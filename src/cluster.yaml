@@ -1,0 +1,57 @@
+__default__:
+  # J: "normjob"
+  t: "12:00:00"
+  mem:  "128000"
+  p:    "gpu"
+  gres: "gpu:1"
+  n: "1"
+  c: "1"
+
+predict:
+  t: "00:10:00"
+
+predict_pts:
+  mem:  "16000"
+  t: "03:00:00"
+  p:    "batch"
+  gres: "gpu:0"
+
+
+# flower_bm3d:
+#   t: "02:00:00"
+#   p: "batch"
+#   gres: "gpu:0"
+
+# shutter_bm3d:
+#   t: "02:00:00"
+#   p: "batch"
+#   gres: "gpu:0"
+
+# flower_analysis:
+#   t: "01:00:00"
+#   p: "batch"
+#   gres: "gpu:0"
+
+# flower_analysis_single:
+#   t: "01:00:00"
+#   p: "batch"
+#   gres: "gpu:0"
+
+# shutter_analysis:
+#   t: "01:00:00"
+#   p: "batch"
+#   gres: "gpu:0"
+
+# cele_analysis:
+#   t: "01:00:00"
+#   p: "batch"
+#   gres: "gpu:0"
+
+# two:
+#   # J: "two"
+#   p: "gpu"
+#   gres: "gpu:1"
+
+# pred_flower_nlm:
+#   p: "gpu"
+#   gres: "gpu:1"
