@@ -62,19 +62,17 @@ detect.train(m,d,td,ta)
 ## Names
 
 m  :: models (update in place)
-d  :: raw data
+d  :: test data
 td :: training data
 ta :: training artifacts (update in place)
 
 if you want to stop training just use Ctrl-C, it will up at the same iteration where you left off because of state in ta and m.
-
 """
 
 def setup_dirs(savedir):
   if savedir.exists(): shutil.rmtree(savedir)
   savedir.mkdir(exist_ok=True,parents=True)
   (savedir/'m').mkdir(exist_ok=True)
-  # (savedir/'epoch').mkdir(exist_ok=True)
 
 def init(savedir, n):
   savedir = Path(savedir).resolve()
@@ -83,41 +81,21 @@ def init(savedir, n):
   ## training artifacts
   ta = SimpleNamespace()
   ta.savedir = savedir
+  ta.use_denoised = False
 
   ## test data
-  d = SimpleNamespace()
-  d.raw = np.array([load(f"/projects/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/01/t{n:03d}.tif") for n in [0,10,100,189]])
-  d.raw = normalize3(d.raw,2,99.6)
-  def pts(mantrack): return np.array([r.centroid for r in regionprops(mantrack)],np.int)
-  d.gt  = [pts(load(f"/projects/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/01_GT/TRA/man_track{n:03d}.tif")) for n in [0,10,100,189]]
-  
+  ta.valitimes = [0,5,33,34,100,189]
+  d = build_training_data(ta.valitimes, ta.use_denoised)
+
   ## training data
-
-  s  = np.array([1,3,3])   ## sigma for gaussian
-  ks = np.array([7,21,21]) ## kernel size. must be all odd
-
-  def place_kern_at_pts(pts):
-    def f(x):
-      x = x - (ks-1)/2
-      return np.exp(-(x*x/s/s).sum()/2)
-    kern = np.array([f(x) for x in np.indices(ks).reshape((len(ks),-1)).T]).reshape(ks)
-    kern = kern / kern.max()
-    # target = np.zeros(d.raw[0].shape)
-    # target[tuple(pts.T)] = 1
-    # target = convolve(target,kern,mode='constant',cval=0)
-    target = conv_at_pts(pts,kern)
-    target = target[3:,10:,10:]
-    sh = np.array(d.raw[0].shape) - target.shape
-    target = np.pad(target,[(0,sh[0]), (0,sh[1]), (0,sh[2])], mode='constant')
-    return target
-
-  target = np.array([place_kern_at_pts(d.gt[i]) for i in range(4)])
-
+  ta.traintimes = [0,5,33,34,100,189]
+  d2 = build_training_data(ta.traintimes, ta.use_denoised)
   td = SimpleNamespace()
-  td.input  = torch.from_numpy(d.raw).float()[:,None]
-  td.target = torch.from_numpy(target).float()[:,None]
+  td.input  = torch.from_numpy(d2.raw).float()[:,None]
+  td.target = torch.from_numpy(d2.target).float()[:,None]
   td.input  = td.input.cuda()
   td.target = td.target.cuda()
+  save(d2.target.max(1).astype(np.float16),ta.savedir/'ta/mx_vali/target.tif')
 
   ## model
   m = SimpleNamespace()
@@ -137,7 +115,7 @@ def train(m,d,td,ta):
   _sh = np.array(td.input.shape)[2:]
   # weight,global_avg = 1e1, 0.3 #td.target.mean()
 
-  defaults = dict(i=0,losses=[],lr=2e-4,i_final=10**5,save_count=0,scores=[])
+  defaults = dict(i=0,losses=[],lr=2e-4,i_final=10**5,save_count=0,vali_scores=[])
   ta.__dict__.update(**{**defaults,**ta.__dict__})
 
   thresh = 0.01
@@ -157,16 +135,12 @@ def train(m,d,td,ta):
   ## linearly decay scalar input to value 1 after 3 epochs, then flat
   decayto1 = lambda x: x*(1-ta.i/(1000*3)) + ta.i/(1000*3) if ta.i<=(1000*3) else 1
 
-  # indices = np.arange(n_samples)
-  # np.random.shuffle(indices)
-
   for ta.i in range(ta.i,ta.i_final):
 
     _pt = np.floor(np.random.rand(3)*(_sh-(16,128,128))).astype(int)
     sz,sy,sx = slice(_pt[0],_pt[0]+16), slice(_pt[1],_pt[1]+128), slice(_pt[2],_pt[2]+128)
-    sc = np.random.randint(4)
+    sc = np.random.randint(td.input.shape[0])
 
-    # ix = indices[ta.i%n_samples]
     x  = td.input[[sc],:,sz,sy,sx]
     yt = td.target[[sc],:,sz,sy,sx]
 
@@ -182,11 +156,7 @@ def train(m,d,td,ta):
 
     ## extra stuff for monitoring training and shuffling
 
-    # if (ix%n_samples)==n_samples-1:
-    #   np.random.shuffle(indices)
-
     ta.losses.append(float(loss/w.mean()))
-    # ta.losses.append(float(loss))
 
     if ta.i%100==0:
       print(f"i={ta.i:04d}, loss={np.mean(ta.losses[-100:])}")
@@ -202,18 +172,55 @@ def train(m,d,td,ta):
         predict4(m,d,ta)
         torch.save(m.net.state_dict(), ta.savedir / f'm/net{ta.save_count:02d}.pt')
 
+
+## Internal utilities, etc
+
 def predict4(m,d,ta):
+  vs = []
   with torch.no_grad():
-    for i in range(4):
+    for i in range(d.raw.shape[0]):
       res = predict.apply_net_tiled_3d(m.net,d.raw[i,None])
       pts = peak_local_max(res[0],threshold_abs=.2,exclude_border=False,footprint=np.ones((3,8,8)))
       score3  = point_matcher.match_points_single(d.gt[i],pts,dub=3)
       score10 = point_matcher.match_points_single(d.gt[i],pts,dub=10)
       scr = (ta.i,i,score3,score10)
       print("e i match pred true", scr)
-      ta.scores.append(list(flatten(scr)))
+      vs.append(list(flatten(scr)))
       # save(res[0],ta.savedir / f"ta/pred/e{e}_i{i}.tif")
       save(res[0,16],ta.savedir / f"ta/ms/e{ta.save_count:02d}_i{i}.tif")
       save(res[0].max(0),ta.savedir / f"ta/mx/e{ta.save_count:02d}_i{i}.tif")
+  ta.vali_scores.append(vs)
 
+def build_training_data(times,use_denoised=False):
+
+  d = SimpleNamespace()
+  if use_denoised:
+    d.raw = np.array([load(f"/projects/project-broaddus/devseg_2/e01/test/pred/Fluo-N3DH-CE/01/t{n:03d}.tif") for n in times])
+  else:
+    d.raw = np.array([load(f"/projects/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/01/t{n:03d}.tif") for n in times])
+  d.raw = normalize3(d.raw,2,99.6)
+  def pts(mantrack): return np.array([r.centroid for r in regionprops(mantrack)],np.int)
+  d.gt  = [pts(load(f"/projects/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/01_GT/TRA/man_track{n:03d}.tif")) for n in times]
+
+  s  = np.array([1,3,3])   ## sigma for gaussian
+  ks = np.array([7,21,21]) ## kernel size. must be all odd
+
+  def place_kern_at_pts(pts):
+    def f(x):
+      x = x - (ks-1)/2
+      return np.exp(-(x*x/s/s).sum()/2)
+    kern = np.array([f(x) for x in np.indices(ks).reshape((len(ks),-1)).T]).reshape(ks)
+    kern = kern / kern.max()
+    # target = np.zeros(d.raw[0].shape)
+    # target[tuple(pts.T)] = 1
+    # target = convolve(target,kern,mode='constant',cval=0)
+    target = conv_at_pts(pts,kern)
+    target = target[3:,10:,10:]
+    sh = np.array(d.raw[0].shape) - target.shape
+    target = np.pad(target,[(0,sh[0]), (0,sh[1]), (0,sh[2])], mode='constant')
+    return target
+
+  d.target = np.array([place_kern_at_pts(d.gt[i]) for i in range(len(times))])
+
+  return d
 

@@ -17,9 +17,8 @@ anno_ce_train_02 = [rawdata / f"celegans_isbi/Fluo-N3DH-CE/02/t{n:03d}.tif" for 
 ## wildcards
 
 wc_raw_ce   = rawdata / "celegans_isbi/{dset}/{ab}/t{time}.tif"
-wc_train_ce = home / "{ed}/{kd}/m/net10.pt"
+wc_train_ce = home / "{ed}/{kd}/m/net05.pt"
 wc_pred_ce  = home / "{ed}/{kd}/pred/{dset}/{ab}/p{time}.tif"
-
 
 wc_pts_input_250 = [home / "{ed}/{kd}/pred/{dset}/{ab}/" / f"p{time:03d}.tif" for time in range(250)]
 wc_pts_ce   = home / "{ed}/{kd}/pts/{dset}/{ab}/traj.pkl"
@@ -30,23 +29,32 @@ wc_pts_ce   = home / "{ed}/{kd}/pts/{dset}/{ab}/traj.pkl"
 ## parameter sets
 
 s_k      = [] #range(12,16)
-# s_dset = ['Fluo-N3DH-CE', 'Fluo-N3DH-CE_challenge']
-# s_ab   = ['01','02']
-s_dset   = ['Fluo-N3DH-CE']
+s_dset   = ['Fluo-N3DH-CE'] # ['Fluo-N3DH-CE', 'Fluo-N3DH-CE_challenge']
 s_ab     = ['01','02']
 s_times  = {'Fluo-N3DH-CE':range(250), 'Fluo-N3DH-CE_challenge':range(190)}
 
 ## results
 
 train_ce   = [home / f"e02/t{k}/m/net40.pt" for k in s_k]
-train_ce  += [home / f"e03/test/m/net10.pt"]
+# train_ce  += [home / f"e03/test/m/net10.pt"]
+train_ce  += [home / f"e03/test/m/net05.pt"]
 
-pts_ce   = [k.parent.parent / f"pts/{dset}/{ab}/traj.pkl" for k,dset,ab in itertools.product(train_ce,s_dset,s_ab)]
+pts_ce   = [d.parent.parent / f"pts/{dset}/{ab}/traj.pkl" for d,dset,ab in itertools.product(train_ce,s_dset,s_ab)]
 
-pred_ce  = [[k.parent.parent / f"pred/{dset}/{ab}/p{time:03d}.tif" 
+pred_ce  = [[d.parent.parent / f"pred/{dset}/{ab}/p{time:03d}.tif" 
               for time in s_times[dset]]
-              for k,dset,ab in itertools.product(train_ce,s_dset,s_ab)]
+              for d,dset,ab in itertools.product(train_ce,s_dset,s_ab)]
 
+
+
+## denoise stuff
+
+denoise_train_ce = [home / f"e01/test/m/net30.pt"]
+denoise_pred_ce  = [[d.parent.parent / f"pred/{dset}/{ab}/p{time:03d}.tif" 
+              for time in s_times[dset]]
+              for d,dset,ab in itertools.product(denoise_train_ce,s_dset,s_ab)]
+denoise_wc_train_ce = home / "e01/{kd}/m/net30.pt"
+denoise_wc_pred_ce  = home / "e01/{kd}/pred/{dset}/{ab}/p{time}.tif"
 
 # pred_ce  = [[home / f"e02/t{k}/pred/{dset}/{ab}/p{time:03d}.tif" 
 #               for time in s_times[dset]]

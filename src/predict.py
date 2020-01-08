@@ -1,8 +1,20 @@
 import torch
-import numpy as np
-from math import floor,ceil
+from torch import nn
+import torch_models
 import itertools
+from math import floor,ceil
+import numpy as np
+from scipy.ndimage import label
+from skimage.feature  import peak_local_max
+from skimage.measure  import regionprops
+import tifffile
 
+from segtools.numpy_utils import normalize3
+from segtools.render import get_fnz_idx2d
+from ns2dir import load,save
+
+
+## utils. generic.
 
 def apply_net_tiled_3d(net,img):
   """
@@ -42,3 +54,48 @@ def apply_net_tiled_3d(net,img):
     output[:,z:ae,y:be,x:ce] = patch[:,:ae-z,:be-y,:ce-x]
 
   return output
+
+## 
+
+
+def centers(filename_raw,filename_net,filename_out):
+  outdir = Path(filename_out).parent; outdir.mkdir(exist_ok=True,parents=True)
+  net = torch_models.Unet3(16,[[1],[1]],finallayer=nn.Sequential).cuda()
+  net.load_state_dict(torch.load(filename_net))
+  img = load(filename_raw)
+  img = normalize3(img,2,99.6)
+  res = predict.apply_net_tiled_3d(net,img[None])[0]
+  save(res.astype(np.float16), filename_out,)
+
+
+def points(filenames_in,filename_out):
+
+  traj = []
+  zcolordir = Path(filename_out.replace("pts/","zcolor/")).parent
+  maxdir = Path(filename_out.replace("pts/","maxs/")).parent
+
+  for i,file in enumerate(filenames_in):
+    res = load(file).astype(np.float32)
+
+    ## save views of this result
+    zcolor = (1+get_fnz_idx2d(res>0.3)).astype(np.uint8)
+    save(zcolor, zcolordir / f'p{i:03d}.png')
+    mx = res.max(0); mx *= 255/mx.max(); mx = mx.clip(0,255).astype(np.uint8)
+    save(mx, maxdir / f'p{i:03d}.png')
+
+    di  = dict()
+    for th,fp in itertools.product([0.1], [10,20,30]):
+      pts = peak_local_max(res,threshold_abs=th,exclude_border=False,footprint=np.ones((3,fp,fp)))
+      di[(th,fp)] = pts
+    traj.append(di)
+  save(traj,filename_out)
+
+def denoise(filename_raw,filename_net,filename_out):
+  outdir = Path(filename_out).parent; outdir.mkdir(exist_ok=True,parents=True)
+  net = torch_models.Unet2(16,[[1],[1]],finallayer=nn.Sequential).cuda()
+  net.load_state_dict(torch.load(filename_net))
+  img = load(filename_raw)
+  # img = normalize3(img,2,99.6)
+  res = apply_net_tiled_3d(net,img[None])[0]
+  save(res.astype(np.float16), filename_out)
+  save(res.astype(np.float16).max(0), filename_out.replace('pred/','mxpred/'))

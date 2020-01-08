@@ -58,28 +58,45 @@ if you want to stop training just use Ctrl-C, it will up at the same iteration w
 """
 
 def init():
-  savedir = Path("/projects/project-broaddus/devseg_2/e01/test/")
+  savedir = Path("/projects/project-broaddus/devseg_2/e01/test2/")
   if savedir.exists(): shutil.rmtree(savedir)
   savedir.mkdir(exist_ok=True,parents=True)
+
+  ta = SimpleNamespace()
+  ta.savedir = savedir
 
   d = SimpleNamespace()
   # d.raw = np.array([load(f"/projects/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/01/t{n:03d}.tif") for n in [0,10,100,189]])
   # d.raw = normalize3(d.raw,2,99.6)
-  d.raw = load("/projects/project-broaddus/devseg_2/raw/every_30_min_timelapse.tiff")
-  d.raw = d.raw[[0,10,20,30,39]]
-  d.raw = normalize3(d.raw,2,99.6)
+  # d.raw = load("/projects/project-broaddus/devseg_2/raw/every_30_min_timelapse.tiff")
+
+  fs = [
+    "detection_t_00_x_730_y_512_z_30.tiff",
+    "detection_t_14_x_457_y_821_z_24.tiff",
+    "detection_t_21_x_453_y_878_z_35.tiff",
+    "detection_t_27_x_401_y_899_z_39.tiff",
+    "detection_t_30_x_355_y_783_z_7.tiff",
+    "detection_t_24_x_562_y_275_z_12.tiff",
+    "detection_t_38_x_700_y_573_z_17.tiff",
+    ]
+
+  ## detection,time,z,y,x
+  d.raw = np.array([load(f"/projects/project-broaddus/devseg_2/raw/det/{f}") for f in fs])
+  d.raw = d.raw.reshape((-1, 10, 1024, 1024)) ## combine detection and time
+  ta.valisamples = [0,15,30,45,62,]
+
+  # return d
+  # d.raw = d.raw[[0,10,20,30,39]]
+  # d.raw = d.raw[[20]]
+  # d.raw = normalize3(d.raw,2,99.6) ## Already normalized!
 
   td = SimpleNamespace()  ## training/target data
   td.input  = torch.from_numpy(d.raw[None]).float()
+  td.input  = td.input.cuda()
 
   m = SimpleNamespace() ## model
   m.net = torch_models.Unet2(16,[[1],[1]],finallayer=nn.Sequential).cuda()
   (savedir/'m').mkdir(exist_ok=True)
-
-  td.input = td.input.cuda()
-
-  ta = SimpleNamespace()
-  ta.savedir = savedir
 
   return m,d,td,ta
 
@@ -89,18 +106,19 @@ def train(m,d,td,ta):
   provides ta.losses and ta.i
   """
 
-  n_chan,n_times = td.input.shape[:2]
-  _sh = np.array(td.input.shape)[2:]
-  dmask = SimpleNamespace(patch_size=(16,128,128),xmask=[0],ymask=[0],frac=0.01)
+  n_chan, n_samples = td.input.shape[:2]
+  shape_zyx = np.array(td.input.shape)[2:]
+  dmask = SimpleNamespace(patch_size=(10,128,128),xmask=[0],ymask=[0],frac=0.01)
 
   defaults = dict(i=0,lr=3e-5,losses=[],save_count=0)
   ta.__dict__.update(**{**defaults,**ta.__dict__})
   opt = torch.optim.Adam(m.net.parameters(),lr=ta.lr)
 
   for ta.i in range(ta.i,10**5):
-    c0 = np.floor(np.random.rand(3)*(_sh-(16,128,128))).astype(int)
-    sz,sy,sx = slice(c0[0],c0[0]+16), slice(c0[1],c0[1]+128), slice(c0[2],c0[2]+128)
-    sc = np.random.randint(n_times)
+    _pt = np.floor(np.random.rand(3)*(shape_zyx-(10,128,128))).astype(int)
+    sz,sy,sx = slice(_pt[0],_pt[0]+10), slice(_pt[1],_pt[1]+128), slice(_pt[2],_pt[2]+128)
+    sc = np.random.randint(n_samples)
+    # sc = 2 ## only train on middle sample (timepoint)
 
     ## apply masking, feed to net, and accumulate gradients
     xorig = td.input[0,sc,sz,sy,sx]
@@ -109,7 +127,7 @@ def train(m,d,td,ta):
     xmasked[ma>0] = torch.rand(xmasked.shape).cuda()[ma>0]
     y  = m.net(xmasked[None,None])[0,0]
     loss = torch.abs((y-xorig)[ma==2]**1).mean() # + weight*torch.abs((y-global_avg)**1).mean()
-    print(float(loss),flush=True)
+    # print(float(loss),flush=True)
     loss.backward()
 
     if ta.i%10==0:
@@ -138,11 +156,16 @@ def train(m,d,td,ta):
 
 def predict4(m,d,td,ta):
   with torch.no_grad():
-    for i in range(d.raw.shape[0]):
+    for i in range(d.raw[ta.valisamples].shape[0]):
       print(f"predict on {i}")
       res = predict.apply_net_tiled_3d(m.net,d.raw[None,i])
-      save(res[0,20],ta.savedir / f"ta/ms/e{ta.save_count:02d}_i{i}.tif")
+      save(res[0,5],ta.savedir / f"ta/ms/e{ta.save_count:02d}_i{i}.tif")
       save(res[0].max(0),ta.savedir / f"ta/mx/e{ta.save_count:02d}_i{i}.tif")
+
+# def predict_on_divisiontimes():
+#   raw = load("/projects/project-broaddus/devseg_2/raw/every_30_min_timelapse.tiff")
+#   raw = raw[[31, 21, 17, 9,]]
+#   for i,img in enumerate(raw):
 
 
 def sparse_3set_mask(d):

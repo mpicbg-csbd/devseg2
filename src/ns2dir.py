@@ -23,8 +23,8 @@ def clean(s):
   s = s2 if s2 else "d"+s
   return s
 
-known_filetypes = ['.npy', '.png', '.tif', '.pkl',] # '.json',]
-known_scalars = [int,float,str,Path,PosixPath]
+known_filetypes = ['.npy', '.png', '.tif', '.tiff', '.pkl',] # '.json',]
+known_scalars = [bool,int,float,str,bytes,Path,PosixPath]
 known_collections = [dict, set, list]
 known_array_collection = [np.ndarray, torch.Tensor]
 
