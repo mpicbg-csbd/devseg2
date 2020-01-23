@@ -258,3 +258,16 @@ ls2 = [2,
 # wc_ce_scores = home / "e02/eval/Fluo-N3DH-CE/{ab}/scores.npy"
 # ce_scores_01 = home / "e02/eval/Fluo-N3DH-CE/01/scores.npy"
 # ce_scores_02 = home / "e02/eval/Fluo-N3DH-CE/02/scores.npy"
+
+
+
+## Flies!!
+
+fly0 = "/projects/project-broaddus/rawdata/fly_isbi/Fluo-N3DL-DRO/01/t000.tif"
+flies_all  = [fly0.replace("t000",f"t{i:03d}") for i in range(50)]
+flies_pred = [x.replace("rawdata/fly_isbi/","devseg_2/e04_flydet/pred/") for x in flies_all]
+flies_pts  = [x.replace("pred/","pts/") for x in flies_pred]
+
+fly_raw_wc = "/projects/project-broaddus/rawdata/fly_isbi/Fluo-N3DL-DRO/{dset}/{name}.tif"
+fly_pred_wc = "/projects/project-broaddus/devseg_2/e04_flydet/pred/Fluo-N3DL-DRO/{dset}/{name}.tif"
+

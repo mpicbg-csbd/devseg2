@@ -4,15 +4,19 @@ import torch_models
 import itertools
 from math import floor,ceil
 import numpy as np
-from scipy.ndimage import label
+from scipy.ndimage import label,zoom
 from skimage.feature  import peak_local_max
 from skimage.measure  import regionprops
 import tifffile
+from pathlib import Path
 
+from subprocess import Popen,run
+from segtools.math_utils import conv_at_pts_multikern
+import files
 from segtools.numpy_utils import normalize3
 from segtools.render import get_fnz_idx2d
 from ns2dir import load,save
-
+from types import SimpleNamespace
 
 ## utils. generic.
 
@@ -55,8 +59,7 @@ def apply_net_tiled_3d(net,img):
 
   return output
 
-## 
-
+## C. elegans snakemake wildcard functions
 
 def centers(filename_raw,filename_net,filename_out):
   outdir = Path(filename_out).parent; outdir.mkdir(exist_ok=True,parents=True)
@@ -66,7 +69,6 @@ def centers(filename_raw,filename_net,filename_out):
   img = normalize3(img,2,99.6)
   res = predict.apply_net_tiled_3d(net,img[None])[0]
   save(res.astype(np.float16), filename_out,)
-
 
 def points(filenames_in,filename_out):
 
@@ -99,3 +101,67 @@ def denoise(filename_raw,filename_net,filename_out):
   res = apply_net_tiled_3d(net,img[None])[0]
   save(res.astype(np.float16), filename_out)
   save(res.astype(np.float16).max(0), filename_out.replace('pred/','mxpred/'))
+
+## C. elegans analysis
+
+
+## flies snakemake
+
+def fly_centers(f_raw,f_pred):
+  img = load(f_raw)
+  img = img/1300
+  net = torch_models.Unet3(16,[[1],[1]],finallayer=nn.Sequential).cuda()
+  net.load_state_dict(torch.load("/projects/project-broaddus/devseg_2/e04_flydet/test3/m/net30.pt"))
+  res = apply_net_tiled_3d(net,img[None])[0]
+  save(res.astype(np.float16),f_pred)
+  save(res.astype(np.float16).max(0), f_pred.replace('pred/','mxpred/'))
+
+def fly_pts(f_pred,f_pts=None):
+  print(f_pred)
+  img = load(f_pred)
+  pts = peak_local_max(img.astype(np.float32),threshold_abs=0.2,exclude_border=False,footprint=np.ones((3,8,8)))
+  save(pts,f_pts)
+
+## flies analysis
+
+def fly_max_preds():
+  for p in files.flies_pred:
+    print(p)
+    img = load(p).astype(np.float32)
+    save(img.max(0),str(p).replace("pred/","pred_mx_z/"))
+    save(img.max(1),str(p).replace("pred/","pred_mx_y/"))
+    save(img.max(2),str(p).replace("pred/","pred_mx_x/"))
+    a,b,c = img.shape
+    save(img[:a//2].max(0),str(p).replace("pred/","pred_mx_z_half/"))
+    save(zoom(img[:,:b//2].max(1), (5,1)),str(p).replace("pred/","pred_mx_y_half/"))
+    save(zoom(img[:,:,:c//2].max(2), (5,1)),str(p).replace("pred/","pred_mx_x_half/"))
+
+
+## build fly NHLs for tracking
+
+def img2nhl_fly(img,raw):
+  nhl = SimpleNamespace()
+  nhl.pts = peak_local_max(img.astype(np.float32),threshold_abs=.2,min_distance=6)
+  nhl.imgvals = img[tuple(nhl.pts.T)]
+  nhl.rawvals = raw[tuple(nhl.pts.T)]
+  mask = nhl.rawvals>500
+  nhl.pts = nhl.pts[mask]
+  nhl.imgvals = nhl.imgvals[mask]
+  nhl.label = np.arange(len(nhl.pts))+1
+  return nhl
+
+def process_all_flyimgs():
+  nhls = []
+  for i in range(20):
+    print(files.flies_all[i])
+    raw  = load(files.flies_all[i])
+    pred = load(files.flies_pred[i])
+    nhl  = img2nhl_fly(pred,raw)
+    nhls.append(nhl)
+  return nhls
+
+
+
+
+
+

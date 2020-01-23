@@ -62,74 +62,29 @@ if you want to stop training just use Ctrl-C, it will up at the same iteration w
 """
 
 def init():
-  savedir = Path("/projects/project-broaddus/devseg_2/e01/test4/")
+  savedir = Path("/projects/project-broaddus/devseg_2/e05_flydenoise/test/")
   if savedir.exists(): shutil.rmtree(savedir)
   savedir.mkdir(exist_ok=True,parents=True)
 
   ta = SimpleNamespace()
   ta.savedir = savedir
 
-  # d.raw = np.array([load(f"/projects/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/01/t{n:03d}.tif") for n in [0,10,100,189]])
-  # d.raw = normalize3(d.raw,2,99.6)
-  # d.raw = load("/projects/project-broaddus/devseg_2/raw/every_30_min_timelapse.tiff")
+  ta.train_times = [0,5,10,15,45]
+  ta.vali_times = [0,10,30,40,50]
 
-  # ta.trains = [
-  #   "detection_t_00_x_730_y_512_z_30.tiff",
-  #   "detection_t_14_x_457_y_821_z_24.tiff",
-  #   "detection_t_21_x_453_y_878_z_35.tiff",
-  #   "detection_t_24_x_562_y_275_z_12.tiff",
-  #   "detection_t_27_x_401_y_899_z_39.tiff",
-  #   "detection_t_30_x_355_y_783_z_7.tiff",
-  #   "detection_t_38_x_700_y_573_z_17.tiff",
-  #   ]
-  ta.trains = list(ddinv.keys())[:-5]
-  # ta.valis = list(ddinv.keys())[-5:]
-  ta.valis = [0,10,30,40,50]
+  td = SimpleNamespace()
+  td.input = np.array([load(f"/projects/project-broaddus/rawdata/fly_isbi/Fluo-N3DL-DRO/01/t{i:03d}") for i in ta.trains])
+  td.intut = td.input / 1300
+  td.input = td.input[None]
 
-  # ta.valis = [
-  #   "detection_t_00_x_730_y_512_z_30.tiff",
-  #   "detection_t_09_x_303_y_814_z_25.tiff",
-  #   # "detection_t_15_x_885_y_526_z_21.tiff",
-  #   # "detection_t_20_x_641_y_831_z_13.tiff",
-  #   "detection_t_26_x_252_y_802_z_0.tiff",
-  #   # "detection_t_28_x_452_y_401_z_31.tiff",
-  #   "detection_t_30_x_353_y_932_z_2.tiff",
-  #   # "detection_t_33_x_614_y_330_z_33.tiff",
-  #   "detection_t_39_x_193_y_348_z_17.tiff",
-  #   ]
-
-  def load2(fi):
-    res = load(fi)
-    res = res[0] ## only the round ones at time zero
-    res = res[:,512-100:512+100,512-100:512+100] ## focus on them
-    return res
-
-  # ## detection,time,z,y,x
-  # d = SimpleNamespace()
-  # d.raw = np.array([load2(f"/projects/project-broaddus/devseg_2/raw/det/{f}") for f in ta.valis])
-  # # d.raw = d.raw[:,5] ## take 5th timepoint from each
-  # # d.raw = d.raw.reshape((-1, 10, 1024, 1024)) ## combine detection and times
-
-  ## detection,time,z,y,x
-  # d2 = SimpleNamespace()
-  # d2.raw = np.array([load2(f"/projects/project-broaddus/devseg_2/raw/det/{f}") for f in ta.trains])
-  # d2.raw = d2.raw.reshape((-1, 10, 1024, 1024)) ## combine detection and time
-
-  d2 = SimpleNamespace()
-  d2.raw = np.array([load2(f"/projects/project-broaddus/devseg_2/raw/det/{f}") for f in ta.trains])
-
-  d = SimpleNamespace()
-  d.raw = d2.raw[ta.valis]
-
-  td = SimpleNamespace()  ## training/target data
-  td.input  = torch.from_numpy(d2.raw[None]).float()
-  td.input  = td.input.cuda()
+  vd = SimpleNamespace()
+  vd.raw = vd.raw[ta.valis]
 
   m = SimpleNamespace() ## model
   m.net = torch_models.Unet2(16,[[1],[1]],finallayer=nn.Sequential).cuda()
   (savedir/'m').mkdir(exist_ok=True)
 
-  return m,d,td,ta
+  return m,vd,td,ta
 
 def train(m,d,td,ta):
   """
@@ -250,66 +205,3 @@ def sparse_3set_mask(d):
   ma = ma.astype(np.uint8)
   ma[z_inds,y_inds,x_inds] = 2
   return ma
-
-
-ddinv = {
- 'detection_t_00_x_730_y_512_z_30.tiff': 'fish_1',
- 'detection_t_02_x_736_y_440_z_13.tiff': 'fish_3',
- 'detection_t_09_x_303_y_814_z_25.tiff': 'fish_1',
- 'detection_t_09_x_600_y_343_z_30.tiff': 'fish_0',
- 'detection_t_10_x_745_y_668_z_9.tiff': 'fish_3',
- 'detection_t_12_x_655_y_294_z_10.tiff': 'fish_3',
- 'detection_t_13_x_503_y_793_z_8.tiff': 'fish_3',
- 'detection_t_13_x_696_y_416_z_35.tiff': 'fish_4',
- 'detection_t_14_x_457_y_821_z_24.tiff': 'fish_3',
- 'detection_t_14_x_759_y_413_z_39.tiff': 'fish_4',
- 'detection_t_15_x_688_y_313_z_29.tiff': 'fish_3',
- 'detection_t_15_x_749_y_571_z_19.tiff': 'fish_1',
- 'detection_t_15_x_885_y_526_z_21.tiff': 'fish_4',
- 'detection_t_16_x_324_y_875_z_43.tiff': 'fish_1',
- 'detection_t_16_x_533_y_857_z_35.tiff': 'fish_3',
- 'detection_t_16_x_611_y_629_z_36.tiff': 'fish_4',
- 'detection_t_17_x_105_y_492_z_39.tiff': 'fish_0',
- 'detection_t_17_x_737_y_413_z_27.tiff': 'fish_3',
- 'detection_t_18_x_499_y_296_z_0.tiff': 'fish_3',
- 'detection_t_19_x_205_y_826_z_42.tiff': 'fish_1',
- 'detection_t_20_x_622_y_435_z_29.tiff': 'fish_1',
- 'detection_t_20_x_641_y_831_z_13.tiff': 'fish_3',
- 'detection_t_21_x_453_y_878_z_35.tiff': 'fish_3',
- 'detection_t_21_x_69_y_672_z_39.tiff': 'fish_0',
- 'detection_t_22_x_416_y_328_z_0.tiff': 'fish_3',
- 'detection_t_23_x_668_y_506_z_17.tiff': 'fish_1',
- 'detection_t_23_x_803_y_515_z_30.tiff': 'fish_4',
- 'detection_t_24_x_562_y_275_z_12.tiff': 'fish_3',
- 'detection_t_25_x_295_y_400_z_2.tiff': 'fish_4',
- 'detection_t_25_x_674_y_507_z_10.tiff': 'fish_1',
- 'detection_t_26_x_246_y_900_z_24.tiff': 'fish_1',
- 'detection_t_26_x_252_y_802_z_0.tiff': 'fish_2',
- 'detection_t_26_x_271_y_409_z_1.tiff': 'fish_4',
- 'detection_t_26_x_544_y_858_z_6.tiff': 'fish_3',
- 'detection_t_27_x_272_y_796_z_0.tiff': 'fish_2',
- 'detection_t_27_x_286_y_402_z_1.tiff': 'fish_4',
- 'detection_t_27_x_401_y_899_z_39.tiff': 'fish_3',
- 'detection_t_27_x_466_y_360_z_25.tiff': 'fish_1',
- 'detection_t_28_x_452_y_401_z_31.tiff': 'fish_2',
- 'detection_t_28_x_501_y_892_z_21.tiff': 'fish_3',
- 'detection_t_28_x_728_y_570_z_0.tiff': 'fish_1',
- 'detection_t_29_x_672_y_498_z_3.tiff': 'fish_1',
- 'detection_t_29_x_696_y_435_z_6.tiff': 'fish_3',
- 'detection_t_30_x_254_y_811_z_0.tiff': 'fish_2',
- 'detection_t_30_x_353_y_932_z_2.tiff': 'fish_1',
- 'detection_t_30_x_355_y_783_z_7.tiff': 'fish_3',
- 'detection_t_31_x_193_y_437_z_4.tiff': 'fish_0',
- 'detection_t_31_x_540_y_877_z_26.tiff': 'fish_3',
- 'detection_t_32_x_606_y_337_z_32.tiff': 'fish_3',
- 'detection_t_33_x_158_y_362_z_23.tiff': 'fish_1',
- 'detection_t_33_x_254_y_809_z_0.tiff': 'fish_2',
- 'detection_t_33_x_614_y_330_z_33.tiff': 'fish_3',
- 'detection_t_34_x_601_y_334_z_34.tiff': 'fish_3',
- 'detection_t_35_x_625_y_407_z_15.tiff': 'fish_3',
- 'detection_t_36_x_678_y_424_z_24.tiff': 'fish_3',
- 'detection_t_37_x_375_y_865_z_28.tiff': 'fish_3',
- 'detection_t_38_x_700_y_573_z_17.tiff': 'fish_3',
- 'detection_t_39_x_193_y_348_z_17.tiff': 'fish_1',
- 'detection_t_39_x_634_y_747_z_13.tiff': 'fish_3', 
- }

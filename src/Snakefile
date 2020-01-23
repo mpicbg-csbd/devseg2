@@ -15,7 +15,15 @@ wildcard_constraints:
   ed = 'e0[23]'
 
 rule runall:
-  input: denoise_pred_ce #train_ce, pts_ce, pred_ce, denoise_pred_ce
+  input: flies_pred #train_ce, pts_ce, pred_ce, denoise_pred_ce
+
+rule flydetect:
+  input: fly_raw_wc
+  output: fly_pred_wc
+  run:
+    import predict
+    predict.fly_centers(input[0],output[0])
+
 
 rule predict:
   input:  wc_raw_ce, wc_train_ce
@@ -46,13 +54,13 @@ rule train:
     m,d,td,ta = detect.init(savedir,int(wildcards.k))
     detect.train(m,d,td,ta)
     
-rule denoise_train:
-  output: wc_denoise_retina
-  run:
-    import denoise
-    savedir = Path(output[0]).parent.parent
-    m,d,td,ta = denoise.init(savedir,int(wildcards.k))
-    denoise.train(m,d,td,ta)
+# rule denoise_train:
+#   output: wc_denoise_retina
+#   run:
+#     import denoise
+#     savedir = Path(output[0]).parent.parent
+#     m,d,td,ta = denoise.init(savedir,int(wildcards.k))
+#     denoise.train(m,d,td,ta)
 
 
 

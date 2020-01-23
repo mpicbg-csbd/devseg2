@@ -42,12 +42,11 @@ def init_weights(net):
   net.apply(f);
 
 def test_weights(net):
-  table = []
+  table = ["weight mean,weight std,bias mean,bias std".split(',')]
   def f(m):
     if type(m) == nn.Conv3d:
       table.append([float(m.weight.data.mean()),float(m.weight.data.std()),float(m.bias.data.mean()),float(m.bias.data.std())])
-      # torch.nn.init.xavier_uniform_(m.weight, gain=nn.init.calculate_gain('relu'))
-      # m.bias.data.fill_(0.05)
+      print(m)
   net.apply(f)
   return table
 
@@ -243,3 +242,38 @@ class Res1(nn.Module):
     out1 = self.l_k(c3)
 
     return out1
+
+
+## utils
+
+def pretty_size(size):
+  """Pretty prints a torch.Size object"""
+  assert(isinstance(size, torch.Size))
+  return " × ".join(map(str, size))
+
+def dump_tensors(gpu_only=True):
+  """Prints a list of the Tensors being tracked by the garbage collector."""
+  import gc
+  total_size = 0
+  for obj in gc.get_objects():
+    try:
+      if torch.is_tensor(obj):
+        if not gpu_only or obj.is_cuda:
+          print("%s:%s%s %s" % (type(obj).__name__, 
+                      " GPU" if obj.is_cuda else "",
+                      " pinned" if obj.is_pinned else "",
+                      pretty_size(obj.size())))
+          total_size += obj.numel()
+      elif hasattr(obj, "data") and torch.is_tensor(obj.data):
+        if not gpu_only or obj.is_cuda:
+          print("%s → %s:%s%s%s%s %s" % (type(obj).__name__, 
+                           type(obj.data).__name__, 
+                           " GPU" if obj.is_cuda else "",
+                           " pinned" if obj.data.is_pinned else "",
+                           " grad" if obj.requires_grad else "", 
+                           " volatile" if obj.volatile else "",
+                           pretty_size(obj.data.size())))
+          total_size += obj.data.numel()
+    except Exception as e:
+      pass        
+  print("Total size:", total_size)
