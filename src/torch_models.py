@@ -114,7 +114,7 @@ class Unet3(nn.Module):
   The same exact shape we used for models submitted to ISBI. 2,767,777 params.
   """
 
-  def __init__(self, c=32, io=[[1],[1]], finallayer=nn.LeakyReLU):
+  def __init__(self, c=32, io=[[1],[1]], finallayer=nn.LeakyReLU, pool=(1,2,2)):
     super(Unet3, self).__init__()
 
     self.l_ab = conv2(io[0][0] ,c, c)

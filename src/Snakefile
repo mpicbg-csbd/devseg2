@@ -8,14 +8,18 @@
 # import files as F
 from files import *
 
-localrules: runall
+# localrules: runall
 
 wildcard_constraints:
   k = '[0-9]{1,3}',
   ed = 'e0[23]'
 
 rule runall:
-  input: flies_pred #train_ce, pts_ce, pred_ce, denoise_pred_ce
+  input:
+    # [f"/projects/project-broaddus/devseg_2/e05_trib2d/pred/Fluo-N3DL-TRIC/01/t{i:03d}.tif" for i in range(65)],
+    [f"/projects/project-broaddus/devseg_2/e06_trib/pts/down/Fluo-N3DL-TRIF/02/t{i:03d}.tif" for i in range(80)],
+
+    #flies_pred #train_ce, pts_ce, pred_ce, denoise_pred_ce
 
 rule flydetect:
   input: fly_raw_wc
@@ -23,7 +27,6 @@ rule flydetect:
   run:
     import predict
     predict.fly_centers(input[0],output[0])
-
 
 rule predict:
   input:  wc_raw_ce, wc_train_ce
@@ -53,7 +56,49 @@ rule train:
     savedir = Path(output[0]).parent.parent
     m,d,td,ta = detect.init(savedir,int(wildcards.k))
     detect.train(m,d,td,ta)
-    
+
+
+## Tribolium 2D stuff
+
+rule trib2d_centers:
+  input: "/projects/project-broaddus/rawdata/trib_isbi_proj/Fluo-N3DL-TRIC/01/t{i}.tif"
+  output: "/projects/project-broaddus/devseg_2/e05_trib2d/pred/Fluo-N3DL-TRIC/01/t{i}.tif"
+  run:
+    import predict
+    predict.trib2d_centers(input[0])
+
+rule trib2d_train:
+  output: "/projects/project-broaddus/devseg_2/e05_trib2d/test2/"
+  run:
+    import detect_trib2d
+    m,vd,td,ta = detect_trib2d.init(output[0],0)
+    detect_trib2d.train(m,vd,td,ta)
+
+
+## Tribolium 3D Stuff
+
+# rule trib3d_downsample:
+#   input: "/projects/project-broaddus/rawdata/trib_isbi/Fluo-N3DL-TRIF/{ab}/t{i}.tif"
+#   output: "/projects/project-broaddus/rawdata/trib_isbi/down/Fluo-N3DL-TRIF/{ab}/t{i}.tif"
+#   # output: "/projects/project-broaddus/devseg_2/e06_trib/pred/Fluo-N3DL-TRIF/02/t{i}.tif"
+#   run:
+#     import ipy
+#     ipy.downsample(input[0])
+
+rule trib3d_centers:
+  input:  "/projects/project-broaddus/rawdata/trib_isbi/down/Fluo-N3DL-TRIF/{ab}/t{i}.tif"
+  output: "/projects/project-broaddus/devseg_2/e06_trib/pred/down/Fluo-N3DL-TRIF/{ab}/t{i}.tif"
+  run:
+    import predict
+    predict.trib3d_centers(input[0])
+
+rule trib3d_points:
+  input:  "/projects/project-broaddus/devseg_2/e06_trib/pred/down/Fluo-N3DL-TRIF/{ab}/t{i}.tif"
+  output: "/projects/project-broaddus/devseg_2/e06_trib/pts/down/Fluo-N3DL-TRIF/{ab}/t{i}.tif"
+  run:
+    import predict
+    predict.trib3d_points(input[0])
+
 # rule denoise_train:
 #   output: wc_denoise_retina
 #   run:

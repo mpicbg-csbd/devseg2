@@ -50,7 +50,7 @@ def job03():
     sy,sx = slice(1280,1700), slice(500,1000)
     save(img[:,sy,sx].max(0),str(p).replace("trib_isbi_proj","trib_isbi_proj/mx_z_crop/"))
 
-def job04():
+def job04_downsample():
   "tribolium (full) downsample"
   for p in sorted(Path("/projects/project-broaddus/rawdata/trib_isbi/Fluo-N3DL-TRIF/02/").glob("*.tif")):
     print(p)
@@ -94,6 +94,15 @@ def job08():
     allpts.append(pts)
   return allpts
 
+def isbi_make_dataset_gt():
+  home = Path("/lustre/projects/project-broaddus/rawdata/trib_isbi/Fluo-N3DL-TRIF/01_GT/TRA/")
+  allpts = []
+  for name in sorted(home.glob("man_track*.tif")):
+    print(name)
+    lab = load(name)
+    pts = mantrack2pts(lab)
+    allpts.append(pts)
+  save(allpts,"/lustre/projects/project-broaddus/rawdata/trib_isbi/traj/Fluo-N3DL-TRIF/01_traj.pkl")
 
 
 

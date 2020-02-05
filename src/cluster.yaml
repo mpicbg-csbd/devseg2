@@ -16,6 +16,12 @@ predict_pts:
   p:    "batch"
   gres: "gpu:0"
 
+trib3d_points:
+  mem:  "16000"
+  t: "01:00:00"
+  p:    "batch"
+  gres: "gpu:0"
+
 
 # flower_bm3d:
 #   t: "02:00:00"

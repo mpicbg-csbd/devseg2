@@ -18,7 +18,7 @@ from segtools.render import get_fnz_idx2d
 from ns2dir import load,save
 from types import SimpleNamespace
 
-## utils. generic.
+## utils. generic. all datasets.
 
 def apply_net_tiled_3d(net,img):
   """
@@ -59,7 +59,7 @@ def apply_net_tiled_3d(net,img):
 
   return output
 
-## C. elegans snakemake wildcard functions
+## C. elegans
 
 def centers(filename_raw,filename_net,filename_out):
   outdir = Path(filename_out).parent; outdir.mkdir(exist_ok=True,parents=True)
@@ -67,7 +67,7 @@ def centers(filename_raw,filename_net,filename_out):
   net.load_state_dict(torch.load(filename_net))
   img = load(filename_raw)
   img = normalize3(img,2,99.6)
-  res = predict.apply_net_tiled_3d(net,img[None])[0]
+  res = apply_net_tiled_3d(net,img[None])[0]
   save(res.astype(np.float16), filename_out,)
 
 def points(filenames_in,filename_out):
@@ -102,10 +102,8 @@ def denoise(filename_raw,filename_net,filename_out):
   save(res.astype(np.float16), filename_out)
   save(res.astype(np.float16).max(0), filename_out.replace('pred/','mxpred/'))
 
-## C. elegans analysis
 
-
-## flies snakemake
+## Drosophila
 
 def fly_centers(f_raw,f_pred):
   img = load(f_raw)
@@ -122,8 +120,6 @@ def fly_pts(f_pred,f_pts=None):
   pts = peak_local_max(img.astype(np.float32),threshold_abs=0.2,exclude_border=False,footprint=np.ones((3,8,8)))
   save(pts,f_pts)
 
-## flies analysis
-
 def fly_max_preds():
   for p in files.flies_pred:
     print(p)
@@ -136,8 +132,7 @@ def fly_max_preds():
     save(zoom(img[:,:b//2].max(1), (5,1)),str(p).replace("pred/","pred_mx_y_half/"))
     save(zoom(img[:,:,:c//2].max(2), (5,1)),str(p).replace("pred/","pred_mx_x_half/"))
 
-
-## build fly NHLs for tracking
+#### build fly NHLs for tracking
 
 def img2nhl_fly(img,raw):
   nhl = SimpleNamespace()
@@ -162,6 +157,57 @@ def process_all_flyimgs():
 
 
 
+## Tribolium 2D
+
+def trib2d_centers(name1):
+  net = torch_models.Unet3(16,[[1],[1]],finallayer=nn.Sequential).cuda()
+  net.load_state_dict(torch.load("/projects/project-broaddus/devseg_2/e05_trib2d/test2/m/net07.pt"))
+  # for i in range(65):
+  # name1 = f"/projects/project-broaddus/rawdata/trib_isbi_proj/Fluo-N3DL-TRIC/01/t{i:03d}.tif"
+  print(name1)
+  img = load(name1)
+  img = (img / 1800).clip(max=2400/1800)
+  res = apply_net_tiled_3d(net,img[None])[0]
+  save(res.astype(np.float16),name1.replace("rawdata/trib_isbi_proj/", "devseg_2/e05_trib2d/pred/"))
+
+def trib2d_points():
+  traj = []
+  for i in range(65):
+  # for i in [64]:
+    name1 = f"/projects/project-broaddus/devseg_2/e05_trib2d/pred/Fluo-N3DL-TRIC/01/t{i:03d}.tif"
+    print(name1)
+    img = load(name1)
+    pts = peak_local_max(img.astype(np.float32),threshold_abs=0.2,exclude_border=False,footprint=np.ones((3,5,5)))
+    save(pts,name1.replace("e05_trib2d/pred/", "e05_trib2d/pts/"))
+    traj.append(pts)
+  save(traj,"/projects/project-broaddus/devseg_2/e05_trib2d/traj/Fluo-N3DL-TRIC/01/traj.pkl")
+
+## trib 3D
+
+def trib3d_centers(name1):
+  net = torch_models.Unet3(16,[[1],[1]],finallayer=nn.Sequential).cuda()
+  net.load_state_dict(torch.load("/projects/project-broaddus/devseg_2/e06_trib/t03_downsize/m/net60.pt"))
+  # for i in range(80):
+  # name1 = f"/projects/project-broaddus/rawdata/trib_isbi/down/Fluo-N3DL-TRIF/02/t{i:03d}.tif"
+  print(name1)
+  img = load(name1)
+  img = (img / 1800).clip(max=2400/1800)
+  res = apply_net_tiled_3d(net,img[None])[0]
+  save(res.astype(np.float16),name1.replace("rawdata/trib_isbi/", "devseg_2/e06_trib/pred/"))
+
+def trib3d_points(name1):
+  print(name1)
+  img = load(name1)
+  pts = peak_local_max(img.astype(np.float32),threshold_abs=0.2,exclude_border=False,footprint=np.ones((4,4,4)))
+  save(pts,name1.replace("e06_trib/pred/", "e06_trib/pts/"))
+
+def trib3d_joinpoints():
+  traj = []
+  for i in range(80):
+    name1 = f"/projects/project-broaddus/devseg_2/e06_trib/pts/down/Fluo-N3DL-TRIF/02/t{i:03d}.tif"
+    pts = load(name1)*3
+    traj.append(pts)
+  save(traj,"/projects/project-broaddus/devseg_2/e06_trib/traj/Fluo-N3DL-TRIF/02/traj.pkl")
 
 
 

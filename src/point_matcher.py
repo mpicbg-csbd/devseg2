@@ -1,6 +1,6 @@
 from pykdtree.kdtree import KDTree as pyKDTree
 import numpy as np
-
+from types import SimpleNamespace
 from scipy.optimize import linear_sum_assignment
 
 def match_points_single(pts_gt,pts_yp,dub=10):
@@ -27,3 +27,18 @@ def hungarian_matching(x,y,dub=10):
       cost[i,j] = np.linalg.norm(c-d)
   res = linear_sum_assignment(cost)
   return np.sum(res), len(y), len(x)
+
+def matches2scores(matches):
+  """
+  matches is an Nx3 array with (n_matched, n_proposed, n_target) semantics.
+  here we perform mean-then-divide to compute scores. As opposed to divide-then-mean.
+  """
+  d = SimpleNamespace()
+  d.f1          = 2*matches[:,0].sum() / np.maximum(matches[:,[1,2]].sum(),1)
+  d.precision   =   matches[:,0].sum() / np.maximum(matches[:,1].sum(),1)
+  d.recall      =   matches[:,0].sum() / np.maximum(matches[:,2].sum(),1)
+  d.f1_2        = (2*matches[:,0] / np.maximum(matches[:,[1,2]].sum(1),1)).mean()
+  d.precision_2 = (  matches[:,0] / np.maximum(matches[:,1],1)).mean()
+  d.recall_2    = (  matches[:,0] / np.maximum(matches[:,2],1)).mean()
+
+  return d
