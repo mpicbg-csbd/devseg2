@@ -55,14 +55,14 @@ def flatten(l):
 notes = """
 ## Usage
 
-import detect
-m,d,td,ta = detect.init()
-detect.train(m,d,td,ta)
+import detect_adapt_fly
+m,d,td,ta = detect_adapt_fly.init("my_local_dir/experiment01/")
+detect_adapt_fly.train(m,d,td,ta)
 
 ## Names
 
 m  :: models (update in place)
-d  :: validation data
+vd :: validation data
 td :: training data
 ta :: training artifacts (update in place)
 
@@ -75,7 +75,7 @@ def setup_dirs(savedir):
   (savedir/'m').mkdir(exist_ok=True)
   shutil.copy("/projects/project-broaddus/devseg_2/src/detect_adapt.py",savedir)
 
-def init(savedir, n):
+def init(savedir):
   savedir = Path(savedir).resolve()
   setup_dirs(savedir)
 
