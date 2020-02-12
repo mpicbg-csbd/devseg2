@@ -17,37 +17,38 @@ wildcard_constraints:
 rule runall:
   input:
     # [f"/projects/project-broaddus/devseg_2/e05_trib2d/pred/Fluo-N3DL-TRIC/01/t{i:03d}.tif" for i in range(65)],
-    [f"/projects/project-broaddus/devseg_2/e06_trib/pts/down/Fluo-N3DL-TRIF/02/t{i:03d}.tif" for i in range(80)],
+    # [f"/projects/project-broaddus/devseg_2/e06_trib/pts/down/Fluo-N3DL-TRIF/02/t{i:03d}.tif" for i in range(80)],
+    [f"/projects/project-broaddus/devseg_2/e03_celedet/test_02/pred/Fluo-N3DH-CE/02/t{i:03d}.tif" for i in range(190)],
+    "/projects/project-broaddus/devseg_2/e03_celedet/test_02/pts/Fluo-N3DH-CE/02/traj.pkl",
 
-    #flies_pred #train_ce, pts_ce, pred_ce, denoise_pred_ce
+# rule flydetect:
+#   input: fly_raw_wc
+#   output: fly_pred_wc
+#   run:
+#     import predict
+#     predict.fly_centers(input[0],output[0])
 
-rule flydetect:
-  input: fly_raw_wc
-  output: fly_pred_wc
-  run:
-    import predict
-    predict.fly_centers(input[0],output[0])
+# rule predict:
+#   input:  wc_raw_ce, wc_train_ce
+#   output: wc_pred_ce
+#   run:
+#     import predict
+#     predict.centers(input[0],input[1],output[0])
 
-rule predict:
-  input:  wc_raw_ce, wc_train_ce
-  output: wc_pred_ce
-  run:
-    import predict
-    predict.centers(input[0],input[1],output[0])
+# rule denoise_predict:
+#   input: wc_raw_ce, denoise_wc_train_ce
+#   output: denoise_wc_pred_ce
+#   run:
+#     import predict
+#     predict.denoise(input[0],input[1],output[0])
 
-rule denoise_predict:
-  input: wc_raw_ce, denoise_wc_train_ce
-  output: denoise_wc_pred_ce
-  run:
-    import predict
-    predict.denoise(input[0],input[1],output[0])
+# rule predict_pts:
+#   input: wc_pts_input_250
+#   output: wc_pts_ce
+#   run:
+#     import predict
+#     predict.points(input,output[0])
 
-rule predict_pts:
-  input: wc_pts_input_250
-  output: wc_pts_ce
-  run:
-    import predict
-    predict.points(input,output[0])
 
 rule train:
   output: wc_train_ce
@@ -57,6 +58,21 @@ rule train:
     m,d,td,ta = detect.init(savedir,int(wildcards.k))
     detect.train(m,d,td,ta)
 
+
+rule cele_centers:
+  input: "/projects/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/02/t{i}.tif"
+  output: "/projects/project-broaddus/devseg_2/e03_celedet/test_02/pred/Fluo-N3DH-CE/02/t{i}.tif"
+  run:
+    import predict
+    net = predict.net_cele_centers()
+    predict.cele_centers(net,input[0],output[0])
+
+rule cele_points:
+  input: [f"/projects/project-broaddus/devseg_2/e03_celedet/test_02/pred/Fluo-N3DH-CE/02/t{i:03d}.tif" for i in range(190)]
+  output: "/projects/project-broaddus/devseg_2/e03_celedet/test_02/pts/Fluo-N3DH-CE/02/traj.pkl"
+  run:
+    import predict
+    predict.cele_points(input,output[0])
 
 ## Tribolium 2D stuff
 

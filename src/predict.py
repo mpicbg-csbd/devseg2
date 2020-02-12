@@ -59,18 +59,38 @@ def apply_net_tiled_3d(net,img):
 
   return output
 
+
+
 ## C. elegans
 
-def centers(filename_raw,filename_net,filename_out):
-  outdir = Path(filename_out).parent; outdir.mkdir(exist_ok=True,parents=True)
+def all_cele_centers():
+  net = net_cele_centers()
+  for i in range(65,190):
+    name1 = f"/projects/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/01/t{i:03d}.tif"
+    name2 = str(name1).replace("rawdata/celegans_isbi/", "devseg_2/e03_celedet/test_02/pred/")
+    print(name1)
+    print(name2)
+    assert name1 != name2
+    cele_centers(net,name1,name2)
+
+def net_cele_centers():
   net = torch_models.Unet3(16,[[1],[1]],finallayer=nn.Sequential).cuda()
-  net.load_state_dict(torch.load(filename_net))
-  img = load(filename_raw)
+  net.load_state_dict(torch.load("/projects/project-broaddus/devseg_2/e03_celedet/test_02/m/net12.pt"))
+  return net
+
+def cele_centers(net,name1,name2):
+  img = load(name1)
   img = normalize3(img,2,99.6)
   res = apply_net_tiled_3d(net,img[None])[0]
-  save(res.astype(np.float16), filename_out,)
+  save(res.astype(np.float16), name2)
 
-def points(filenames_in,filename_out):
+
+def all_cele_points():
+  filenames_in = [f"/projects/project-broaddus/devseg_2/e03_celedet/test_02/pred/Fluo-N3DH-CE/01/t{i:03d}.tif" for i in range(190)]
+  filename_out = "/projects/project-broaddus/devseg_2/e03_celedet/test_02/pts/Fluo-N3DH-CE/01/traj.pkl"
+  cele_points(filenames_in,filename_out)
+
+def cele_points(filenames_in,filename_out):
 
   traj = []
   zcolordir = Path(filename_out.replace("pts/","zcolor/")).parent
@@ -92,7 +112,7 @@ def points(filenames_in,filename_out):
     traj.append(di)
   save(traj,filename_out)
 
-def denoise(filename_raw,filename_net,filename_out):
+def cele_denoise(filename_raw,filename_net,filename_out):
   outdir = Path(filename_out).parent; outdir.mkdir(exist_ok=True,parents=True)
   net = torch_models.Unet2(16,[[1],[1]],finallayer=nn.Sequential).cuda()
   net.load_state_dict(torch.load(filename_net))

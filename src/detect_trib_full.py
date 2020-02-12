@@ -36,7 +36,6 @@ from segtools import color
 from segtools.defaults.ipython import moviesave
 
 from ns2dir import load, save
-import predict
 
 import files
 import torch_models

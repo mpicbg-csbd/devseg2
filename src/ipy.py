@@ -103,6 +103,4 @@ def isbi_make_dataset_gt():
     pts = mantrack2pts(lab)
     allpts.append(pts)
   save(allpts,"/lustre/projects/project-broaddus/rawdata/trib_isbi/traj/Fluo-N3DL-TRIF/01_traj.pkl")
-
-
-
+  

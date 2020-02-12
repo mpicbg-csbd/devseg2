@@ -31,7 +31,7 @@ from skimage.morphology   import binary_dilation
 from scipy.ndimage        import convolve
 
 from segtools.numpy_utils import collapse2, normalize3, plotgrid
-from segtools.math_utils import conv_at_pts2
+from segtools.math_utils import conv_at_pts4
 from segtools import color
 from segtools.defaults.ipython import moviesave
 
@@ -51,31 +51,13 @@ def flatten(l):
     else:
       yield el
 
-
-notes = """
-## Usage
-
-import detect
-m,d,td,ta = detect.init()
-detect.train(m,d,td,ta)
-
-## Names
-
-m  :: models (update in place)
-d  :: validation data
-td :: training data
-ta :: training artifacts (update in place)
-
-if you want to stop training just use Ctrl-C, it will restart at the same iteration where you left off because of state in ta and m.
-"""
-
 def setup_dirs(savedir):
   if savedir.exists(): shutil.rmtree(savedir)
   savedir.mkdir(exist_ok=True,parents=True)
   (savedir/'m').mkdir(exist_ok=True)
   shutil.copy("/projects/project-broaddus/devseg_2/src/detect_adapt.py",savedir)
 
-def init(savedir, n):
+def init(savedir):
   savedir = Path(savedir).resolve()
   setup_dirs(savedir)
 
@@ -86,11 +68,11 @@ def init(savedir, n):
 
   ## test data
   ta.valitimes = [0,5,33,34,100,189]
-  d = build_training_data(ta.valitimes, ta.use_denoised)
+  d = build_training_data(ta.valitimes, '02', ta.use_denoised)
 
   ## training data
   ta.traintimes = [0,5,33,34,100,189]
-  d2 = build_training_data(ta.traintimes, ta.use_denoised)
+  d2 = build_training_data(ta.traintimes, '02', ta.use_denoised)
   td = SimpleNamespace()
   td.input  = torch.from_numpy(d2.raw).float()[:,None]
   td.target = torch.from_numpy(d2.target).float()[:,None]
@@ -192,16 +174,16 @@ def validate(m,d,ta):
 
 ## helper functions
 
-def build_training_data(times,use_denoised=False):
+def build_training_data(times,dset='01',use_denoised=False):
 
   d = SimpleNamespace()
   if use_denoised:
-    d.raw = np.array([load(f"/projects/project-broaddus/devseg_2/e01/test/pred/Fluo-N3DH-CE/01/t{n:03d}.tif") for n in times])
+    d.raw = np.array([load(f"/projects/project-broaddus/devseg_2/e01/test/pred/Fluo-N3DH-CE/{dset}/t{n:03d}.tif") for n in times])
   else:
-    d.raw = np.array([load(f"/projects/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/01/t{n:03d}.tif") for n in times])
+    d.raw = np.array([load(f"/projects/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/{dset}/t{n:03d}.tif") for n in times])
   d.raw = normalize3(d.raw,2,99.6)
   def mantrack2pts(mantrack): return np.array([r.centroid for r in regionprops(mantrack)],np.int)
-  d.gt  = [mantrack2pts(load(f"/projects/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/01_GT/TRA/man_track{n:03d}.tif")) for n in times]
+  d.gt  = [mantrack2pts(load(f"/projects/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/{dset}_GT/TRA/man_track{n:03d}.tif")) for n in times]
 
   s  = np.array([1,3,3])   ## sigma for gaussian
   ks = np.array([7,21,21]) ## kernel size. must be all odd
@@ -213,7 +195,7 @@ def build_training_data(times,use_denoised=False):
       return np.exp(-(x*x/s/s).sum()/2)
     kern = np.array([f(x) for x in np.indices(ks).reshape((len(ks),-1)).T]).reshape(ks)
     kern = kern / kern.max()
-    target = conv_at_pts2(pts,kern,sh,lambda a,b:np.maximum(a,b))
+    target = conv_at_pts4(pts,kern,sh,lambda a,b:np.maximum(a,b))
     return target
 
   d.target = np.array([place_kern_at_pts(pts) for pts in d.gt])

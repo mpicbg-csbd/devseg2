@@ -13,12 +13,12 @@ from segtools.math_utils import conv_at_pts_multikern
 from pathlib import Path
 from segtools.ns2dir import load,save,toarray
 import tifffile
-import point_matcher
+from segtools import point_matcher
 
 
 
 def rasterize_celegans_predictions():
-  traj = load("/projects/project-broaddus/devseg_2/e03/test/pts/Fluo-N3DH-CE/01/traj.pkl")
+  traj = load("/projects/project-broaddus/devseg_2/e03_celedet/test/pts/Fluo-N3DH-CE/01/traj.pkl")
   raw  = load("/projects/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/01/t000.tif")
 
   home = Path("/projects/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/01_RES/")
@@ -112,10 +112,53 @@ def evaluate_drosophila_nn_matching():
 
 def evaluate_celegans_nn_matching():
   traj_gt = load("/lustre/projects/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/gtpts1_unscaled.pkl")
-  traj    = load("/projects/project-broaddus/devseg_2/e03/test/pts/Fluo-N3DH-CE/01/traj.pkl")
-  matches = np.array([point_matcher.match_points_single(x,y,dub=8) for x,y in zip(traj_gt,traj)])
-  scores  = point_matcher.matches2scores(matches)
-  print(scores)
+  name1 = "/projects/project-broaddus/devseg_2/e03_celedet/test_02/pts/Fluo-N3DH-CE/01/traj.pkl"
+  traj    = load(name1)
+  syms      = [point_matcher.match_unambiguous_nearestNeib(x,y[(0.1,30)],dub=5,scale=[2,1,1]) for x,y in zip(traj_gt,traj)]
+  symscores = point_matcher.listOfMatches_to_Scores(syms)
+  print(symscores)
+  save(syms, Path(name1).parent / "symmetric_matching.pkl")
+
+  return syms
+
+  if False:
+    huns      = [point_matcher.hungarian_matching(x,y[(0.1,30)],scale=[11,1,1],dub=5) for x,y in zip(traj_gt,traj)]
+    for h in huns: point_matcher.score_hungarian(h,dub=5)
+    hunscores = point_matcher.listOfMatches_to_Scores(huns)
+    print(hunscores)
+
+def all_celegans_nn_matching():
+  traj_gt_01 = load("/lustre/projects/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/gtpts1_unscaled.pkl")
+  traj_gt_02 = load("/lustre/projects/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/gtpts2_unscaled.pkl")  
+
+  name1 = "/projects/project-broaddus/devseg_2/e03_celedet/test_02/pts/Fluo-N3DH-CE/01/traj.pkl"
+  traj  = load(name1)
+  syms      = [point_matcher.match_unambiguous_nearestNeib(x,y[(0.1,30)],dub=5,scale=[2,1,1]) for x,y in zip(traj_gt_01,traj)]
+  symscores = point_matcher.listOfMatches_to_Scores(syms)
+  print("train 02 pred 01: ", symscores)
+  save(syms, Path(name1).parent / "symmetric_matching.pkl")
+
+  name1 = "/projects/project-broaddus/devseg_2/e03_celedet/test_02/pts/Fluo-N3DH-CE/02/traj.pkl"
+  traj  = load(name1)
+  syms      = [point_matcher.match_unambiguous_nearestNeib(x,y[(0.1,30)],dub=5,scale=[2,1,1]) for x,y in zip(traj_gt_02,traj)]
+  symscores = point_matcher.listOfMatches_to_Scores(syms)
+  print("train 02 pred 02: ", symscores)
+  save(syms, Path(name1).parent / "symmetric_matching.pkl")
+
+  name1 = "/projects/project-broaddus/devseg_2/e03_celedet/test/pts/Fluo-N3DH-CE/01/traj.pkl"
+  traj  = load(name1)
+  syms      = [point_matcher.match_unambiguous_nearestNeib(x,y[(0.1,30)],dub=5,scale=[2,1,1]) for x,y in zip(traj_gt_01,traj)]
+  symscores = point_matcher.listOfMatches_to_Scores(syms)
+  print("train 01 pred 01: ", symscores)
+  save(syms, Path(name1).parent / "symmetric_matching.pkl")
+
+  name1 = "/projects/project-broaddus/devseg_2/e03_celedet/test/pts/Fluo-N3DH-CE/02/traj.pkl"
+  traj  = load(name1)
+  syms      = [point_matcher.match_unambiguous_nearestNeib(x,y[(0.1,30)],dub=5,scale=[2,1,1]) for x,y in zip(traj_gt_02,traj)]
+  symscores = point_matcher.listOfMatches_to_Scores(syms)
+  print("train 01 pred 02: ", symscores)
+  save(syms, Path(name1).parent / "symmetric_matching.pkl")
+
 
 # def evaluate_trib2d_nn_matching():
 #   traj_gt = load("/projects/project-broaddus/rawdata/trib_isbi_proj/traj/Fluo-N3DL-TRIC/01_traj.pkl")

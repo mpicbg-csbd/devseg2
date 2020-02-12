@@ -129,7 +129,9 @@ def train(m,vd,td,ta):
   ws = mkweights()
   print(ws)
 
-  opt = torch.optim.Adam(m.net.parameters(), lr = ta.lr)
+  try: m.opt
+  except: m.opt = torch.optim.Adam(m.net.parameters(), lr = ta.lr)
+  
   w = torch.zeros(1,1,16,128,128).cuda() ## just create once
   ## linearly decay scalar input to value 1 after 3 epochs, then flat
   decayto1 = lambda x: x*(1-ta.i/(1000*10)) + ta.i/(1000*10) if ta.i<=(1000*10) else 1
@@ -156,8 +158,8 @@ def train(m,vd,td,ta):
     loss.backward()
 
     if ta.i%10==0:
-      opt.step()
-      opt.zero_grad()
+      m.opt.step()
+      m.opt.zero_grad()
 
     ## monitoring training and validation
 

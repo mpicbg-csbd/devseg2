@@ -7,20 +7,31 @@ __default__:
   n: "1"
   c: "1"
 
-predict:
-  t: "00:10:00"
 
-predict_pts:
-  mem:  "16000"
-  t: "03:00:00"
-  p:    "batch"
+cele_centers:
+  mem: "16000"
+  t: "00:20:00"
+
+cele_points:
+  mem: "16000"
+  t: "00:20:00"
+  p: "batch"
   gres: "gpu:0"
+
+trib2d_centers:
+  mem: "16000"
+  t: "00:20:00"
+
+trib3d_centers:
+  mem: "16000"
+  t: "00:20:00"
 
 trib3d_points:
-  mem:  "16000"
-  t: "01:00:00"
-  p:    "batch"
+  mem: "16000"
+  t: "00:20:00"
+  p: "batch"
   gres: "gpu:0"
+
 
 
 # flower_bm3d:

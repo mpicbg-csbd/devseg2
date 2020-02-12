@@ -6,7 +6,7 @@ But it's not that complex, and I welcome you, oh courageous explorer, to try.
 
 - `detect*.py`  data-specific modules for training centerpoint detection
 - `denoise*.py` data-specific modules for applying (Structured) Noise2Void
-- `projection.py` data-specific 3D centerpoint detection models with 2D training data on max projections
+- `projection*.py` data-specific 3D centerpoint detection models with 2D training data on max projections
 - `Snakemake`, `files.py`, `cluster.yaml` are for making the whole project run in parallel on the cluster
 - `evaluation.py`, `point_matcher.py`, `predict.py` for predictions and evaluations
 - `ipy.py`, `ns2dir.py` utils
