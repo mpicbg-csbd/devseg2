@@ -7,6 +7,17 @@ from pathlib import Path
 import numpy as np
 
 
+# def evaluate_method_on_isbi_dataset(d_isbi):
+  # for dset in [01,02] (parallel on cluster w gpu)
+    # train 
+    # for dset in [01,02] (parallel in cluster w gpu)
+      # for img in dset (parallel in cluster w gpu)
+        # predict
+        # find points
+        # evaluate
+      # evaluate_all (must wait for all evaluations to complete. no gpu reqd.)
+
+
 def build_trib2d_dset():
   d_isbi = SimpleNamespace()
   d_isbi.name = "trib2d"
@@ -28,7 +39,7 @@ def build_trib2d_dset():
   d_isbi.trainer.trainout = Path("/projects/project-broaddus/devseg_2/e05_trib2d/test_01/m/net10.pt") ## used as Snakemake output
   d_isbi.trainer.matches_inp_wc = "/projects/project-broaddus/rawdata/trib_isbi_proj/Fluo-N3DL-TRIC/01/t{time}.tif" ## Snakemake wildcard
   d_isbi.trainer.matches_out_wc = "/projects/project-broaddus/devseg_2/e05_trib2d/test_01/matches/Fluo-N3DL-TRIC/01/s{time}.pkl" ## Snakemake wildcard
-  d_isbi.all_matches = [f"/projects/project-broaddus/devseg_2/e05_trib2d/test_01/matches/Fluo-N3DL-TRIC/01/s{time:03d}.pkl" for time in range(65)]
+  d_isbi.trainer.all_matches = [f"/projects/project-broaddus/devseg_2/e05_trib2d/test_01/matches/Fluo-N3DL-TRIC/01/s{time:03d}.pkl" for time in range(0,65)]
 
   d_isbi.trainer.valitimes  = [12,51]
   d_isbi.trainer.traintimes = [ 0, 25, 38, 64]
@@ -42,11 +53,12 @@ def build_trib2d_dset():
 
   d_isbi.trainer.patch_space = np.array([13,256,256])
   d_isbi.trainer.patch_full  = np.array([1,1,13,256,256])
-  d_isbi.trainer.best_model  = "/projects/project-broaddus/devseg_2/e05_trib2d/test_01/m/net04.pt"
+  d_isbi.trainer.best_model  = "/projects/project-broaddus/devseg_2/e05_trib2d/test_01/m/net07.pt"
 
   d_isbi.traj_gt = load("/projects/project-broaddus/rawdata/trib_isbi_proj/traj/Fluo-N3DL-TRIC/01_traj.pkl")
 
-  d_isbi.DET_command = f"time '/projects/project-broaddus/comparison_methods/EvaluationSoftware/Linux/DETMeasure' {d_isbi.trainer.RESdir.parent} 01 3"
+  d_isbi.trainer.DET_command = f"time '/projects/project-broaddus/comparison_methods/EvaluationSoftware/Linux/DETMeasure' {d_isbi.trainer.RESdir.parent} 01 3"
+  d_isbi.trainer.DET_output  = "/projects/project-broaddus/rawdata/trib_isbi_proj/Fluo-N3DL-TRIC/01_RES/DET_log.txt"
 
   def pts2lab(pts):
     kerns = [np.zeros((3,10,10)) + j + 1 for j in range(len(pts))]
@@ -59,13 +71,11 @@ def build_trib2d_dset():
   return d_isbi
 
 
-# def evaluate_method_on_isbi_dataset(d_isbi):
-  # for dset in [01,02] (parallel on cluster w gpu)
-    # train 
-    # for dset in [01,02] (parallel in cluster w gpu)
-      # for img in dset (parallel in cluster w gpu)
-        # predict
-        # find points
-        # evaluate
-      # evaluate_all (must wait for all evaluations to complete. no gpu reqd.)
+
+
+
+
+
+
+
 

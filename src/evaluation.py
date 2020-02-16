@@ -21,18 +21,6 @@ import ipdb
 from itertools import product
 
 
-def rasterize_isbi_detections(d_isbi):
-  traj = load(d_isbi.name_total_traj)
-  for i in range(len(traj)):
-    pts = traj[i]
-    lab = d_isbi.pts2lab(pts)
-    save(lab, d_isbi.RESdir / f'mask{i:03d}.tif')
-
-def evaluate_isbi_DET(d_isbi):
-  run([d_isbi.DET_command],shell=True)
-
-
-
 
 
 ## c elegans
@@ -146,6 +134,9 @@ def celegans_printScores_saveMatchings():
     match_scores = point_matcher.listOfMatches_to_Scores(matches)
     print(f"train {train} pred {pred}: ", match_scores)
     save(matches, Path(name1).parent / "symmetric_matching.pkl")
+
+
+
 
 def celegans_dubVSaccuracy_curve():
   traj_gt_01 = load("/lustre/projects/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/gtpts1_unscaled.pkl")

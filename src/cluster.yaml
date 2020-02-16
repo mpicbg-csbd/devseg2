@@ -7,7 +7,6 @@ __default__:
   n: "1"
   c: "1"
 
-
 cele_centers:
   mem: "16000"
   t: "00:04:00"

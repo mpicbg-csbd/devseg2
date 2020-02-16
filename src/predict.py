@@ -1,23 +1,27 @@
-import torch
-from torch import nn
-import torch_models
 import itertools
 from math import floor,ceil
+
 import numpy as np
 from scipy.ndimage import label,zoom
 from skimage.feature  import peak_local_max
 from skimage.measure  import regionprops
-import tifffile
+# import tifffile
 from pathlib import Path
 
 from subprocess import Popen,run
+
+import torch
+# from torch import nn
+import torch_models
+
+# import files
+
 from segtools.math_utils import conv_at_pts_multikern
-import files
 from segtools.numpy_utils import normalize3
 from segtools.render import get_fnz_idx2d
-from ns2dir import load,save
-from types import SimpleNamespace
+from segtools.ns2dir import load,save
 from segtools import point_matcher
+# from types import SimpleNamespace
 
 ## utils. generic. all datasets.
 
@@ -62,6 +66,7 @@ def apply_net_tiled_3d(net,img):
   return output
 
 
+
 def isbi_single(d_isbi,name_img,name_matches,time):
   net = d_isbi.trainer.f_net()
   net.load_state_dict(torch.load(d_isbi.trainer.best_model))
@@ -76,11 +81,22 @@ def isbi_single(d_isbi,name_img,name_matches,time):
   save(matches, name_matches)
 
 def total_matches(d_isbi):
-  match_list = [load(x) for x in d_isbi.all_matches]
+  match_list = [load(x) for x in d_isbi.trainer.all_matches]
   match_scores = point_matcher.listOfMatches_to_Scores(match_list)
   save(match_scores, d_isbi.trainer.name_total_scores)
   allpts = [load(x) for x in d_isbi.trainer.pts_dir.glob('t*.tif')]
   save(allpts, d_isbi.trainer.name_total_traj)
+
+def rasterize_isbi_detections(d_isbi):
+  traj = load(d_isbi.trainer.name_total_traj)
+  for i in range(len(traj)):
+    pts = traj[i]
+    lab = d_isbi.pts2lab(pts)
+    save(lab, d_isbi.trainer.RESdir / f'mask{i:03d}.tif')
+
+def evaluate_isbi_DET(d_isbi):
+  run([d_isbi.trainer.DET_command],shell=True)
+
 
 
 ## C. elegans

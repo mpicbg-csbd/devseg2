@@ -8,7 +8,11 @@
 # import files as F
 from files import *
 
-# localrules: runall
+localrules: 
+  runall,
+  isbi_total_matches,
+  isbi_DET_score,
+
 
 # wildcard_constraints:
 #   k = '[0-9]{1,3}',
@@ -19,7 +23,8 @@ d_isbi = run_isbi.build_trib2d_dset()
 
 rule runall:
   input:
-    d_isbi.name_total_scores,
+    d_isbi.trainer.DET_output,
+    # d_isbi.trainer.name_total_scores,
     # d_isbi.trainer.trainout,
     # [f"/projects/project-broaddus/devseg_2/e05_trib2d/t{train}/pred/Fluo-N3DL-TRIC/02/t{i:03d}.tif" for i in range(210) for train in ['01','02']],
     # [f"/projects/project-broaddus/devseg_2/e05_trib2d/t{train}/pred/Fluo-N3DL-TRIC/01/t{i:03d}.tif" for i in range(65) for train in ['01','02']],
@@ -48,6 +53,13 @@ rule isbi_total_matches:
     import predict
     predict.total_matches(d_isbi)
 
+rule isbi_DET_score:
+  input: d_isbi.trainer.name_total_traj
+  output: d_isbi.trainer.DET_output
+  run:
+    import predict
+    predict.rasterize_isbi_detections(d_isbi)
+    predict.evaluate_isbi_DET(d_isbi)
 
 
 # rule flydetect:
