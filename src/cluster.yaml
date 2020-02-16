@@ -10,7 +10,7 @@ __default__:
 
 cele_centers:
   mem: "16000"
-  t: "00:20:00"
+  t: "00:04:00"
 
 cele_points:
   mem: "16000"
@@ -18,9 +18,13 @@ cele_points:
   p: "batch"
   gres: "gpu:0"
 
+## trib 2d
+
 trib2d_centers:
   mem: "16000"
-  t: "00:20:00"
+  t: "00:04:00"
+
+## trib 3d
 
 trib3d_centers:
   mem: "16000"

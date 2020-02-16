@@ -35,12 +35,16 @@ from segtools.math_utils import conv_at_pts4
 from segtools import color
 from segtools.defaults.ipython import moviesave
 
-from ns2dir import load, save
 
 import files
 import torch_models
 import predict
-import point_matcher
+
+# from ns2dir import load, save
+# import point_matcher
+from segtools.ns2dir import load,save
+from segtools.point_matcher import match_unambiguous_nearestNeib, listOfMatches_to_Scores, match_points_single
+
 
 import collections
 
@@ -52,30 +56,13 @@ def flatten(l):
       yield el
 
 
-notes = """
-## Usage
-
-import detect
-m,d,td,ta = detect.init()
-detect.train(m,d,td,ta)
-
-## Names
-
-m  :: models (update in place)
-d  :: validation data
-td :: training data
-ta :: training artifacts (update in place)
-
-if you want to stop training just use Ctrl-C, it will restart at the same iteration where you left off because of state in ta and m.
-"""
-
 def setup_dirs(savedir):
   if savedir.exists(): shutil.rmtree(savedir)
   savedir.mkdir(exist_ok=True,parents=True)
   (savedir/'m').mkdir(exist_ok=True)
   shutil.copy("/projects/project-broaddus/devseg_2/src/detect_trib2d.py",savedir)
 
-def init(savedir, n):
+def init(savedir, dset):
   savedir = Path(savedir).resolve()
   setup_dirs(savedir)
 
@@ -84,15 +71,18 @@ def init(savedir, n):
   ta.savedir = savedir
   ta.use_denoised = False
 
-  ## test data
-  ta.valitimes = [0,64]
-  vd = build_training_data(ta.valitimes, ta.use_denoised)
+  ## different training cases
 
-  ## training data
-  ta.traintimes = np.r_[1:64]
-  td = build_training_data(ta.traintimes, ta.use_denoised)
-  # td.input  = td.raw[:,None]
-  # td.target = td.target[:,None]
+  if dset == '01':
+    ta.valitimes  = [12,51]
+    ta.traintimes = [ 0, 25, 38, 64]
+  if dset == '02':
+    ta.valitimes = [41,167]
+    ta.traintimes = [0,83,125,209]
+
+  ## training and test data
+  vd = build_training_data(ta.valitimes,dset,ta.use_denoised)
+  td = build_training_data(ta.traintimes,dset,ta.use_denoised)
   save(td.target.max(1).astype(np.float16),ta.savedir/'ta/mx_vali/target.tif')
 
   ## model
@@ -104,8 +94,9 @@ def init(savedir, n):
 
 def train(m,vd,td,ta):
   """
-  requires m.net, td.input, td.target
-  provides ta.losses and ta.i
+  requires: m.net, td.input, td.target
+  updates m.net weights in place
+  adds ta.vali_scores
   """
 
   n_samples,n_chan = td.input.shape[:2]
@@ -183,8 +174,8 @@ def validate(m,d,ta):
     for i in range(d.input.shape[0]):
       res = predict.apply_net_tiled_3d(m.net,d.input[i])
       pts = peak_local_max(res[0],threshold_abs=.2,exclude_border=False,footprint=np.ones((3,8,8)))
-      score3  = point_matcher.match_points_single(d.gt[i],pts,dub=3)
-      score10 = point_matcher.match_points_single(d.gt[i],pts,dub=10)
+      score3  = match_points_single(d.gt[i],pts,dub=3)
+      score10 = match_points_single(d.gt[i],pts,dub=10)
       scr = (ta.i,i,score3,score10)
       print("e i match pred true", scr)
       vs.append(list(flatten(scr)))
@@ -198,18 +189,19 @@ def validate(m,d,ta):
 
 ## helper functions
 
-def build_training_data(times,use_denoised=False):
+def build_training_data(times,dset='01',use_denoised=False):
 
   d = SimpleNamespace()
   if use_denoised:
     pass
-    # d.input = np.array([load(f"/projects/project-broaddus/devseg_2/e01/test/pred/Fluo-N3DH-CE/01/t{n:03d}.tif") for n in times])
+    # d.input = np.array([load(f"/projects/project-broaddus/devseg_2/e01/test/pred/Fluo-N3DH-CE/{dset}/t{n:03d}.tif") for n in times])
   else:
-    d.input = np.array([load(f"/projects/project-broaddus/rawdata/trib_isbi_proj/Fluo-N3DL-TRIC/01/t{n:03d}.tif") for n in times])
-  d.input = (d.input / 1800).clip(max=2400/1800) # normalize3(d.raw,2,99.6) # no clipping, min already set to zero
+    d.input = np.array([load(f"/projects/project-broaddus/rawdata/trib_isbi_proj/Fluo-N3DL-TRIC/{dset}/t{n:03d}.tif") for n in times])
+  imgmax  = np.percentile(d.input,99.4)
+  d.input = (d.input / imgmax).clip(max=imgmax*4/3) # normalize3(d.raw,2,99.6) # no clipping, min already set to zero
 
   def mantrack2pts(mantrack): return np.array([r.centroid for r in regionprops(mantrack)],np.int)
-  d.gt  = [mantrack2pts(load(f"/projects/project-broaddus/rawdata/trib_isbi_proj/Fluo-N3DL-TRIC/01_GT/TRA/man_track{n:03d}.tif")) for n in times]
+  d.gt  = [mantrack2pts(load(f"/projects/project-broaddus/rawdata/trib_isbi_proj/Fluo-N3DL-TRIC/{dset}_GT/TRA/man_track{n:03d}.tif")) for n in times]
 
   s  = np.array([1,3,3])   ## sigma for gaussian
   ks = np.array([7,21,21]) ## kernel size. must be all odd

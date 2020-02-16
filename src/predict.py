@@ -17,6 +17,7 @@ from segtools.numpy_utils import normalize3
 from segtools.render import get_fnz_idx2d
 from ns2dir import load,save
 from types import SimpleNamespace
+from segtools import point_matcher
 
 ## utils. generic. all datasets.
 
@@ -53,19 +54,40 @@ def apply_net_tiled_3d(net,img):
     qe,re,se = min(z+16,a+q),min(y+200,b+r),min(x+200,c+s)
     ae,be,ce = min(z+16,a),min(y+200,b),min(x+200,c)
     patch = img_padded[:,z:qe+2*ZPAD,y:re+2*YPAD,x:se+2*XPAD]
-    patch = torch.from_numpy(patch).cuda().float()
-    patch = net(patch[None])[0,:,ZPAD:-ZPAD,YPAD:-YPAD,XPAD:-XPAD].detach().cpu().numpy()
+    with torch.no_grad():
+      patch = torch.from_numpy(patch).cuda().float()
+      patch = net(patch[None])[0,:,ZPAD:-ZPAD,YPAD:-YPAD,XPAD:-XPAD].detach().cpu().numpy()
     output[:,z:ae,y:be,x:ce] = patch[:,:ae-z,:be-y,:ce-x]
 
   return output
 
+
+def isbi_single(d_isbi,name_img,name_matches,time):
+  net = d_isbi.trainer.f_net()
+  net.load_state_dict(torch.load(d_isbi.trainer.best_model))
+  img = load(name_img)
+  img = d_isbi.trainer.norm(img)
+  res = apply_net_tiled_3d(net,img[None])[0]
+  save(res.astype(np.float16), d_isbi.trainer.pred_dir / Path(name_img).name)
+  pts = peak_local_max(res,threshold_abs=0.1,exclude_border=False,footprint=np.ones((3,20,20)))
+  save(pts, d_isbi.trainer.pts_dir / Path(name_img).name)
+  matches = point_matcher.match_unambiguous_nearestNeib(d_isbi.traj_gt[time],pts,dub=5)
+  print(matches)
+  save(matches, name_matches)
+
+def total_matches(d_isbi):
+  match_list = [load(x) for x in d_isbi.all_matches]
+  match_scores = point_matcher.listOfMatches_to_Scores(match_list)
+  save(match_scores, d_isbi.trainer.name_total_scores)
+  allpts = [load(x) for x in d_isbi.trainer.pts_dir.glob('t*.tif')]
+  save(allpts, d_isbi.trainer.name_total_traj)
 
 
 ## C. elegans
 
 def all_cele_centers():
   net = net_cele_centers()
-  for i in range(65,190):
+  for i in range(0,190):
     name1 = f"/projects/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/01/t{i:03d}.tif"
     name2 = str(name1).replace("rawdata/celegans_isbi/", "devseg_2/e03_celedet/test_02/pred/")
     print(name1)
@@ -152,6 +174,8 @@ def fly_max_preds():
     save(zoom(img[:,:b//2].max(1), (5,1)),str(p).replace("pred/","pred_mx_y_half/"))
     save(zoom(img[:,:,:c//2].max(2), (5,1)),str(p).replace("pred/","pred_mx_x_half/"))
 
+
+
 #### build fly NHLs for tracking
 
 def img2nhl_fly(img,raw):
@@ -179,16 +203,31 @@ def process_all_flyimgs():
 
 ## Tribolium 2D
 
-def trib2d_centers(name1):
+def trib2d_net(train='01'):
   net = torch_models.Unet3(16,[[1],[1]],finallayer=nn.Sequential).cuda()
-  net.load_state_dict(torch.load("/projects/project-broaddus/devseg_2/e05_trib2d/test2/m/net07.pt"))
-  # for i in range(65):
-  # name1 = f"/projects/project-broaddus/rawdata/trib_isbi_proj/Fluo-N3DL-TRIC/01/t{i:03d}.tif"
+  if train == '01':
+    net.load_state_dict(torch.load("/projects/project-broaddus/devseg_2/e05_trib2d/t01/m/net05.pt"))
+  elif train == '02': 
+    net.load_state_dict(torch.load("/projects/project-broaddus/devseg_2/e05_trib2d/t02/m/net05.pt"))
+  else: return None
+  return net
+
+def trib2d_pred_all(train='01',pred='01'):
+  net  = trib2d_net(train)
+  tmax = 65 if pred=='01' else 210
+  for i in range(5,tmax):
+    name1 = f"/projects/project-broaddus/rawdata/trib_isbi_proj/Fluo-N3DL-TRIC/{pred}/t{i:03d}.tif"
+    name2 = name1.replace("rawdata/trib_isbi_proj/", f"devseg_2/e05_trib2d/t{train}/pred/")
+    assert name1!=name2
+    trib2d_centers(net, name1, name2)
+
+def trib2d_centers(net, name1, name2):
   print(name1)
   img = load(name1)
-  img = (img / 1800).clip(max=2400/1800)
+  imgmax = np.percentile(img,99.4)
+  img = (img / imgmax).clip(max=imgmax*4/3)
   res = apply_net_tiled_3d(net,img[None])[0]
-  save(res.astype(np.float16),name1.replace("rawdata/trib_isbi_proj/", "devseg_2/e05_trib2d/pred/"))
+  save(res.astype(np.float16),name2)
 
 def trib2d_points():
   traj = []
