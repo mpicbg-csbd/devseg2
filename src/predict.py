@@ -11,8 +11,7 @@ from pathlib import Path
 from subprocess import Popen,run
 
 import torch
-# from torch import nn
-import torch_models
+from torch import nn
 
 # import files
 
@@ -21,14 +20,16 @@ from segtools.numpy_utils import normalize3
 from segtools.render import get_fnz_idx2d
 from segtools.ns2dir import load,save
 from segtools import point_matcher
+from segtools import torch_models
 # from types import SimpleNamespace
 
-## utils. generic. all datasets.
+## works with any torch cnn and 3D image (potentially multichannel)
 
 def apply_net_tiled_3d(net,img):
   """
+  Does not perform normalization.
   Applies net to image with dims Channels,Z,Y,X.
-  Assume 3x or less max pooling layers => (U-net) translational symmetry with period 8px.
+  Assume 3x or less max pooling layers => (U-net) translational symmetry with period 2^n for n in [0,1,2,3].
   """
 
   # borders           = [8,24,24] ## border width within each patch that is thrown away after prediction
@@ -39,250 +40,114 @@ def apply_net_tiled_3d(net,img):
   def f(n,m): return ceil(n/m)*m-n ## gives padding needed for n to be divisible by m
 
   a,b,c = img.shape[1:]
-  ## padding per image
-  ## calculate extra border needed for stride % 8 = 0.
-  q,r,s = f(a,8),f(b,8),f(c,8) 
 
-  ## padding per patch. must be divisible by 8.
-  ZPAD,YPAD,XPAD = 8,32,32
+  ## extra border needed for stride % 8 = 0. read as e.g. "ImagePad_Z"
+  ip_z,ip_y,ip_x = f(a,8),f(b,8),f(c,8) 
+  
+  # pp_z,pp_y,pp_x = 8,32,32
+  # DZ,DY,DX = 16,200,200
 
-  img_padded = np.pad(img,[(0,0),(ZPAD,ZPAD+q),(YPAD,YPAD+r),(XPAD,XPAD+s)],mode='constant')
+  ## max total size with Unet3 16 input channels (64,528,528) = 
+  ## padding per patch. must be divisible by 8. read as e.g. "PatchPad_Z"
+  pp_z,pp_y,pp_x = 8,64,64
+  ## inner patch size (does not include patch border. also will be smaller at boundary)
+  DZ,DY,DX = 48,400,400
+
+  img_padded = np.pad(img,[(0,0),(pp_z,pp_z+ip_z),(pp_y,pp_y+ip_y),(pp_x,pp_x+ip_x)],mode='constant')
   output = np.zeros(img.shape)
 
-  ## coordinate for each patch. each stride must be divisible by 8.
-  zs = np.r_[:a:16]
-  ys = np.r_[:b:200]
-  xs = np.r_[:c:200]
+  ## start coordinates for each patch in the padded input. each stride must be divisible by 8.
+  zs = np.r_[:a:DZ]
+  ys = np.r_[:b:DY]
+  xs = np.r_[:c:DX]
 
+  ## start coordinates of padded input (e.g. top left patch corner)
   for x,y,z in itertools.product(xs,ys,zs):
-    qe,re,se = min(z+16,a+q),min(y+200,b+r),min(x+200,c+s)
-    ae,be,ce = min(z+16,a),min(y+200,b),min(x+200,c)
-    patch = img_padded[:,z:qe+2*ZPAD,y:re+2*YPAD,x:se+2*XPAD]
+    ## end coordinates of padded input (including patch border)
+    ze,ye,xe = min(z+DZ,a+ip_z) + 2*pp_z, min(y+DY,b+ip_y) + 2*pp_y, min(x+DX,c+ip_x) + 2*pp_x
+    patch = img_padded[:,z:ze,y:ye,x:xe]
     with torch.no_grad():
       patch = torch.from_numpy(patch).cuda().float()
-      patch = net(patch[None])[0,:,ZPAD:-ZPAD,YPAD:-YPAD,XPAD:-XPAD].detach().cpu().numpy()
+      patch = net(patch[None])[0,:,pp_z:-pp_z,pp_y:-pp_y,pp_x:-pp_x].detach().cpu().numpy()
+    ## end coordinates of unpadded output (not including border)
+    ae,be,ce = min(z+DZ,a),min(y+DY,b),min(x+DX,c)
+    ## use "ae-z" because patch size changes near boundary
     output[:,z:ae,y:be,x:ce] = patch[:,:ae-z,:be-y,:ce-x]
 
   return output
 
+## can be used for any d_isbi dataset
 
+def isbi_predict(predictor):
+  args,kwargs = predictor.f_net_args
+  net = torch_models.Unet3(*args,**kwargs).cuda()
+  net.load_state_dict(torch.load(predictor.best_model))
+  o = predictor.out
 
-def isbi_single(d_isbi,name_img,name_matches,time):
-  net = d_isbi.trainer.f_net()
-  net.load_state_dict(torch.load(d_isbi.trainer.best_model))
-  img = load(name_img)
-  img = d_isbi.trainer.norm(img)
-  res = apply_net_tiled_3d(net,img[None])[0]
-  save(res.astype(np.float16), d_isbi.trainer.pred_dir / Path(name_img).name)
-  pts = peak_local_max(res,threshold_abs=0.1,exclude_border=False,footprint=np.ones((3,20,20)))
-  save(pts, d_isbi.trainer.pts_dir / Path(name_img).name)
-  matches = point_matcher.match_unambiguous_nearestNeib(d_isbi.traj_gt[time],pts,dub=5)
-  print(matches)
-  save(matches, name_matches)
+  for time in predictor.predict_times:
+    name_img = predictor.input_dir / f't{time:03d}.tif'
+    if (o.base / 'pred' / o.tail / name_img.name).exists(): continue
+    img = load(name_img)
+    img = predictor.norm(img)
+    res = apply_net_tiled_3d(net,img[None])[0]
+    pts = peak_local_max(res,threshold_abs=0.1,exclude_border=False,footprint=predictor.plm_footprint)
+    unambiguous_matches = point_matcher.match_unambiguous_nearestNeib(predictor.traj_gt_pred[time],pts,dub=10)
+    print("new {:2d} {:6f} {:6f} {:6f}".format(time, unambiguous_matches.f1,unambiguous_matches.precision,unambiguous_matches.recall))
 
-def total_matches(d_isbi):
-  match_list = [load(x) for x in d_isbi.trainer.all_matches]
+    res = res.astype(np.float16)
+    save(res,                 o.base  / 'pred'   / o.tail / name_img.name)
+    save(res.max(0),          o.base  / 'mx_z'   / o.tail / name_img.name)
+    save(pts,                 o.base  / 'pts'    / o.tail / name_img.name)
+    save(unambiguous_matches, o.base  / 'matches'/ o.tail / (name_img.stem + '.pkl'))
+
+def total_matches(evaluator):
+  o = evaluator.out
+  match_list = [load(x) for x in (o.base / 'matches' / o.tail).glob("t*.pkl")]
   match_scores = point_matcher.listOfMatches_to_Scores(match_list)
-  save(match_scores, d_isbi.trainer.name_total_scores)
-  allpts = [load(x) for x in d_isbi.trainer.pts_dir.glob('t*.tif')]
-  save(allpts, d_isbi.trainer.name_total_traj)
+  save(match_scores, evaluator.name_total_scores)
+  print("SCORES: ", match_scores)
+  allpts = [load(x) for x in (o.base / 'pts' / o.tail).glob('t*.tif')]
+  save(allpts, evaluator.name_total_traj)
 
-def rasterize_isbi_detections(d_isbi):
-  traj = load(d_isbi.trainer.name_total_traj)
+def rasterize_isbi_detections(evaluator):
+  traj  = load(evaluator.name_total_traj)
+  shape = load(evaluator.RAWdir / 't000.tif').shape
   for i in range(len(traj)):
-    pts = traj[i]
-    lab = d_isbi.pts2lab(pts)
-    save(lab, d_isbi.trainer.RESdir / f'mask{i:03d}.tif')
+    pts = evaluator.det_pts_transform(traj[i])
+    lab = evaluator.pts2lab(pts,shape)
+    save(lab, evaluator.RESdir / f'mask{i:03d}.tif')
 
-def evaluate_isbi_DET(d_isbi):
-  run([d_isbi.trainer.DET_command],shell=True)
-
-
-
-## C. elegans
-
-def all_cele_centers():
-  net = net_cele_centers()
-  for i in range(0,190):
-    name1 = f"/projects/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/01/t{i:03d}.tif"
-    name2 = str(name1).replace("rawdata/celegans_isbi/", "devseg_2/e03_celedet/test_02/pred/")
-    print(name1)
-    print(name2)
-    assert name1 != name2
-    cele_centers(net,name1,name2)
-
-def net_cele_centers():
-  net = torch_models.Unet3(16,[[1],[1]],finallayer=nn.Sequential).cuda()
-  net.load_state_dict(torch.load("/projects/project-broaddus/devseg_2/e03_celedet/test_02/m/net12.pt"))
-  return net
-
-def cele_centers(net,name1,name2):
-  img = load(name1)
-  img = normalize3(img,2,99.6)
-  res = apply_net_tiled_3d(net,img[None])[0]
-  save(res.astype(np.float16), name2)
+def evaluate_isbi_DET(evaluator):
+  run([evaluator.DET_command],shell=True)
 
 
-def all_cele_points():
-  filenames_in = [f"/projects/project-broaddus/devseg_2/e03_celedet/test_02/pred/Fluo-N3DH-CE/01/t{i:03d}.tif" for i in range(190)]
-  filename_out = "/projects/project-broaddus/devseg_2/e03_celedet/test_02/pts/Fluo-N3DH-CE/01/traj.pkl"
-  cele_points(filenames_in,filename_out)
+def test_apply_net_tiled_3d():
+  net = torch_models.Unet3(16,finallayer=torch_models.nn.Sequential).cuda()
+  img = np.random.rand(1,100,1000,1000)
+  print("input", img.shape)
+  res = apply_net_tiled_3d(net,img)
+  print("output", res.shape)
 
-def cele_points(filenames_in,filename_out):
-
-  traj = []
-  zcolordir = Path(filename_out.replace("pts/","zcolor/")).parent
-  maxdir = Path(filename_out.replace("pts/","maxs/")).parent
-
-  for i,file in enumerate(filenames_in):
-    res = load(file).astype(np.float32)
-
-    ## save views of this result
-    zcolor = (1+get_fnz_idx2d(res>0.3)).astype(np.uint8)
-    save(zcolor, zcolordir / f'p{i:03d}.png')
-    mx = res.max(0); mx *= 255/mx.max(); mx = mx.clip(0,255).astype(np.uint8)
-    save(mx, maxdir / f'p{i:03d}.png')
-
-    di  = dict()
-    for th,fp in itertools.product([0.1], [10,20,30]):
-      pts = peak_local_max(res,threshold_abs=th,exclude_border=False,footprint=np.ones((3,fp,fp)))
-      di[(th,fp)] = pts
-    traj.append(di)
-  save(traj,filename_out)
-
-def cele_denoise(filename_raw,filename_net,filename_out):
-  outdir = Path(filename_out).parent; outdir.mkdir(exist_ok=True,parents=True)
-  net = torch_models.Unet2(16,[[1],[1]],finallayer=nn.Sequential).cuda()
-  net.load_state_dict(torch.load(filename_net))
-  img = load(filename_raw)
-  # img = normalize3(img,2,99.6)
-  res = apply_net_tiled_3d(net,img[None])[0]
-  save(res.astype(np.float16), filename_out)
-  save(res.astype(np.float16).max(0), filename_out.replace('pred/','mxpred/'))
+if __name__ == '__main__': test_apply_net_tiled_3d()
 
 
-## Drosophila
+info = """
 
-def fly_centers(f_raw,f_pred):
-  img = load(f_raw)
-  img = img/1300
-  net = torch_models.Unet3(16,[[1],[1]],finallayer=nn.Sequential).cuda()
-  net.load_state_dict(torch.load("/projects/project-broaddus/devseg_2/e04_flydet/test3/m/net30.pt"))
-  res = apply_net_tiled_3d(net,img[None])[0]
-  save(res.astype(np.float16),f_pred)
-  save(res.astype(np.float16).max(0), f_pred.replace('pred/','mxpred/'))
+Thu Feb 20 14:32:36 2020
 
-def fly_pts(f_pred,f_pts=None):
-  print(f_pred)
-  img = load(f_pred)
-  pts = peak_local_max(img.astype(np.float32),threshold_abs=0.2,exclude_border=False,footprint=np.ones((3,8,8)))
-  save(pts,f_pts)
+How should we specify directory and file names in predictor?
 
-def fly_max_preds():
-  for p in files.flies_pred:
-    print(p)
-    img = load(p).astype(np.float32)
-    save(img.max(0),str(p).replace("pred/","pred_mx_z/"))
-    save(img.max(1),str(p).replace("pred/","pred_mx_y/"))
-    save(img.max(2),str(p).replace("pred/","pred_mx_x/"))
-    a,b,c = img.shape
-    save(img[:a//2].max(0),str(p).replace("pred/","pred_mx_z_half/"))
-    save(zoom(img[:,:b//2].max(1), (5,1)),str(p).replace("pred/","pred_mx_y_half/"))
-    save(zoom(img[:,:,:c//2].max(2), (5,1)),str(p).replace("pred/","pred_mx_x_half/"))
+Right now we use predictor.RAWdir, predictor.pred_dir, predictor.pred_dir_maxz, and predictor.traj_gt_pred, and more.
+There are all directories and filenames.
+The predict function should not need to know the stem name or extension of files to load. That should be done by predictor.
+Should it be easy to create new output directories that have different types of prediction info (eg. maxz) without having to add new attributes to predictor?
+We could do this, but then predictor would not know where to _load_ from those funtions if we needed them later.
+But coupling them adds a bit of overhead and some extra names.
+What If, in the future, we want to be able to predict on multiple different directories?
+We could have a _list_ of directory names instead of a single path. 
+Then have a list of list of times for each directory?
+This sounds awful...
+Better is to have a single list (iterable), just of complete image filenames to read.
+Then a second list with corresponding write names.
 
-
-
-#### build fly NHLs for tracking
-
-def img2nhl_fly(img,raw):
-  nhl = SimpleNamespace()
-  nhl.pts = peak_local_max(img.astype(np.float32),threshold_abs=.2,min_distance=6)
-  nhl.imgvals = img[tuple(nhl.pts.T)]
-  nhl.rawvals = raw[tuple(nhl.pts.T)]
-  mask = nhl.rawvals>500
-  nhl.pts = nhl.pts[mask]
-  nhl.imgvals = nhl.imgvals[mask]
-  nhl.label = np.arange(len(nhl.pts))+1
-  return nhl
-
-def process_all_flyimgs():
-  nhls = []
-  for i in range(20):
-    print(files.flies_all[i])
-    raw  = load(files.flies_all[i])
-    pred = load(files.flies_pred[i])
-    nhl  = img2nhl_fly(pred,raw)
-    nhls.append(nhl)
-  return nhls
-
-
-
-## Tribolium 2D
-
-def trib2d_net(train='01'):
-  net = torch_models.Unet3(16,[[1],[1]],finallayer=nn.Sequential).cuda()
-  if train == '01':
-    net.load_state_dict(torch.load("/projects/project-broaddus/devseg_2/e05_trib2d/t01/m/net05.pt"))
-  elif train == '02': 
-    net.load_state_dict(torch.load("/projects/project-broaddus/devseg_2/e05_trib2d/t02/m/net05.pt"))
-  else: return None
-  return net
-
-def trib2d_pred_all(train='01',pred='01'):
-  net  = trib2d_net(train)
-  tmax = 65 if pred=='01' else 210
-  for i in range(5,tmax):
-    name1 = f"/projects/project-broaddus/rawdata/trib_isbi_proj/Fluo-N3DL-TRIC/{pred}/t{i:03d}.tif"
-    name2 = name1.replace("rawdata/trib_isbi_proj/", f"devseg_2/e05_trib2d/t{train}/pred/")
-    assert name1!=name2
-    trib2d_centers(net, name1, name2)
-
-def trib2d_centers(net, name1, name2):
-  print(name1)
-  img = load(name1)
-  imgmax = np.percentile(img,99.4)
-  img = (img / imgmax).clip(max=imgmax*4/3)
-  res = apply_net_tiled_3d(net,img[None])[0]
-  save(res.astype(np.float16),name2)
-
-def trib2d_points():
-  traj = []
-  for i in range(65):
-  # for i in [64]:
-    name1 = f"/projects/project-broaddus/devseg_2/e05_trib2d/pred/Fluo-N3DL-TRIC/01/t{i:03d}.tif"
-    print(name1)
-    img = load(name1)
-    pts = peak_local_max(img.astype(np.float32),threshold_abs=0.2,exclude_border=False,footprint=np.ones((3,5,5)))
-    save(pts,name1.replace("e05_trib2d/pred/", "e05_trib2d/pts/"))
-    traj.append(pts)
-  save(traj,"/projects/project-broaddus/devseg_2/e05_trib2d/traj/Fluo-N3DL-TRIC/01/traj.pkl")
-
-## trib 3D
-
-def trib3d_centers(name1):
-  net = torch_models.Unet3(16,[[1],[1]],finallayer=nn.Sequential).cuda()
-  net.load_state_dict(torch.load("/projects/project-broaddus/devseg_2/e06_trib/t03_downsize/m/net60.pt"))
-  # for i in range(80):
-  # name1 = f"/projects/project-broaddus/rawdata/trib_isbi/down/Fluo-N3DL-TRIF/02/t{i:03d}.tif"
-  print(name1)
-  img = load(name1)
-  img = (img / 1800).clip(max=2400/1800)
-  res = apply_net_tiled_3d(net,img[None])[0]
-  save(res.astype(np.float16),name1.replace("rawdata/trib_isbi/", "devseg_2/e06_trib/pred/"))
-
-def trib3d_points(name1):
-  print(name1)
-  img = load(name1)
-  pts = peak_local_max(img.astype(np.float32),threshold_abs=0.2,exclude_border=False,footprint=np.ones((4,4,4)))
-  save(pts,name1.replace("e06_trib/pred/", "e06_trib/pts/"))
-
-def trib3d_joinpoints():
-  traj = []
-  for i in range(80):
-    name1 = f"/projects/project-broaddus/devseg_2/e06_trib/pts/down/Fluo-N3DL-TRIF/02/t{i:03d}.tif"
-    pts = load(name1)*3
-    traj.append(pts)
-  save(traj,"/projects/project-broaddus/devseg_2/e06_trib/traj/Fluo-N3DL-TRIF/02/traj.pkl")
-
-
-
+"""

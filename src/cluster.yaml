@@ -7,71 +7,12 @@ __default__:
   n: "1"
   c: "1"
 
-cele_centers:
+isbi_predict:
   mem: "16000"
-  t: "00:04:00"
+  t: "00:10:00"
 
-cele_points:
-  mem: "16000"
-  t: "00:20:00"
-  p: "batch"
+isbi_evaluate:
+  t: "04:00:00"
+  p:    "batch"
   gres: "gpu:0"
 
-## trib 2d
-
-trib2d_centers:
-  mem: "16000"
-  t: "00:04:00"
-
-## trib 3d
-
-trib3d_centers:
-  mem: "16000"
-  t: "00:20:00"
-
-trib3d_points:
-  mem: "16000"
-  t: "00:20:00"
-  p: "batch"
-  gres: "gpu:0"
-
-
-
-# flower_bm3d:
-#   t: "02:00:00"
-#   p: "batch"
-#   gres: "gpu:0"
-
-# shutter_bm3d:
-#   t: "02:00:00"
-#   p: "batch"
-#   gres: "gpu:0"
-
-# flower_analysis:
-#   t: "01:00:00"
-#   p: "batch"
-#   gres: "gpu:0"
-
-# flower_analysis_single:
-#   t: "01:00:00"
-#   p: "batch"
-#   gres: "gpu:0"
-
-# shutter_analysis:
-#   t: "01:00:00"
-#   p: "batch"
-#   gres: "gpu:0"
-
-# cele_analysis:
-#   t: "01:00:00"
-#   p: "batch"
-#   gres: "gpu:0"
-
-# two:
-#   # J: "two"
-#   p: "gpu"
-#   gres: "gpu:1"
-
-# pred_flower_nlm:
-#   p: "gpu"
-#   gres: "gpu:1"

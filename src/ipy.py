@@ -52,7 +52,7 @@ def job03():
 
 def job04_downsample():
   "tribolium (full) downsample"
-  for p in sorted(Path("/projects/project-broaddus/rawdata/trib_isbi/Fluo-N3DL-TRIF/02/").glob("*.tif")):
+  for p in sorted(Path("/projects/project-broaddus/rawdata/trib_isbi/Fluo-N3DL-TRIF/01/").glob("*.tif")):
     print(p)
     p2 = Path(str(p).replace("trib_isbi/","trib_isbi/down/"))
     if p2.exists(): continue
@@ -79,8 +79,6 @@ def job06():
     save(mx, maxdir / f't{i:03d}.png')
     print(i)
 
-def job07():
-  "explore c. elegans nlm denoising"
 
 def mantrack2pts(mantrack): return np.array([r.centroid for r in regionprops(mantrack)],np.int)
 
@@ -93,14 +91,5 @@ def job08():
     pts = mantrack2pts(lab)
     allpts.append(pts)
   return allpts
-
-def isbi_make_dataset_gt():
-  home = Path("/lustre/projects/project-broaddus/rawdata/trib_isbi/Fluo-N3DL-TRIF/01_GT/TRA/")
-  allpts = []
-  for name in sorted(home.glob("man_track*.tif")):
-    print(name)
-    lab = load(name)
-    pts = mantrack2pts(lab)
-    allpts.append(pts)
-  save(allpts,"/lustre/projects/project-broaddus/rawdata/trib_isbi/traj/Fluo-N3DL-TRIF/01_traj.pkl")
   
+

@@ -119,6 +119,7 @@ def train(m,d,td,ta):
   decayto1 = lambda x: x*(1-ta.i/(1000*3)) + ta.i/(1000*3) if ta.i<=(1000*3) else 1
 
   for ta.i in range(ta.i,ta.i_final):
+    
     ta.timings.append(time())
 
     _pt = np.floor(np.random.rand(3)*(_sh-(16,128,128))).astype(int)

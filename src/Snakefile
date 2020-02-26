@@ -1,174 +1,74 @@
-## invoke with:
 ## alias csnake='snakemake -j 1000 --cluster-config cluster.yaml --cluster "sbatch -J {rule} -p {cluster.p} --gres {cluster.gres} -n {cluster.n} -t {cluster.t} -c {cluster.c} --mem {cluster.mem} -o slurm/slurm-%j.out -e slurm/slurm-%j.err" '
-## (that's now in bashrc. e.g. usage below)
-## csnake train_flower_n2gt
-# from types import SimpleNamespace
-# from utils import flatten, recursive_map2
+## invoke with `csnake` in local (src) dir
 
-# import files as F
-from files import *
 
-localrules: 
+cmd = """
+mkdir -p snake_src01
+cp run_isbi.py snake_src01/run_isbi_copy.py
+cp detect_isbi.py snake_src01/detect_isbi_copy.py
+cp predict.py snake_src01/predict_copy.py
+"""
+
+from subprocess import run
+run([cmd],shell=True)
+
+import sys
+sys.path.append('snake_src01')
+
+localrules:
   runall,
-  isbi_total_matches,
-  isbi_DET_score,
+  # isbi_train,
+  # isbi_predict,
+  # isbi_evaluate,
 
+wildcard_constraints:
+  time = '[0-9]{1,3}',
+  # k = '[0-9]{1,3}',
+  # ed = 'e0[23]'
 
-# wildcard_constraints:
-#   k = '[0-9]{1,3}',
-#   ed = 'e0[23]'
+from itertools import product
+import run_isbi_copy as run_isbi
+deps = run_isbi.build_snakemake_wcs()
 
-import run_isbi
-d_isbi = run_isbi.build_trib2d_dset()
+map1 = dict(celegans_isbi='Fluo-N3DH-CE',fly_isbi='Fluo-N3DL-DRO',trib_isbi_proj='Fluo-N3DL-TRIC',trib_isbi='Fluo-N3DL-TRIF')
+# map2 = dict(celegans_isbi=celegans_isbi,fly_isbi=fly_isbi,trib_isbi_proj=trib_isbi_proj,trib_isbi=trib_isbi)
+
+rawdirs   = ['celegans_isbi'] #, 'fly_isbi', 'trib_isbi_proj', 'trib_isbi',]
+isbinames = [map1[r] for r in rawdirs]
+preds     = ['02'] #,'02']
+trains    = ['01'] #,'02']
 
 rule runall:
   input:
-    d_isbi.trainer.DET_output,
-    # d_isbi.trainer.name_total_scores,
-    # d_isbi.trainer.trainout,
-    # [f"/projects/project-broaddus/devseg_2/e05_trib2d/t{train}/pred/Fluo-N3DL-TRIC/02/t{i:03d}.tif" for i in range(210) for train in ['01','02']],
-    # [f"/projects/project-broaddus/devseg_2/e05_trib2d/t{train}/pred/Fluo-N3DL-TRIC/01/t{i:03d}.tif" for i in range(65) for train in ['01','02']],
-    # # [f"/projects/project-broaddus/devseg_2/e06_trib/pts/down/Fluo-N3DL-TRIF/02/t{i:03d}.tif" for i in range(80)],
-    # [f"/projects/project-broaddus/devseg_2/e03_celedet/test_02/pred/Fluo-N3DH-CE/02/t{i:03d}.tif" for i in range(190)],
-    # "/projects/project-broaddus/devseg_2/e03_celedet/test_02/pts/Fluo-N3DH-CE/02/traj.pkl",
+    [deps.DET_output.format(rawdir=r,isbiname=map1[r],pred=p,train_set=t) for r,p,t in product(rawdirs,preds,trains)]
 
 rule isbi_train:
-  output: d_isbi.trainer.trainout
+  output: deps.trainout
   run:
-    import detect_isbi
-    m,d,td,ta = detect_isbi.init(d_isbi)
-    detect_isbi.train(m,d,td,ta,d_isbi)
+    import run_isbi_copy as run_isbi
+    config = run_isbi.choose_config_from_snakemake_wildcards(wildcards)
+    import detect_isbi_copy as detect_isbi
+    T = detect_isbi.init(config.trainer)
+    detect_isbi.train(T,config.trainer)
 
-rule isbi_pred_det_matches:
-  input:  d_isbi.trainer.matches_inp_wc, d_isbi.trainer.best_model
-  output: d_isbi.trainer.matches_out_wc
+rule isbi_predict:
+  input:  deps.matches_inp_wc, deps.trainout
+  output: deps.matches_out_wc
   run:
-    import predict
-    predict.isbi_single(d_isbi,input[0],output[0],int(wildcards.time))
+    import run_isbi_copy as run_isbi
+    config = run_isbi.choose_config_from_snakemake_wildcards(wildcards)
+    import predict_copy as predict
+    predict.isbi_predict(config.predictor)
 
-rule isbi_total_matches:
-  input:  d_isbi.trainer.all_matches
-  output: d_isbi.trainer.name_total_scores, d_isbi.trainer.name_total_traj
+rule isbi_evaluate:
+  input:  deps.all_matches
+  output: deps.name_total_scores, deps.name_total_traj, deps.DET_output
   run:
-    import predict
-    predict.total_matches(d_isbi)
-
-rule isbi_DET_score:
-  input: d_isbi.trainer.name_total_traj
-  output: d_isbi.trainer.DET_output
-  run:
-    import predict
-    predict.rasterize_isbi_detections(d_isbi)
-    predict.evaluate_isbi_DET(d_isbi)
-
-
-# rule flydetect:
-#   input: fly_raw_wc
-#   output: fly_pred_wc
-#   run:
-#     import predict
-#     predict.fly_centers(input[0],output[0])
-
-# rule predict:
-#   input:  wc_raw_ce, wc_train_ce
-#   output: wc_pred_ce
-#   run:
-#     import predict
-#     predict.centers(input[0],input[1],output[0])
-
-# rule denoise_predict:
-#   input: wc_raw_ce, denoise_wc_train_ce
-#   output: denoise_wc_pred_ce
-#   run:
-#     import predict
-#     predict.denoise(input[0],input[1],output[0])
-
-# rule predict_pts:rule cele_centers:
-#   input: "/projects/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/02/t{i}.tif"
-#   output: "/projects/project-broaddus/devseg_2/e03_celedet/test_02/pred/Fluo-N3DH-CE/02/t{i}.tif"
-#   run:
-#     import predict
-#     net = predict.net_cele_centers()
-#     predict.cele_centers(net,input[0],output[0])
-
-# rule cele_points:
-#   input: [f"/projects/project-broaddus/devseg_2/e03_celedet/test_02/pred/Fluo-N3DH-CE/02/t{i:03d}.tif" for i in range(190)]
-#   output: "/projects/project-broaddus/devseg_2/e03_celedet/test_02/pts/Fluo-N3DH-CE/02/traj.pkl"
-#   run:
-#     import predict
-#     predict.cele_points(input,output[0])
-
-# ## Tribolium 2D stuff
-
-# rule trib2d_train:
-#   output: "/projects/project-broaddus/devseg_2/e05_trib2d/t{train}/m/net12.pt"
-#   run:
-#     import detect_trib2d
-#     savedir = Path(output[0]).parent.parent
-#     m,vd,td,ta = detect_trib2d.init(savedir,wildcards.train)
-#     detect_trib2d.train(m,vd,td,ta)
-
-# rule trib2d_centers:
-#   input: 
-#     "/projects/project-broaddus/rawdata/trib_isbi_proj/Fluo-N3DL-TRIC/{pred}/t{i}.tif",
-#     "/projects/project-broaddus/devseg_2/e05_trib2d/t{train}/m/net10.pt",
-#   output: "/projects/project-broaddus/devseg_2/e05_trib2d/t{train}/pred/Fluo-N3DL-TRIC/{pred}/t{i}.tif"
-#   run:
-#     import predict
-#     net = predict.trib2d_net(train=wildcards.train)
-#     predict.trib2d_centers(net,input[0],output[0])
-#   input: wc_pts_input_250
-#   output: wc_pts_ce
-#   run:
-#     import predict
-#     predict.points(input,output[0])
-
-# rule train:
-#   output: wc_train_ce
-#   run:
-#     import detect
-#     savedir = Path(output[0]).parent.parent
-#     m,d,td,ta = detect.init(savedir,int(wildcards.k))
-#     detect.train(m,d,td,ta)
-
-# C elegans
-
-# 
-
-## Tribolium 3D Stuff
-
-
-# rule trib3d_downsample:
-#   input: "/projects/project-broaddus/rawdata/trib_isbi/Fluo-N3DL-TRIF/{ab}/t{i}.tif"
-#   output: "/projects/project-broaddus/rawdata/trib_isbi/down/Fluo-N3DL-TRIF/{ab}/t{i}.tif"
-#   # output: "/projects/project-broaddus/devseg_2/e06_trib/pred/Fluo-N3DL-TRIF/02/t{i}.tif"
-#   run:
-#     import ipy
-#     ipy.downsample(input[0])
-
-# rule trib3d_centers:
-#   input:  "/projects/project-broaddus/rawdata/trib_isbi/down/Fluo-N3DL-TRIF/{ab}/t{i}.tif"
-#   output: "/projects/project-broaddus/devseg_2/e06_trib/pred/down/Fluo-N3DL-TRIF/{ab}/t{i}.tif"
-#   run:
-#     import predict
-#     predict.trib3d_centers(input[0])
-
-# rule trib3d_points:
-#   input:  "/projects/project-broaddus/devseg_2/e06_trib/pred/down/Fluo-N3DL-TRIF/{ab}/t{i}.tif"
-#   output: "/projects/project-broaddus/devseg_2/e06_trib/pts/down/Fluo-N3DL-TRIF/{ab}/t{i}.tif"
-#   run:
-#     import predict
-#     predict.trib3d_points(input[0])
-
-# rule denoise_train:
-#   output: wc_denoise_retina
-#   run:
-#     import denoise
-#     savedir = Path(output[0]).parent.parent
-#     m,d,td,ta = denoise.init(savedir,int(wildcards.k))
-#     denoise.train(m,d,td,ta)
-
-
-
+    import run_isbi_copy as run_isbi
+    config = run_isbi.choose_config_from_snakemake_wildcards(wildcards)
+    import predict_copy as predict
+    predict.total_matches(config.evaluator)
+    predict.rasterize_isbi_detections(config.evaluator)
+    predict.evaluate_isbi_DET(config.evaluator)
 
 
