@@ -4,11 +4,13 @@
 
 cmd = """
 mkdir -p snake_src01
-cp run_isbi.py snake_src01/run_isbi_copy.py
-cp detect_isbi.py snake_src01/detect_isbi_copy.py
-cp predict.py snake_src01/predict_copy.py
+cp experiments.py snake_src01/experiments_copy.py
+cp detector.py snake_src01/detector_copy.py
+cp isbi_tools.py snake_src01/isbi_tools_copy.py
 """
 
+import os
+import time
 from subprocess import run
 run([cmd],shell=True)
 
@@ -27,48 +29,43 @@ wildcard_constraints:
   # ed = 'e0[23]'
 
 from itertools import product
-import run_isbi_copy as run_isbi
-deps = run_isbi.build_snakemake_wcs()
+import experiments_copy
+deps = experiments_copy.build_snakemake_deps()
 
-map1 = dict(celegans_isbi='Fluo-N3DH-CE',fly_isbi='Fluo-N3DL-DRO',trib_isbi_proj='Fluo-N3DL-TRIC',trib_isbi='Fluo-N3DL-TRIF')
-# map2 = dict(celegans_isbi=celegans_isbi,fly_isbi=fly_isbi,trib_isbi_proj=trib_isbi_proj,trib_isbi=trib_isbi)
-
-rawdirs   = ['celegans_isbi'] #, 'fly_isbi', 'trib_isbi_proj', 'trib_isbi',]
-isbinames = [map1[r] for r in rawdirs]
-preds     = ['02'] #,'02']
-trains    = ['01'] #,'02']
+bad_nodes = ["r02n08"]
 
 rule runall:
   input:
-    [deps.DET_output.format(rawdir=r,isbiname=map1[r],pred=p,train_set=t) for r,p,t in product(rawdirs,preds,trains)]
+    deps.target
 
 rule isbi_train:
-  output: deps.trainout
+  output: deps.train.outputs
   run:
-    import run_isbi_copy as run_isbi
-    config = run_isbi.choose_config_from_snakemake_wildcards(wildcards)
-    import detect_isbi_copy as detect_isbi
-    T = detect_isbi.init(config.trainer)
-    detect_isbi.train(T,config.trainer)
+    print(os.uname())
+    # if os.uname().nodename in bad_nodes: time.sleep(60*60*8)
+    experiments_copy.isbi_train(input,output,wildcards)
 
 rule isbi_predict:
-  input:  deps.matches_inp_wc, deps.trainout
-  output: deps.matches_out_wc
+  input:  deps.pred.inputs
+  output: deps.pred.outputs, 
   run:
-    import run_isbi_copy as run_isbi
-    config = run_isbi.choose_config_from_snakemake_wildcards(wildcards)
-    import predict_copy as predict
-    predict.isbi_predict(config.predictor)
+    print(os.uname())
+    # if os.uname().nodename in bad_nodes: time.sleep(60*60*8)
+    experiments_copy.isbi_predict(input,output,wildcards)
 
 rule isbi_evaluate:
-  input:  deps.all_matches
-  output: deps.name_total_scores, deps.name_total_traj, deps.DET_output
+  input:  deps.eval.inputs
+  output: deps.eval.outputs
   run:
-    import run_isbi_copy as run_isbi
-    config = run_isbi.choose_config_from_snakemake_wildcards(wildcards)
-    import predict_copy as predict
-    predict.total_matches(config.evaluator)
-    predict.rasterize_isbi_detections(config.evaluator)
-    predict.evaluate_isbi_DET(config.evaluator)
+    print(os.uname())
+    experiments_copy.isbi_evaluate(input,output,wildcards)
+
+rule special:
+  run:
+    experiments_copy.special()
+
+
+
+
 
 

@@ -12,7 +12,7 @@ from pathlib import Path
 
 # from subprocess import Popen,run
 # from segtools.math_utils import conv_at_pts_multikern
-import files
+# import files
 # from segtools.numpy_utils import normalize3
 # from segtools.render import get_fnz_idx2d
 from segtools.ns2dir import load,save,flatten_sn,toarray
@@ -79,17 +79,33 @@ def job06():
     save(mx, maxdir / f't{i:03d}.png')
     print(i)
 
-
 def mantrack2pts(mantrack): return np.array([r.centroid for r in regionprops(mantrack)],np.int)
 
 def job08():
-  p = Path("../../rawdata/fly_isbi/Fluo-N3DL-DRO/02_GT/TRA/")
+  p = Path("../../rawdata/A549/Fluo-C3DH-A549/02_GT/TRA/")
   allpts = []
   for name in sorted(p.glob("*.tif")):
     print(name)
     lab = load(name)
     pts = mantrack2pts(lab)
     allpts.append(pts)
+  save(allpts, "/projects/project-broaddus/rawdata/A549/traj/Fluo-C3DH-A549/02_traj.pkl")
   return allpts
   
-
+def job09(deps):
+  p = deps.params
+  scores = []
+  # for total in deps.target:
+  for r,prd,t,tid,kxy,kz in itertools.product(p.rawdirs,p.preds,p.trains,p.tid_list,p.kernxy_list,p.kernz_list):
+    try:
+      total = deps.name_total_scores.format(rawdir=r,isbiname=p.map1[r],pred=prd,train_set=t,tid=tid,kernxy=float(kxy),kernz=float(kz))
+      tot = load(total)
+      tot.kxy = kxy
+      tot.kz = kz
+      tot.pred=prd
+      scores.append(tot)
+      print(kxy,kz,tot.f1)
+    except FileNotFoundError as e:
+      print(e)
+  save(scores,'/lustre/projects/project-broaddus/devseg_2/ex7/celegans_isbi/train1/allscores.pkl')
+  return scores

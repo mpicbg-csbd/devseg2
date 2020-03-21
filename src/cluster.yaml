@@ -9,7 +9,7 @@ __default__:
 
 isbi_predict:
   mem: "16000"
-  t: "00:10:00"
+  t: "00:00:30"
 
 isbi_evaluate:
   t: "04:00:00"
