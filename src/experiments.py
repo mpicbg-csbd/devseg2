@@ -32,7 +32,7 @@ but it is the actions that really do the work / require the resources / can have
 
 import detector
 import isbi_tools
-import train_StructN2V
+# import train_StructN2V
 import data_specific
 
 def add_defaults_to_namespace(namespace,defaults):
