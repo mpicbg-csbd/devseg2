@@ -28,7 +28,7 @@ from skimage.feature      import peak_local_max
 from skimage.measure      import regionprops
 
 from segtools.numpy_utils import collapse2, normalize3, plotgrid
-from segtools.math_utils import conv_at_pts4
+from segtools.math_utils import conv_at_pts4, conv_at_pts_multikern
 # from segtools import color
 from segtools import torch_models
 from segtools.point_matcher import match_points_single, match_unambiguous_nearestNeib

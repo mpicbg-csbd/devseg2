@@ -41,11 +41,11 @@ def evaluate_isbi_DET(base_dir,detname,pred='01',fullanno=True):
   "evalid is a unique ID that prevents us from overwriting DET_log files from different experiments predicting on the same data."
   fullanno = '' if fullanno else '0'
   DET_command = f"""
-  time /projects/project-broaddus/comparison_methods/EvaluationSoftware/Linux/DETMeasure {basedir} {pred} 3 {fullanno}
-  cd {basedir}/{pred}_RES/
+  time /projects/project-broaddus/comparison_methods/EvaluationSoftware/Linux/DETMeasure {base_dir} {pred} 3 {fullanno}
+  cd {base_dir}/{pred}_RES/
   mv DET_log.txt {detname}
   """
-  run([evaluator.DET_command],shell=True)
+  run([DET_command],shell=True)
 
 
 notes = """

@@ -252,17 +252,23 @@ def isbi_predict(inputs,outputs,wildcards):
 
 def test_isbi_evaluate():
   w = eg_wildcards()
-  print(w)
+
+  pp.pprint(w)
   deps = build_snakemake_deps()
   deps = reify_deps(deps.eval,w)
 
   # for d in deps.outputs:
   #   # Path(d).unlink()
   #   print(Path(d).exists())
+  print("\n\nstart\n\n")
+
   isbi_evaluate(deps.inputs, deps.outputs, w)
-  for d in deps.outputs[0]:
-    print(d)
-    print(Path(d).exists())
+  pp.pprint(deps.outputs)
+  # for d in deps.outputs[0]:
+  #   print(d)
+  #   print(Path(d).exists())
+
+import pprint as pp
 
 def isbi_evaluate(inputs,outputs,wildcards):
   wildcards = convert_snakemake_wcs(wildcards)
@@ -272,18 +278,25 @@ def isbi_evaluate(inputs,outputs,wildcards):
   # deps = build_snakemake_deps()
   # deps = reify_deps(deps,wildcards)
 
-  match_list   = [load(x) for x in inputs[0]]
+  print('\n\nabcdef\n\n')
+  # for x in inputs[0]: print(x)
+  pp.pprint(inputs)
+  print('\n\ngabay\n\n')
+
+  ## WARNING!!! snakemake will automatically collapse an input list of one element to just the element itself.
+  ## This means we 
+  match_list   = [load(x) for x in inputs]
   match_scores = point_matcher.listOfMatches_to_Scores(match_list)
   save(match_scores, outputs[0])
   print("SCORES: ", match_scores)  
-  traj = [load(x.replace("matches/","pts/")) for x in inputs[0]]
+  traj = [load(x.replace("matches/","pts/")) for x in inputs]
   save(traj, outputs[1])
 
   w = wildcards
   RESdir  = f"/projects/project-broaddus/rawdata/{w.rawdir}/{w.isbiname}/{w.pred}_RES/"
   eg_img  = f"/projects/project-broaddus/rawdata/{w.rawdir}/{w.isbiname}/{w.pred}/t000.tif"
 
-  detector.rasterize_detections(config, traj, load(eg_img).shape, RESdir, pts_transform = lambda x: x,)
+  detector.rasterize_detections(config, traj, load(eg_img).shape, Path(RESdir), pts_transform = lambda x: x,)
   base_dir = Path(RESdir).parent
   isbi_tools.evaluate_isbi_DET(base_dir,outputs[2],pred=wildcards.pred,fullanno=False)
 
@@ -293,7 +306,6 @@ def isbi_evaluate(inputs,outputs,wildcards):
 
 def special():
   print("test!!!!")
-
 
 notes = """
 
@@ -415,7 +427,9 @@ Q: how should we add the experiments on other random datasets to our current set
 - standardize directory structure to match isbi data, add to snakemake
 - 
 
+Sat Mar 21 20:26:36 2020
 
+Got DET score of 99.3!!! on 02 dataset after refactor!!!
 """
 
 
