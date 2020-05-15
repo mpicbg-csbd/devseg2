@@ -57,6 +57,30 @@ def _specialize_train(wildcards,loader,config):
   if wildcards.isbiname=="Fluo-N3DL-TRIC": ## 2d
     pass
   if wildcards.isbiname=="Fluo-N3DL-TRIF": ## 3d
+    config.pt_norm   = lambda pts: pts / 3
+    # config.pt_unnorm = lambda pts: pts * 3
+    # config.patch_space = np.array([64,64,64])
+  return loader,config
+
+def _specialize_eval(wildcards,loader,config):
+  """
+  All the data-specific param changes live in here
+  """
+  if wildcards.isbiname=="Fluo-C3DH-A549":
+    config.norm = lambda img: img/2000
+    config.bg_weight_multiplier = 0.1
+  if wildcards.isbiname=="Fluo-C3DL-MDA231":
+    config.norm = lambda img: img/4000
+  if wildcards.isbiname=="Fluo-N3DH-CE":
+    loader.traintimes     = [0,5,33,100,189]
+    loader.valitimes      = [0,1,180]
+    config.bg_weight_multiplier = 0.2
+  if wildcards.isbiname=="Fluo-N3DL-DRO":
     pass
+  if wildcards.isbiname=="Fluo-N3DL-TRIC": ## 2d
+    pass
+  if wildcards.isbiname=="Fluo-N3DL-TRIF": ## 3d
+    # config.pt_norm   = lambda pts: pts / 3
+    config.pt_unnorm = lambda pts: pts * 3
     # config.patch_space = np.array([64,64,64])
   return loader,config

@@ -1,21 +1,28 @@
 ## alias csnake='snakemake -j 1000 --cluster-config cluster.yaml --cluster "sbatch -J {rule} -p {cluster.p} --gres {cluster.gres} -n {cluster.n} -t {cluster.t} -c {cluster.c} --mem {cluster.mem} -o slurm/slurm-%j.out -e slurm/slurm-%j.err" '
 ## invoke with `csnake` in local (src) dir
 
-
-cmd = """
-mkdir -p snake_src01
-cp experiments.py snake_src01/experiments_copy.py
-cp detector.py snake_src01/detector_copy.py
-cp isbi_tools.py snake_src01/isbi_tools_copy.py
-"""
+# cmd = """
+# mkdir -p snake_src
+# for x in *.py;
+# cp experiments.py snake_src01/experiments.py
+# cp detector.py snake_src01/detector_copy.py
+# cp isbi_tools.py snake_src01/isbi_tools_copy.py
+# cp detector.py snake_src01/detector_copy.py
+# cp isbi_tools.py snake_src01/isbi_tools_copy.py
+# """
 
 import os
 import time
-from subprocess import run
-run([cmd],shell=True)
+# from subprocess import run
+# from pathlib import Path
+# import shutil
 
-import sys
-sys.path.append('snake_src01')
+# run([cmd],shell=True)
+# Path('snake_src').mkdir(exist_ok=True)
+# for x in Path('.').glob('*.py'):
+#   shutil.copy(x,Path('snake_src') / (x.stem + '_copy.py'))
+# import sys
+# sys.path.append('snake_src')
 
 localrules:
   runall,
@@ -28,22 +35,49 @@ wildcard_constraints:
   # k = '[0-9]{1,3}',
   # ed = 'e0[23]'
 
-from itertools import product
-import experiments_copy
-deps = experiments_copy.build_snakemake_deps()
+# from itertools import product
+import experiments
+deps = experiments.build_snakemake_deps()
+target = experiments.build_list_of_target_files()
 
 bad_nodes = ["r02n08"]
 
 rule runall:
   input:
-    deps.target
+    target
+
+# rule isbi_prep:
+#   input:  deps.prep.inputs
+#   output: deps.prep.outputs, 
+#   run:
+#     print(os.uname())
+#     # if os.uname().nodename in bad_nodes: time.sleep(60*60*8)
+#     experiments.isbi_prep(wildcards)
+
+rule isbi_prep_all:
+  input:  deps.prep_all.inputs
+  output: deps.prep_all.outputs, 
+  run:
+    print(os.uname())
+    # if os.uname().nodename in bad_nodes: time.sleep(60*60*8)
+    experiments.isbi_prep_all(wildcards)
+
+
+rule isbi_train_den:
+  input:  deps.train_den.inputs
+  output: deps.train_den.outputs, 
+  run:
+    print(os.uname())
+    # if os.uname().nodename in bad_nodes: time.sleep(60*60*8)
+    experiments.isbi_train_den(wildcards)
+
 
 rule isbi_train:
   output: deps.train.outputs
   run:
     print(os.uname())
     # if os.uname().nodename in bad_nodes: time.sleep(60*60*8)
-    experiments_copy.isbi_train(input,output,wildcards)
+    experiments.isbi_train(wildcards)
 
 rule isbi_predict:
   input:  deps.pred.inputs
@@ -51,21 +85,54 @@ rule isbi_predict:
   run:
     print(os.uname())
     # if os.uname().nodename in bad_nodes: time.sleep(60*60*8)
-    experiments_copy.isbi_predict(input,output,wildcards)
+    experiments.isbi_predict(wildcards)
 
 rule isbi_evaluate:
   input:  deps.eval.inputs
   output: deps.eval.outputs
   run:
     print(os.uname())
-    experiments_copy.isbi_evaluate(input,output,wildcards)
+    experiments.isbi_evaluate(wildcards)
+
+import ipy
 
 rule special:
+  input:
+    "job11_synthetic_membranes_1",
+    # "job12_horst_1",
+    # "job12_horst_2",
+    # "job12_horst_3",
+    # "job10_alex_retina_2D_1",
+    # "job10_alex_retina_3D_1",
+    # "job10_alex_retina_3D_2",
+
+rule job10_alex_retina_3D:
+  output: "job10_alex_retina_3D_{id}"
   run:
-    experiments_copy.special()
+    import ipy
+    _id = int(wildcards.id)
+    ipy.job10_alex_retina_3D(_id=_id)
 
+rule job10_alex_retina_2D:
+  output: "job10_alex_retina_2D_{id}"
+  run:
+    import ipy
+    _id = int(wildcards.id)
+    ipy.job10_alex_retina_2D(_id=_id)
 
+rule job11_synthetic_membranes:
+  output: "job11_synthetic_membranes_{id}"
+  run:
+    import ipy
+    id = int(wildcards.id)
+    ipy.job11_synthetic_membranes(_id=id)  
 
+rule job12_horst:
+  output: "job12_horst_{id}"
+  run:
+    import ipy
+    id = int(wildcards.id)
+    ipy.job12_horst(id=id)
 
 
 

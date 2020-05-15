@@ -1,3 +1,5 @@
+
+# %load ipy.py
 # import torch
 # from torch import nn
 # import torch_models
@@ -16,7 +18,7 @@ from pathlib import Path
 # from segtools.numpy_utils import normalize3
 # from segtools.render import get_fnz_idx2d
 from segtools.ns2dir import load,save,flatten_sn,toarray
-# from types import SimpleNamespace
+from types import SimpleNamespace
 
 
 ## one-time-tasks
@@ -109,3 +111,4 @@ def job09(deps):
       print(e)
   save(scores,'/lustre/projects/project-broaddus/devseg_2/ex7/celegans_isbi/train1/allscores.pkl')
   return scores
+

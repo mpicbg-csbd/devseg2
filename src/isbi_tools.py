@@ -24,8 +24,11 @@ def _load_isbi_training_data(times,loader,config):
   d = SimpleNamespace()
   d.input  = np.array([load(loader.input_dir / f"t{n:03d}.tif") for n in times])
   d.input  = config.norm(d.input)
-  # d.gt     = [mantrack2pts(load(config.TRAdir / f"man_track{n:03d}.tif")) for n in times]
-  d.gt     = np.array([load(loader.traj_gt_train)[n] for n in times])
+  try:
+    d.gt   = load(loader.traj_gt_train)
+  except:
+    d.gt   = [mantrack2pts(load(loader.TRAdir / f"man_track{n:03d}.tif")) for n in times]
+  d.gt     = np.array([config.pt_norm(x) for x in d.gt])
   d.target = detector._pts2target(d.gt,d.input[0].shape,config)
   d.target = d.target[:,None]
   d.input  = d.input[:,None]
@@ -46,6 +49,9 @@ def evaluate_isbi_DET(base_dir,detname,pred='01',fullanno=True):
   mv DET_log.txt {detname}
   """
   run([DET_command],shell=True)
+
+
+
 
 
 notes = """

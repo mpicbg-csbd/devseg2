@@ -65,6 +65,10 @@ def config(img_meta):
   ## prediction / evaluation / training
   config.f_net_args    = ((16,[[1],[1]]), dict(finallayer=torch_models.nn.Sequential)) ## *args and **kwargs
   config.norm          = lambda img: normalize3(img,2,99.4,clip=True)
+  ## TODO: add image config.unnorm : (img,norm_state) -> img # to be applied after prediction (only really important for N2V/restoration tasks)
+  ## Also, config.norm should return and image and a norm_state we can use later (But this data will get lost! train/eval/pred are separate tasks! we can save to disk in training_artifacts...)
+  config.pt_norm       = lambda pts: pts
+  config.pt_unnorm     = lambda pts: pts
   config.plm_footprint = np.ones((3,10,10))
   config.threshold_abs = 0.1
 
@@ -72,19 +76,19 @@ def config(img_meta):
   config.rescale_for_matching = (2,1,1)
   config.dub=10
 
-  ## training only
-  # kernz,kernxy = 1,7
-
+  ## training [detector only]
   config.sigmas       = np.array([1,7,7])
   config.kernel_shape = np.array([43,43,43]) ## 7sigma in each direction
-  config.sampler      = content_sampler
+  ## general img2img model ltraining
+  config.sampler      = flat_sampler
   config.patch_space  = np.array([16,128,128])
   config.patch_full   = np.array([1,1,16,128,128])
+  config.i_final      = 31*600
+  config.bp_per_epoch = 600
+  ## fg/bg weights stuff for fluorescence images & class-imbalanced data
   config.fg_bg_thresh = np.exp(-16/2)
   config.bg_weight_multiplier = 0.0
   config.weight_decay = True
-  config.i_final      = 31*600
-  config.bp_per_epoch = 600
 
   return config
 
@@ -149,10 +153,10 @@ def train(T):
       m.opt.step()
       m.opt.zero_grad()
 
-    ## monitoring training and validation
-
-    ta.losses.append(float(loss/w.mean()))
-    ta.heights.append(float(y.max()))
+    if ta.i%50==0:
+      ## monitoring training and validation ## takes 0.2 sec!!! so expensive!
+      ta.losses.append((loss/w.mean()).detach().cpu())
+      ta.heights.append(y.max().detach().cpu())
 
     if ta.i%100==0:
       print(f"i={ta.i:04d}, loss={np.mean(ta.losses[-100:])}", flush=True)

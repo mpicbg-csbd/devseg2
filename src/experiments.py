@@ -9,7 +9,7 @@ import numpy as np
 from skimage.measure  import regionprops
 from itertools import product
 
-
+import ipdb
 
 """
 EVALUATE_METHOD_ON_ALL_ISBI_DATASETS
@@ -29,6 +29,8 @@ for isbi_dataset in worm, fly, trib2d, trib3d
 a for loop is "parallel" if all the actions it contains (including child loops!) are independent conditioned on loop variable
 but it is the actions that really do the work / require the resources / can have dependence relations, not the for's.
 """
+
+import pprint as pp
 
 import detector
 import isbi_tools
@@ -68,12 +70,6 @@ def run_everything(rawdirs,train_sets=['01','02'],pred_sets=['01','02']):
 
 ## snakemake stuff
 
-def _all_matches(wc):
-  maxtime    = len(list(Path(f"/projects/project-broaddus/rawdata/{wc.rawdir}/{wc.isbiname}/{wc.pred}_GT/TRA/").glob("man_track*.tif")))
-  allmatches = [f"/projects/project-broaddus/devseg_2/ex7/{wc.rawdir}/train{wc.tid}/p{wc.param_id}/{wc.train_set}/matches/{wc.isbiname}/{wc.pred}/t{time:03d}.pkl" for time in range(maxtime)]
-  # allmatches = expand(deps.matches_out_wc,**)
-  return allmatches
-
 def apply_recursively_to_strings(obj,func,callable_arg=None):
   """
   apply func recursivly to obj, keeping nested structure.
@@ -111,9 +107,37 @@ def reify_deps(deps,wildcards):
 def build_snakemake_deps():
   deps = SimpleNamespace()
 
+  deps.train_den = SimpleNamespace()
+  deps.train_den.rawdir   = "/projects/project-broaddus/{rawdir}/{isbiname}/{train_set}/"
+  deps.train_den.traindir = "/projects/project-broaddus/devseg_2/ex_denoise/{rawdir}/train{tid}/p{param_id}/{train_set}/"
+  deps.train_den.best_model = deps.train_den.traindir + "m/net30.pt"
+  deps.train_den.inputs  = []
+  deps.train_den.outputs = [deps.train_den.best_model]
+
+  # deps.prep = SimpleNamespace()
+  # deps.prep.raw        = "/projects/project-broaddus/rawdata/{rawdir}/{isbiname}/{pred}/t{time}.tif"
+  # deps.prep.autocorr   = "/projects/project-broaddus/rawdata/{rawdir}/autocorr/{isbiname}/{pred}/t{time}.tif"
+  # deps.prep.inputs     = [deps.prep.raw, ] #[deps.pred.raw, deps.train.best_model, deps.pred.traj_gt]
+  # deps.prep.outputs    = [deps.prep.autocorr] #[deps.pred.matches, deps.pred.netpred, deps.pred.netpredmxz, deps.pred.pts,]
+
+  def _all_autocorr(wc):
+    maxtime    = len(list(Path(f"/projects/project-broaddus/rawdata/{wc.rawdir}/{wc.isbiname}/{wc.pred}_GT/TRA/").glob("man_track*.tif")))
+    raw   = [f"/projects/project-broaddus/rawdata/{wc.rawdir}/autocorr/{wc.isbiname}/{wc.pred}/t{time:03d}.tif" for time in range(maxtime)]
+    allac = [f"/projects/project-broaddus/rawdata/{wc.rawdir}/autocorr/{wc.isbiname}/{wc.pred}/t{time:03d}.tif" for time in range(maxtime)]
+    return [raw, allac]
+
+  deps.prep_all = SimpleNamespace()
+  deps.prep_all.rawdir        = "/projects/project-broaddus/rawdata/{rawdir}/{isbiname}/{pred}/"
+  deps.prep_all.avg        = "/projects/project-broaddus/rawdata/{rawdir}/autocorr/{isbiname}/{pred}/avg.tif"
+  deps.prep_all.inputs     = [] #[deps.pred.raw, deps.train.best_model, deps.pred.traj_gt]
+  deps.prep_all.outputs    = [deps.prep_all.avg] #[deps.pred.matches, deps.pred.netpred, deps.pred.netpredmxz, deps.pred.pts,]
+
+
   deps.train = SimpleNamespace()
+  deps.train.rawdir   = "/projects/project-broaddus/{rawdir}/{isbiname}/{train_set}/"
   deps.train.traindir = "/projects/project-broaddus/devseg_2/ex7/{rawdir}/train{tid}/p{param_id}/{train_set}/"
   deps.train.best_model = deps.train.traindir + "m/net22.pt"
+  deps.train.inputs = []
   deps.train.outputs = [deps.train.traindir, deps.train.best_model]
 
   deps.pred = SimpleNamespace()
@@ -126,38 +150,60 @@ def build_snakemake_deps():
   deps.pred.inputs     = [deps.pred.raw, deps.train.best_model, deps.pred.traj_gt]
   deps.pred.outputs    = [deps.pred.matches, deps.pred.netpred, deps.pred.netpredmxz, deps.pred.pts,]
 
+  def _all_matches(wc):
+    maxtime    = len(list(Path(f"/projects/project-broaddus/rawdata/{wc.rawdir}/{wc.isbiname}/{wc.pred}_GT/TRA/").glob("man_track*.tif")))
+    all_matches = [f"/projects/project-broaddus/devseg_2/ex7/{wc.rawdir}/train{wc.tid}/p{wc.param_id}/{wc.train_set}/matches/{wc.isbiname}/{wc.pred}/t{time:03d}.pkl" for time in range(maxtime)]
+    # allac = [f"/projects/project-broaddus/rawdata/{wc.rawdir}/autocorr/{wc.isbiname}/{wc.pred}/t{time}.tif" for time in range(maxtime)]
+    return all_matches
+
   deps.eval = SimpleNamespace()
   deps.eval.total_matches = deps.train.traindir + "matches/{isbiname}/{pred}/total_matches.pkl"
+  deps.eval.all_matches = _all_matches
   deps.eval.traj    = deps.train.traindir + "pts/{isbiname}/{pred}/traj.pkl"
   deps.eval.RESdir  = "/projects/project-broaddus/rawdata/{rawdir}/{isbiname}/{pred}_RES/"
-  deps.eval.DET     = deps.eval.RESdir + "DET_log_ts{train_set}_tid{tid}_p{param_id}.txt"
-  deps.eval.inputs  = [_all_matches,]
-  deps.eval.outputs = [deps.eval.total_matches, deps.eval.traj, deps.eval.DET]
-  
-  ## now let's reify target
-
-  p = SimpleNamespace()
-  p.map1 = dict(celegans_isbi='Fluo-N3DH-CE',fly_isbi='Fluo-N3DL-DRO',trib_isbi_proj='Fluo-N3DL-TRIC',trib_isbi='Fluo-N3DL-TRIF',A549="Fluo-C3DH-A549",MDA231="Fluo-C3DL-MDA231",)
-  # map2 = dict(celegans_isbi=celegans_isbi,fly_isbi=fly_isbi,trib_isbi_proj=trib_isbi_proj,trib_isbi=trib_isbi)
-  p.rawdirs   = ['celegans_isbi', 'MDA231'] #, 'fly_isbi', 'trib_isbi_proj', 'trib_isbi','A549', 'MDA231', ]
-  # p.isbinames = [p.map1[r] for r in p.rawdirs]
-  p.preds     = ['01','02'] #,'02']
-  p.trains    = ['02'] #,'02']
-  p.kernxy_list  = [7] #[1,3,5,7,9]
-  p.kernz_list   = [1,3] #[1,3,5]
-  p.tid_list     = [1,]
-  p.extra_params = list(product(p.kernxy_list,p.kernz_list))
-  p.param_id = np.arange(len(p.extra_params))
-  p.times = ['002']
-
-  iterator    = product(p.rawdirs,p.preds,p.trains,p.tid_list,p.param_id,p.times)
-  deps.target = [deps.eval.DET.format(rawdir=a,isbiname=p.map1[a],pred=b,train_set=c,tid=d,param_id=e,time=f) for a, b, c, d, e, f in iterator]
-  print(deps.target)
-  deps.p      = p
+  deps.eval.DETname = deps.eval.RESdir + "DET_log_ts{train_set}_tid{tid}_p{param_id}.txt"
+  deps.eval.inputs  = [deps.eval.all_matches,]
+  deps.eval.outputs = [deps.eval.total_matches, deps.eval.traj, deps.eval.DETname]
 
   return deps
+  
+def build_wildcard_list():
+  p = SimpleNamespace()
 
-# Wildcards = namedtuple(?)
+  p.map1 = {'celegans_isbi'  :'Fluo-N3DH-CE',
+            'fly_isbi'       :'Fluo-N3DL-DRO',
+            'trib_isbi_proj' :'Fluo-N3DL-TRIC',
+            'trib_isbi/down' :'Fluo-N3DL-TRIF',
+            'A549'           :"Fluo-C3DH-A549",
+            'MDA231'         :"Fluo-C3DL-MDA231",
+            }
+
+  p.rawdirs   = ['celegans_isbi', 'trib_isbi_proj', 'MDA231', 'fly_isbi', 'trib_isbi/down', 'A549', ]
+  p.preds     = ['01','02']
+  p.trains    = ['02',] #'02']
+  p.tid_list  = [1,]
+  p.times = ['002']
+
+  p.kernxy_list  = [7] #[1,3,5,7,9]
+  p.kernz_list   = [1,] #[1,3,5]
+  p.extra_params = list(product(p.kernxy_list,p.kernz_list))
+  p.param_id = np.arange(len(p.extra_params))
+
+  def _param_id2params(pid):
+    res = SimpleNamespace()
+    a,b = p.extra_params[pi]
+    res.kernxy = a
+    res.kernz  = b
+    return res
+  p.param_id2params = _param_id2params
+
+  def prod2wc(prod):
+    a,b,c,d,e,f = prod
+    wc = SimpleNamespace(rawdir=a,isbiname=p.map1[a],pred=b,train_set=c,tid=d,param_id=e,time=f)
+    return wc
+  p.wildcard_list = [prod2wc(x) for x in product(p.rawdirs,p.preds,p.trains,p.tid_list,p.param_id,p.times)]
+
+  return p
 
 def eg_wildcards():
   wildcards = SimpleNamespace(train_set='01',pred='01',time='all',tid=5,kernxy=7,kernz=1,rawdir='A549',isbiname='Fluo-C3DH-A549')
@@ -165,35 +211,102 @@ def eg_wildcards():
   wildcards = SimpleNamespace(train_set='02',pred='02',time='003',tid=5,param_id=0,rawdir='MDA231',isbiname='Fluo-C3DL-MDA231',)
   return wildcards
 
-def convert_snakemake_wcs(wildcards):
+def build_list_of_target_files():
   deps = build_snakemake_deps()
-  wildcards.tid      = int(wildcards.tid)
-  wildcards.kernxy   = deps.p.extra_params[int(wildcards.param_id)][0]
-  wildcards.kernz    = deps.p.extra_params[int(wildcards.param_id)][1]
-  wildcards.isbiname = deps.p.map1[wildcards.rawdir]
-  wildcards = add_defaults_to_namespace(wildcards,eg_wildcards()) ## adds time, pred, anything that we're missing
-  return wildcards
+  wcl  = build_wildcard_list()
+  def wc2files(wc):
+    maxtime    = len(list(Path(f"/projects/project-broaddus/rawdata/{wc.rawdir}/{wc.isbiname}/{wc.pred}_GT/TRA/").glob("man_track*.tif")))
+    # allmatches = [f"/projects/project-broaddus/devseg_2/ex7/{wc.rawdir}/train{wc.tid}/p{wc.param_id}/{wc.train_set}/matches/{wc.isbiname}/{wc.pred}/t{time:03d}.pkl" for time in range(maxtime)]
+    # autocorr   = [f"/projects/project-broaddus/rawdata/{wc.rawdir}/autocorr/{wc.isbiname}/{wc.pred}/t{time:03d}.tif" for time in range(maxtime)]
+    # return autocorr
+    target = deps.prep_all.avg.format(**wc.__dict__)
+    return target
+
+  list_of_target_files = [wc2files(wc) for wc in wcl.wildcard_list]
+  return list_of_target_files
+
+def autocorrelation(x):
+  """
+  2D autocorrelation
+  remove mean per-patch (not global GT)
+  normalize stddev to 1
+  autocorrelation at zero shift normalized to 1...
+  """
+  # assert x.ndim == 3
+  x = (x - np.mean(x))/np.std(x)
+  # x = np.pad(x, [(50,50),(50,50)], mode='constant')
+  x  = np.fft.fftn(x)
+  x  = np.abs(x)**2
+  x = np.fft.ifftn(x).real
+  x = x / x.flat[0]
+  x = np.fft.fftshift(x)
+  return x
 
 ## Below are entry points from snakemake
-def test_isbi_train():
-  w = eg_wildcards()
-  deps = build_snakemake_deps()
-  deps = reify_deps(deps.train,w)
-  isbi_train([],deps.outputs,w)
-  for d in deps.outputs:
-    print(d)
-    print(Path(d).exists())
 
-def isbi_train(inputs,outputs,wildcards):
-  
-  wildcards = convert_snakemake_wcs(wildcards)
+def isbi_prep_all(wildcards):
+  deps = build_snakemake_deps()
+  deps = reify_deps(deps.prep_all,wildcards)
+  # all_ac = np.array([load(x) for x in deps.all_ac])
+  all_ac = []
+  for name in sorted(Path(deps.rawdir).glob("t*.tif")):
+    print(name)
+    img = load(name)
+    if np.isnan(img).any(): ipdb.set_trace()
+    a,b,c = img.shape
+    autocorr = autocorrelation(img)
+    # ipdb.set_trace()
+    autocorr = autocorr[a//2-a//4:a//2+a//4, b//2-b//4:b//2+b//4, c//2-c//4:c//2+c//4]
+    all_ac.append(autocorr)
+  avg = np.array(all_ac).mean(0)
+  avg = avg.astype(np.float16)
+  save(avg, deps.avg) ## output
+  return all_ac
+
+def isbi_train_den(wildcards):
+  deps = build_snakemake_deps()
+  deps = reify_deps(deps.train_den,wildcards)
+
+  # wildcards = convert_snakemake_wcs(wildcards)
   img_meta  = data_specific._get_img_meta(wildcards)
-  config    = detector.config(img_meta)
+  config = denoiser.config(img_meta)
   
   ## update variables we want to control globally via snakemake
   config.savedir = outputs[0] #Path(f"/projects/project-broaddus/devseg_2/ex7/{w.rawdir}/train{w.tid}/{w.kernxy}_{w.kernz}/{w.train_set}/")
   w = wildcards
-  config.sigmas  = np.array([w.kernz,w.kernxy,w.kernxy])
+  wcl = build_wildcard_list()
+  params = wcl.param_id2params(w.param_id)
+  config.sigmas  = np.array([params.kernz, params.kernxy, params.kernxy])
+
+  loader = SimpleNamespace()
+  loader.input_dir     = Path(f"/projects/project-broaddus/rawdata/{w.rawdir}/{w.isbiname}/{w.train_set}/")
+  loader.traj_gt_train = Path(f"/projects/project-broaddus/rawdata/{w.rawdir}/traj/{w.isbiname}/{w.train_set}_traj.pkl")
+  maxtime_train        = len(list(loader.input_dir.glob("*.tif")))
+  _times = np.linspace(0,maxtime_train - 1,8).astype(np.int)
+  loader.valitimes     = _times[[2,5]]
+  loader.traintimes    = _times[[0,1,3,4,6,7]]  
+
+  ## update variables in a data-dependent way
+  loader,config = data_specific._specialize_train(wildcards,loader,config)
+
+  config.load_train_and_vali_data = lambda _config : isbi_tools.load_isbi_train_and_vali(loader,_config)
+
+  T = denoiser.train_init(config)
+  denoiser.train(T)
+
+def isbi_train(wildcards):
+  deps = build_snakemake_deps()
+  deps = reify_deps(deps.train,wildcards)
+  
+  img_meta  = data_specific._get_img_meta(wildcards)
+  config    = detector.config(img_meta)
+  
+  ## update variables we want to control globally via snakemake
+  config.savedir = deps.traindir
+  w = wildcards
+  wcl = build_wildcard_list()
+  params = wcl.param_id2params(w.param_id)
+  config.sigmas  = np.array([params.kernz, params.kernxy, params.kernxy])
 
   loader = SimpleNamespace()
   loader.input_dir     = Path(f"/projects/project-broaddus/rawdata/{w.rawdir}/{w.isbiname}/{w.train_set}/")
@@ -211,86 +324,53 @@ def isbi_train(inputs,outputs,wildcards):
   T = detector.train_init(config)
   detector.train(T)
 
-def test_isbi_predict():
-  w = eg_wildcards()
+def isbi_predict(wildcards):
   deps = build_snakemake_deps()
-  deps = reify_deps(deps.pred,w)
-  deps.inputs[1] = Path(deps.inputs[1]).parent / "net22.pt"
-
-  for d in deps.outputs:
-    Path(d).unlink()
-    print(Path(d).exists())
-  isbi_predict(deps.inputs, deps.outputs, w)
-  for d in deps.outputs:
-    print(d)
-    print(Path(d).exists())
-
-def isbi_predict(inputs,outputs,wildcards):
+  deps = reify_deps(deps.pred, wildcards)
   wildcards = convert_snakemake_wcs(wildcards)
   img_meta  = data_specific._get_img_meta(wildcards)
   config    = detector.config(img_meta)
 
   ## update config with global vars
-  config.best_model = inputs[1]
+  config.best_model = deps.best_model #inputs[1]
   
   ## data-dependent updates
   config = data_specific._specialize_predict(wildcards,config)
 
-  pts_gt  = load(inputs[2])[int(wildcards.time)]
-  raw     = load(inputs[0])
+  pts_gt  = load(deps.traj_gt)[int(wildcards.time)]
+  raw     = load(deps.raw)
+
   net     = detector._load_net(config)
   pred    = detector.predict_raw(config,net,raw)
   pts     = detector.predict_pts(config,pred)
   matches = detector.predict_matches(config,pts_gt,pts)
 
-  out_matches, out_netpred, out_netpredmxz, out_pts, = outputs
-  save(pred,out_netpred)
-  save(pred.max(0),out_netpredmxz)
-  save(pts,out_pts)
-  save(matches,out_matches)
+  save(pred,deps.netpred)
+  save(pred.max(0),deps.netpredmxz)
+  save(pts,deps.pts)
+  save(matches,deps.matches)
 
-
-def test_isbi_evaluate():
-  w = eg_wildcards()
-
-  pp.pprint(w)
+def isbi_evaluate(wildcards):
   deps = build_snakemake_deps()
-  deps = reify_deps(deps.eval,w)
+  deps = reify_deps(deps.eval,wildcards)
 
-  # for d in deps.outputs:
-  #   # Path(d).unlink()
-  #   print(Path(d).exists())
-  print("\n\nstart\n\n")
-
-  isbi_evaluate(deps.inputs, deps.outputs, w)
-  pp.pprint(deps.outputs)
-  # for d in deps.outputs[0]:
-  #   print(d)
-  #   print(Path(d).exists())
-
-import pprint as pp
-
-def isbi_evaluate(inputs,outputs,wildcards):
   wildcards = convert_snakemake_wcs(wildcards)
   img_meta  = data_specific._get_img_meta(wildcards)
   config    = detector.config(img_meta)
 
-  # deps = build_snakemake_deps()
-  # deps = reify_deps(deps,wildcards)
-
-  print('\n\nabcdef\n\n')
-  # for x in inputs[0]: print(x)
-  pp.pprint(inputs)
-  print('\n\ngabay\n\n')
-
-  ## WARNING!!! snakemake will automatically collapse an input list of one element to just the element itself.
-  ## This means we 
-  match_list   = [load(x) for x in inputs]
+  match_list   = [load(x) for x in deps.all_matches]
   match_scores = point_matcher.listOfMatches_to_Scores(match_list)
-  save(match_scores, outputs[0])
+
+  deps.eval.total_matches
+  deps.eval.traj
+  deps.eval.RESdir
+  deps.eval.DETname
+  deps.eval.allmatches
+
+  save(match_scores, deps.total_matches)
   print("SCORES: ", match_scores)  
-  traj = [load(x.replace("matches/","pts/")) for x in inputs]
-  save(traj, outputs[1])
+  traj = [load(x.replace("matches/","pts/")) for x in deps.all_matches]
+  save(traj, deps.traj)
 
   w = wildcards
   RESdir  = f"/projects/project-broaddus/rawdata/{w.rawdir}/{w.isbiname}/{w.pred}_RES/"
@@ -298,14 +378,15 @@ def isbi_evaluate(inputs,outputs,wildcards):
 
   detector.rasterize_detections(config, traj, load(eg_img).shape, Path(RESdir), pts_transform = lambda x: x,)
   base_dir = Path(RESdir).parent
-  isbi_tools.evaluate_isbi_DET(base_dir,outputs[2],pred=wildcards.pred,fullanno=False)
+  isbi_tools.evaluate_isbi_DET(base_dir,deps.DETname,pred=wildcards.pred,fullanno=False)
 
   # detector.total_matches(config.evaluator)
   # detector.rasterize_isbi_detections(config.evaluator)
   # detector.evaluate_isbi_DET(config.evaluator)
 
 def special():
-  print("test!!!!")
+  import ipy
+  ipy.job10_alex_retina_3D()
 
 notes = """
 
@@ -419,17 +500,35 @@ Only place where wildcards goes outside of experiments and Snakefile.
 only exists for coms between experiments and one function in isbi_tools.
 
 Q: how should we add the experiments on other random datasets to our current set of experiments?
-- new experiments file, snakemake wildcard control. vs data-specific config control.
-  - data-specific config knows about raw/gt location, image properties, and method's data-specific params.
-  - snakemake approach: data-specific config only knows about image properties and method's params, not file locations / dir structure.
+- new experiments file
+  - snakemake wildcard control vs.
+  - data-specific config control.
+    - data-specific config knows about raw/gt location, image properties, and method's data-specific params.
+    - snakemake approach: data-specific config only knows about image properties and method's params, not file locations / dir structure.
   - how do we know how many time points to use? look at gt files, not raw files.
   - what if meta-data is acquisition dependent? (a la in c. elegans where timestep and acquisition length differ?)
 - standardize directory structure to match isbi data, add to snakemake
-- 
+  - minimal extra code (basically zero)
+  - get parallel train/pred/eval for free
+  - no change to wildcard-based interface
+  - isbi file conventions may not translate (no DET/SEG/TRA ground truth? etc)
 
 Sat Mar 21 20:26:36 2020
 
 Got DET score of 99.3!!! on 02 dataset after refactor!!!
+
+Wed Mar 25 18:17:05 2020
+
+Now how are we going to add:
+- pixelwise classifiers for segmentation and kernel scaling?
+- evaluate SEG
+- other methods of kernel scaling?
+- tracking and track evaluation?
+- fisheye data...
+
+
+
+
 """
 
 

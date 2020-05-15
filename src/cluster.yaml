@@ -7,6 +7,16 @@ __default__:
   n: "1"
   c: "1"
 
+# isbi_prep:
+#   mem: "16000"
+#   t: "00:10:00"
+#   gres: "gpu:0"
+
+isbi_prep_all:
+  mem: "64000"
+  t: "12:00:00"
+  gres: "gpu:0"
+
 isbi_predict:
   mem: "16000"
   t: "00:00:30"
