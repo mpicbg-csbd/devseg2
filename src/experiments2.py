@@ -9,22 +9,44 @@ from skimage.feature  import peak_local_max
 from skimage.measure  import regionprops
 from pathlib import Path
 from segtools.ns2dir import load,save,flatten_sn,toarray
+from segtools import torch_models
 from types import SimpleNamespace
-import denoiser, denoise_utils, denoiser2d
+import denoiser, denoise_utils
+import torch
+from segtools.numpy_utils import normalize3, perm2, collapse2, splt
 
+def ipython():
+  """
+  ## blocking cuda enables straightforward time profiling
+  export CUDA_LAUNCH_BLOCKING=1
+  ipython
+  import denoiser
+  from segtools.ns2dir import load,save
+  import experiments2
+  import numpy as np
+  %load_ext line_profiler
+  """
+  pass
 
-## Alex's retina
+def qsave(img):
+  save(img.astype(np.float16),"qsave.tif")
 
-def job10_alex_retina_3D(_id=1):
-  img = load("../raw/every_30_min_timelapse.tiff")
-  T   = _job10_a(img,_id=_id)
+## Alex's retina 3D
+
+def job10_alex_retina_3D(_id=1,img=None):
+  if img is None: img = load("../raw/every_30_min_timelapse.tiff")
+
+  cfig = _job10_alex_retina_3D(img,_id=_id)
+  T = denoiser.train_init(cfig)
+
   denoiser.train(T)
-  res = denoiser.predict_raw(T, T.td.input[0,0])
+  # torch_models.gc.collect()
+  res = denoiser.predict_raw(T.m.net,img[33], dims="ZYX", ta=T.ta, D_zyx=(16,256,256)) # pp_zyx=(4,16,16), D_zyx=(16,200,200))
   save(res,T.config.savedir / 'pred_t33.tif')
-  # res = denoiser.predict_raw(T, T.td.input[0,0])
+  # res = denoiser.predict_raw(T.m.net, T.td.input[0,0],ta=T.ta)
   # save(res,T.config.savedir / 'td_pred3d.tif')
 
-def _job10_a(img,_id=1):
+def _job10_alex_retina_3D(img,_id=1):
   """
   load image, train net, predict, save
   img data already normalized (and possibly even clipped poorly)
@@ -32,198 +54,225 @@ def _job10_a(img,_id=1):
   
   cfig = denoiser.config(denoiser.eg_img_meta())
 
+  # t=100
+  # cfig.times = [1,10,t//10,t//4,t]
+  t=100_000
+  cfig.times = [10,100,t//20,t//10,t]
+  cfig.lr = 1e-4
+  cfig.batch_space  = np.array([16,128,128])
+  cfig.batch_shape  = np.array([1,1,16,128,128])
+  cfig.sampler      = denoiser.flat_sampler
+  cfig.getnet       = lambda : torch_models.Unet2(16, [[1],[1]], pool=(1,2,2), kernsize=(3,5,5), finallayer=torch_models.nn.Sequential)
+
   if _id==1:
     # kern = np.zeros((1,1,1)) ## must be odd
     # kern[0,0,0]  = 2
     # cfig.mask = kern
-    cfig.savedir = '../e01_alexretina/timelapse/'
-    cfig.masker = denoise_utils.nearest_neib_sampler
+    cfig.savedir = Path('../e01_alexretina/v2_timelapse1/')
+    # cfig.best_model = '../e01_alexretina/v2_timelapse1/m/'
+    cfig.masker  = denoise_utils.nearest_neib_masker
   if _id==2:
     kern = np.zeros((40,1,1)) ## must be odd
     kern[:,0,0]  = 1
     kern[20,0,0] = 2
     cfig.mask = kern
-    cfig.savedir = '../e01_alexretina/timelapse2/'
-    cfig.masker  = denoise_utils.footprint_sampler
+    cfig.savedir = Path('../e01_alexretina/v2_timelapse2/')
+    # cfig.best_model = '../e01_alexretina/v2_timelapse2/m/'
+    cfig.masker  = denoise_utils.structN2V_masker
   if _id==3:
     kern = np.zeros((40,1,1)) ## must be odd
     kern[:,0,0]  = 1
     kern[20,0,0] = 2
     cfig.mask = kern
-    cfig.savedir = '../e01_alexretina/timelapse_test/'
-    cfig.i_final = 2001
-
-  cfig.i_final      = 10**5
-  cfig.bp_per_epoch = 4*10**3
-  cfig.lr = 1e-4
+    cfig.masker  = denoise_utils.footprint_masker
+    cfig.savedir = Path('../e01_alexretina/v2_timelapse3/')
+    # cfig.best_model = '../e01_alexretina/v2_timelapse3/m/'
 
   def _ltvd(config):
-    td = SimpleNamespace()
-    vd = SimpleNamespace()
-    
-    td.input  = img[None,None,30]
-    td.target = img[None,None,30]
+    td = SimpleNamespace()    
+    td.input  = img[[33],None]
+    td.target = img[[33],None]
     denoiser.add_meta_to_td(td)
-    
-    vd.input  = img[None,None,33]
-    vd.target = img[None,None,33]
+    vd = SimpleNamespace()
+    vd.input  = img[[30],None]
+    vd.target = img[[30],None]
     denoiser.add_meta_to_td(vd)
-
     return td,vd
+
   cfig.load_train_and_vali_data = _ltvd
 
-  T = denoiser.train_init(cfig)
-  return T
+  return cfig
 
-def job10_alex_retina_2D(_id=0):
+## Alex's retina 2D
+
+def job10_alex_retina_2D(_id=1):
   img = load("../raw/every_30_min_timelapse.tiff")
-  T = _job10_b(img)
-  denoiser2d.train(T)
-  # res = denoiser2d.predict_raw(T, T.td.input[0,0])
-  _predict_and_save_2D(T,img)
+  cfig = _job10_alex_retina_2D(img,_id=_id)
+  T = denoiser.train_init(cfig)
+  denoiser.train(T)
+  res = denoiser.predict_raw(T.m.net,img[33,:,None],dims="NCYX",ta=T.ta)
+  # save(res.astype(np.float16),T.config.savedir / 'pred_t33.tif')
 
-def _predict_and_save_2D(T,img):
-  res = []
-  for i in range(img[33].shape[0]):
-    res.append(denoiser2d.predict_raw(T,img[33,[i]]))
-  res = np.array(res)
-  save(res.astype(np.float16),T.config.savedir / 'pred_t33.tif')
-  save(res[20,0],T.config.savedir / 'pred_t33_z20.tif')
-  return res
-
-def _job10_b(img):
+def _job10_alex_retina_2D(img,_id=1):
   """
   load image, train net, predict, save
   img data already normalized (and possibly even clipped poorly)
   """
   
-  cfig = denoiser2d.config(denoiser2d.eg_img_meta())
-
-  # # 1
-  # kern = np.zeros((40,1,1)) ## must be odd
-  # kern[:,0,0]  = 1
-  # kern[20,0,0] = 2
-  # cfig.mask = kern
-  # cfig.savedir = '../e01_alexretina/timelapse/'
+  cfig = denoiser.config(denoiser.eg_img_meta())
+  t=100_000
+  cfig.times = [10,100,t//20,t//10,t]
+  cfig.lr = 1e-4
+  cfig.batch_space  = np.array([512,512])
+  cfig.batch_shape  = np.array([1,1,512,512])
+  cfig.sampler      = denoiser.flat_sampler
+  cfig.getnet       = lambda : torch_models.Unet3(16, [[1],[1]], pool=(2,2), kernsize=(5,5), finallayer=torch_models.nn.Sequential)
 
   ## 2
-  kern = np.zeros((1,1)) ## must be odd
-  kern[0,0]  = 2
-  cfig.mask = kern
-  cfig.savedir = '../e01_alexretina/timelapse2_2d/'
-
-  cfig.i_final      = 10**5
-  cfig.bp_per_epoch = 4*10**3
-  cfig.lr = 1e-4
+  if _id==1:
+    cfig.masker  = denoise_utils.nearest_neib_masker
+    cfig.savedir = Path('../e01_alexretina/v2_timelapse2d_0/')
 
   def _ltvd(config):
     td = SimpleNamespace()
-    vd = SimpleNamespace()
-    
-    # td.input  = img[None,None,30,20]
-    # td.target = img[None,None,30,20]
-    td.input  = img[30,:,None]
-    td.target = img[30,:,None]
-    denoiser2d.add_meta_to_td(td)
-    
-    # vd.input  = img[None,None,33,20]
-    # vd.target = img[None,None,33,20]
-    vd.input  = img[33,:,None]
-    vd.target = img[33,:,None]
-    denoiser2d.add_meta_to_td(vd)
+    td.input  = img[33,:,None]
+    td.target = img[33,:,None]
+    denoiser.add_meta_to_td(td)    
+    vd = SimpleNamespace()    
+    vd.input  = img[30,:,None]
+    vd.target = img[30,:,None]
+    denoiser.add_meta_to_td(vd)
 
     return td,vd
   cfig.load_train_and_vali_data = _ltvd
 
-  T = denoiser2d.train_init(cfig)
-  return T
+  return cfig
 
 ## Alex's synthetic membranes
 
 def job11_synthetic_membranes(_id=1):
-  signal = load('/projects/project-broaddus/rawdata/synth_membranes/gt.npy')
+  signal = load('/projects/project-broaddus/rawdata/synth_membranes/gt.npy')[:6000]
 
   from scipy.ndimage import convolve
   def f():
-    noise = []
     kern  = np.array([[1,1,1]])/3
     a,b,c = signal.shape
+    res = []
     for i,_x in enumerate(signal):
       noise = np.random.rand(b,c)
       noise = convolve(noise,kern)
       noise = noise-noise.mean()
-      noise.append(noise)
-    return np.array(noise)
+      res.append(noise)
+    return np.array(res)
   noise = f()
-  noisy_dataset = signal + noise
+  X = signal + noise
 
-  mu,sig = np.mean(noisy_dataset), np.std(noisy_dataset)
-  X = (noisy_dataset-mu)/sig
   X = X[:,None]
-  T = _job11_synthetic_membranes(X,_id=_id)
+  cfig = _job11_synthetic_membranes(X,_id=_id)
+  T = denoiser.train_init(cfig)
 
   save(noise, T.config.savedir / 'noise.npy')
 
-  denoiser2d.train(T)
-  X = X[:6000].reshape([12,500,1,128,128])
-  res = denoiser2d.predict_raw(T,X,dims="NBCYX")
-  res = res.reshape([12*500,1,128,128])
-  res = res*sig + mu
+  denoiser.train(T)
+  X = X.reshape([500,12,1,128,128])
+  res = denoiser.predict_raw(T.m.net,X,dims="NBCYX",ta=T.ta)
+  res = res.reshape([12*500,128,128])
   save(res[::10].astype(np.float16),T.config.savedir / 'pred.npy')
 
-def _job11_synthetic_membranes(noisy_data,_id=1):
+def _job11_synthetic_membranes(X,_id=1):
   """
-  noisy_data is synthetic membranes with noisy values in [0,2]
+  X is synthetic membranes with noisy values in [0,2]
   """
   
-  cfig = denoiser2d.config(denoiser2d.eg_img_meta())
+  cfig = denoiser.config(denoiser.eg_img_meta())
+  t=100_000
+  cfig.times = [10,100,t//20,t//10,t]
+  cfig.lr = 1e-4
+  cfig.batch_space  = np.array([128,128])
+  cfig.batch_shape  = np.array([1,1,128,128])
+  cfig.sampler      = denoiser.flat_sampler
+  cfig.getnet       = lambda : torch_models.Unet2(16, [[1],[1]], pool=(2,2), kernsize=(3,3), finallayer=torch_models.nn.Sequential)
 
   if _id==1:
     kern = np.array([[0,0,0,1,1,1,1,1,0,0,0]])
     cfig.mask = kern
-    cfig.masker = denoise_utils.apply_structN2Vmask
-    cfig.savedir = '../e07_synmem/t01/'
-
-  cfig.i_final      = 10**5
-  cfig.bp_per_epoch = 4*10**3
-  cfig.lr = 1e-4
-  cfig.patch_space  = np.array([128,128])
-  cfig.patch_full   = np.array([1,1,128,128])
+    cfig.masker = denoise_utils.structN2V_masker
+    cfig.savedir = Path('../e07_synmem/v2_t01/')
+  if _id==2:
+    kern = np.array([[0,0,0,0,1,1,1,0,0,0,0]])
+    cfig.mask = kern
+    cfig.masker = denoise_utils.structN2V_masker
+    cfig.savedir = Path('../e07_synmem/v2_t02/')
+  if _id==3:
+    kern = np.array([[0,0,0,0,0,1,0,0,0,0,0]])
+    cfig.mask = kern
+    cfig.masker = denoise_utils.structN2V_masker
+    cfig.savedir = Path('../e07_synmem/v2_t03/')
 
   def _ltvd(config):
     td = SimpleNamespace()
-    td.input  = noisy_data[800:]
-    td.target = noisy_data[800:]
-    denoiser2d.add_meta_to_td(td)
-    vd = SimpleNamespace()
-    vd.input  = noisy_data[:800:40]
-    vd.target = noisy_data[:800:40]
-    denoiser2d.add_meta_to_td(vd)
+    td.input  = X[:-50]
+    td.target = X[:-50]
+    denoiser.add_meta_to_td(td)    
+    vd = SimpleNamespace()    
+    vd.input  = X[-50:]
+    vd.target = X[-50:]
+    denoiser.add_meta_to_td(vd)
+
     return td,vd
 
   cfig.load_train_and_vali_data = _ltvd
-
-  T = denoiser2d.train_init(cfig)
-  return T
+  return cfig
 
 def j11_sm_analysis():
-  data = load('/projects/project-broaddus/rawdata/synth_membranes/gt.npy')
-
+  signal = load('/projects/project-broaddus/rawdata/synth_membranes/gt.npy')[:6000:10]
+  noise  = load('/projects/project-broaddus/devseg_2/e07_synmem/v2_t01/noise.npy')[:6000:10]
+  pred   = load('/projects/project-broaddus/devseg_2/e07_synmem/v2_t01/pred.npy')
+  diff   = signal + noise - pred
+  print(signal.mean(), noise.mean(), pred.mean(), diff.mean())
+  """
+  most of the errors that i see are on membranes along the _horizontal_, i.e. the axis of the noise.
+  This is totally 
+  """
 
 ## horst's calcium images
 
 def job12_horst(id=1):
-  img = load('/projects/project-broaddus/rawdata/HorstObenhaus/img60480.npy')
-  img = img[:,None]
-  mu,sig = np.mean(img),np.std(img)
-  img = (img-mu)/sig
-  T   = _job12_horst(img,id=id)
 
-  denoiser2d.train(T)
-  res = denoiser2d.predict_raw(T,img.reshape([10,10,1,512,512]),dims="NBCYX")
-  res = img*sig + mu
-  res = res.astype(np.int16)
-  save(res,T.config.savedir / 'pred.npy')
+  # if id>4: img = load('/projects/project-broaddus/rawdata/HorstObenhaus/img88592.npy')
+  # else: img = load('/projects/project-broaddus/rawdata/HorstObenhaus/img60480.npy')
+  img = load('/projects/project-broaddus/rawdata/HorstObenhaus/img60480.npy')
+  # if id==9:
+  #   img = load('/projects/project-broaddus/rawdata/HorstObenhaus/img88592.npy')
+  #   _job12_nlm_horst(img)
+  #   return
+
+  img = img[:,None]
+  cfig = _job12_horst(img,id=id)
+
+  # T   = denoiser.train_init(cfig)
+  # denoiser.train(T)
+  # net, ta = T.m.net, T.ta
+  ta = None
+  net = cfig.getnet().cuda()
+  net.load_state_dict(torch.load(cfig.best_model))
+
+  res = denoiser.predict_raw(net,img.reshape([10,10,1,512,512]),dims="NBCYX",ta=ta)
+  save(res,cfig.savedir / 'pred.npy')
+
+# def _job12_nlm_horst(img):
+#   import gputools
+#   # img = img[0]
+#   # res = gputools.denoise.nlm2(img)
+#   # res = np.array([gputools.denoise.nlm2(img[i],np.log10(-2 + i/25)) for i in range(100)]) # sig
+#   # res = np.array([gputools.denoise.nlm2(img[i],-0.5 + i/33) for i in range(100)]) # sig2
+#   # img = img[0]
+#   img = normalize3(img,2,99)
+#   res = np.array([gputools.denoise.nlm2(img[i],-0.5 + i/33,size_filter=i%10,size_search=i//10) for i in range(100)]) # sig2
+#   res = res.reshape([10,10,512,512])
+#   save(res,'../e08_horst/nlm2d/pred3.npy')
+#   res = res.reshape([10,10,512,512])
+#   save(res,'../e08_horst/nlm2d/pred3.npy')
 
 def _job12_horst(data,id=1):
   """
@@ -231,46 +280,122 @@ def _job12_horst(data,id=1):
   data.noisy_data is synthetic membranes with noisy values in [0,2]
   """
   
-  cfig = denoiser2d.config(denoiser2d.eg_img_meta())
+  cfig = denoiser.config(denoiser.eg_img_meta())
 
-  if id==1:
+  t=1_000
+  cfig.times = [10,100,t//50,t//50,t]
+  cfig.lr = 1e-4
+  cfig.batch_space  = np.array([512,512])
+  cfig.batch_shape  = np.array([1,1,512,512])
+  cfig.sampler      = denoiser.flat_sampler
+  cfig.getnet       = lambda : torch_models.Unet2(16, [[1],[1]], pool=(2,2), kernsize=(5,5), finallayer=torch_models.nn.Sequential)
+
+  if id in [1,5]:
+    kern = np.array([[1,1,1,1,1]])
+    cfig.mask = kern
+    cfig.masker = denoise_utils.structN2V_masker
+  if id in [2,6]:
     kern = np.array([[1,1,1]])
     cfig.mask = kern
-    cfig.masker = denoise_utils.apply_structN2Vmask
-    cfig.savedir = '../e08_horst/tt01/'
-  elif id==2:
+    cfig.masker = denoise_utils.structN2V_masker
+  elif id in [3,7]:
     kern = np.array([[1]])
     cfig.mask = kern
-    cfig.masker = denoise_utils.apply_structN2Vmask
-    cfig.savedir = '../e08_horst/tt02/'
-  elif id==3:
-    # kern = np.array([[1]])
-    # cfig.mask = kern
-    cfig.masker = denoise_utils.nearest_neib_sampler
-    cfig.savedir = '../e08_horst/tt03/'
+    cfig.masker = denoise_utils.structN2V_masker
+  elif id in [4,8]:
+    cfig.masker = denoise_utils.nearest_neib_masker
 
-  cfig.i_final      = 10**3
-  cfig.bp_per_epoch = 4*10**1
-  cfig.lr = 1e-4
-  cfig.patch_space  = np.array([512,512])
-  cfig.patch_full   = np.array([1,1,512,512])
-  # cfig.norm  = lambda x: normalize3(x,2,99.6,clip=False)
+  cfig.savedir = Path(f'../e08_horst/v2_t{id:02d}/')
+  cfig.best_model = Path(f'../e08_horst/v2_t{id-4:02d}/') / 'm/net049.pt'
 
   def _ltvd(config):
     td = SimpleNamespace()
-    vd = SimpleNamespace()    
     td.input  = data[:95]
     td.target = data[:95]
-    denoiser2d.add_meta_to_td(td)
+    denoiser.add_meta_to_td(td)
+    vd = SimpleNamespace()
     vd.input  = data[95:]
     vd.target = data[95:]
-    denoiser2d.add_meta_to_td(vd)
-
+    denoiser.add_meta_to_td(vd)
     return td,vd
   cfig.load_train_and_vali_data = _ltvd
 
-  T = denoiser2d.train_init(cfig)
-  return T
+  return cfig
+
+## mangal's nuclei
+
+def job13_mangal(id=3):
+  img = load('/projects/project-broaddus/rawdata/mangal_nuclei/2020_08_01_noisy_images_sd4_example1.tif')
+  img = img[:,None]
+  cfig = _job13_mangal(img,id=id)
+
+  T   = denoiser.train_init(cfig)
+
+  denoiser.train(T)
+  net, ta = T.m.net, T.ta
+  # ta = None
+  # net = cfig.getnet().cuda()
+  # net.load_state_dict(torch.load(cfig.best_model))
+
+  res = denoiser.predict_raw(net,img.reshape([25,4,1,1024,1024]),dims="NBCYX",ta=ta)
+  save(res,cfig.savedir / 'pred.npy')
+
+def _job13_mangal(data,id):
+  """
+  data is nuclei images with most values in {0,1} and shape 1x100x1024x1024 with dims "SCYX"
+  """
+  
+  cfig = denoiser.config(denoiser.eg_img_meta())
+
+  t=100_000
+  cfig.times = [10,t//100,t//20,t//20,t]
+  cfig.lr = 1e-4
+  cfig.batch_space  = np.array([1024,1024])
+  cfig.batch_shape  = np.array([1,1,1024,1024])
+  cfig.sampler      = denoiser.flat_sampler
+  cfig.getnet       = lambda : torch_models.Unet2(16, [[1],[1]], pool=(2,2), kernsize=(5,5), finallayer=torch_models.nn.Sequential)
+
+  if id in [0,1,5]:
+    kern = np.array([[1,1,1,1,1]])
+    cfig.mask = kern
+    cfig.masker = denoise_utils.structN2V_masker
+  if id in [2,6]:
+    kern = np.array([[1,1,1]])
+    cfig.mask = kern
+    cfig.masker = denoise_utils.structN2V_masker
+  elif id in [3,7]:
+    kern = np.array([[1]])
+    cfig.mask = kern
+    cfig.masker = denoise_utils.structN2V_masker
+  elif id in [4]:
+    kern = np.array([[1,1,1,1,1,1,1,1,1]])
+    cfig.mask = kern
+    cfig.masker = denoise_utils.structN2V_masker    
+  elif id in [8]:
+    cfig.masker = denoise_utils.nearest_neib_masker
+
+  cfig.savedir = Path(f'../e09_mangalnuclei/v3_t{id:02d}/')
+  # cfig.best_model = Path(f'../e08_horst/v2_t{id-4:02d}/') / 'm/net049.pt'
+
+  def _ltvd(config):
+    td = SimpleNamespace()
+    td.input  = data[:95]
+    td.target = data[:95]
+    denoiser.add_meta_to_td(td)
+    vd = SimpleNamespace()
+    vd.input  = data[95:]
+    vd.target = data[95:]
+    denoiser.add_meta_to_td(vd)
+    return td,vd
+  cfig.load_train_and_vali_data = _ltvd
+
+  return cfig
+
+
+
+
+if __name__ == '__main__':
+  job12_horst(id=4)
 
 
 history = """
@@ -283,5 +408,15 @@ But that is the clearest image we have?
 param-free experiments are different from "one time tasks".
 They need to be re-executed as we change the internal params, but they don't need to follow the standard experiment interface with wildcard params.
 Ideally we could easily rerun all of them (in parallel). This is possible if we connect them properly to snakemake.
+
+# Sat May 23 18:01:49 2020
+
+We have two Horst datasets. Should we train on one, pred on the other? Or do it 2-way cross validation?
+
+# Wed Aug  5 13:28:58 2020
+
+Adding Mangal's nuclei datasets to see if my code produces stripes like the juglab StructN2V implementation does.
+
+
 
 """

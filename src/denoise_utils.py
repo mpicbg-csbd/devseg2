@@ -3,7 +3,7 @@ import ipdb
 from segtools.math_utils import conv_at_pts4
 import itertools
 
-def nearest_neib_sampler(x,yt,T):
+def nearest_neib_masker(x,yt,T):
   sh = x.shape[2:]
   ndim = len(sh)
   frac = 0.01
@@ -22,7 +22,7 @@ def nearest_neib_sampler(x,yt,T):
 
   return x,yt,_w
 
-def apply_structN2Vmask(x,yt,T):
+def structN2V_masker(x,yt,T):
   """
   each point in coords corresponds to the center of the mask.
   then for point in the mask with value=1 we assign a random value
@@ -56,7 +56,7 @@ def apply_structN2Vmask(x,yt,T):
 
   return x,yt,w
 
-def footprint_sampler(x,yt,T):
+def footprint_masker(x,yt,T):
   # patch_space = x.shape
   kern = T.config.mask
   ma = mask_from_footprint(x.shape[2:],kern,)
@@ -112,18 +112,3 @@ def sparse_3set_mask(d):
   ma = ma.astype(np.uint8)
   ma[z_inds,y_inds,x_inds] = 2
   return ma
-
-
-def memReport():
-  for obj in gc.get_objects():
-      if torch.is_tensor(obj):
-          print(type(obj), obj.size())
-    
-def cpuStats():
-        print(sys.version)
-        print(psutil.cpu_percent())
-        print(psutil.virtual_memory())  # physical memory usage
-        pid = os.getpid()
-        py = psutil.Process(pid)
-        memoryUse = py.memory_info()[0] / 2. ** 30  # memory use in GB...I think
-        print('memory GB:', memoryUse)

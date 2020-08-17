@@ -28,7 +28,7 @@ from skimage.feature      import peak_local_max
 from skimage.measure      import regionprops
 
 from segtools.numpy_utils import collapse2, normalize3, plotgrid
-from segtools.math_utils import conv_at_pts4
+
 # from segtools import color
 from segtools import torch_models
 from segtools.point_matcher import match_points_single, match_unambiguous_nearestNeib
@@ -39,16 +39,16 @@ import collections
 
 from denoise_utils import nearest_neib_sampler, footprint_sampler
 
+
 def setup_dirs(savedir):
   if savedir.exists(): shutil.rmtree(savedir)
   savedir.mkdir(exist_ok=True,parents=True)
   (savedir/'m').mkdir(exist_ok=True)
-  shutil.copy("/projects/project-broaddus/devseg_2/src/denoiser2d.py",savedir)
-
+  shutil.copy("/projects/project-broaddus/devseg_2/src/denoiser.py",savedir)
 
 def eg_img_meta():
   img_meta = SimpleNamespace()
-  img_meta.voxel_size = np.array([0.09,0.09])
+  img_meta.voxel_size = np.array([1.0,0.09,0.09])
   img_meta.time_step  = 1 ## 1.5 for second dataset?
   return img_meta
 
@@ -68,7 +68,7 @@ def config(img_meta):
   config.pt_unnorm     = lambda pts: pts
 
   ## evaluation / training
-  config.rescale_for_matching = (1,1)
+  config.rescale_for_matching = (2,1,1)
   config.dub=10
 
   ## training [detector only]
@@ -77,8 +77,8 @@ def config(img_meta):
   ## general img2img model ltraining
   config.sampler      = flat_sampler
   config.masker       = nearest_neib_sampler
-  config.patch_space  = np.array([512,512])
-  config.patch_full   = np.array([1,1,512,512])
+  config.patch_space  = np.array([16,128,128])
+  config.patch_full   = np.array([1,1,16,128,128])
   config.i_final      = 10**5
   config.bp_per_epoch = 4*10**3
   config.lr = 1e-5
@@ -91,7 +91,7 @@ def config(img_meta):
 
 def _load_net(config):
   args,kwargs = config.f_net_args
-  net = torch_models.Unet2_2d(*args,**kwargs).cuda()
+  net = torch_models.Unet3(*args,**kwargs).cuda()
   try:
     net.load_state_dict(torch.load(config.best_model))
   except:
@@ -104,7 +104,7 @@ def train_init(config):
   setup_dirs(config.savedir)
 
   ## load train and vali data
-  td,vd = config.load_train_and_vali_data(config)
+  vd,td = config.load_train_and_vali_data(config)
 
   ## model
   m = SimpleNamespace()
@@ -116,6 +116,54 @@ def train_init(config):
   # ta.__dict__.update(**{**defaults,**ta.__dict__})
 
   T  = SimpleNamespace(m=m,vd=vd,td=td,ta=ta,config=config)
+
+  return T
+
+
+
+@DeprecationWarning
+def init(config):
+  savedir = Path(config.train_dir).resolve()
+  setup_dirs(savedir)
+  config.savedir = savedir
+
+  ## training artifacts
+  ta = SimpleNamespace()
+  ta.savedir = savedir
+  ta.use_denoised = False
+
+  ## Transfer from trainer
+  # ta.i_final = trainer.i_final
+  # ta.rescale_for_matching = trainer.rescale_for_matching
+  # ta.bp_per_epoch = trainer.bp_per_epoch
+
+  # ## test data
+  # ta.valitimes  = trainer.valitimes
+  # ta.traintimes = trainer.traintimes
+
+  print("Training Times : ", config.traintimes)
+  print("Vali Times : ", config.valitimes)
+
+  vd = config.load_data(config.valitimes, config)
+  td = config.load_data(config.traintimes, config)
+  # save(td.target.max(1).astype(np.float16),ta.savedir/'ta/mx_vali/target.tif')
+
+  ## model
+  m = SimpleNamespace()
+  args,kwargs = config.f_net_args
+  m.net = torch_models.Unet3(*args,**kwargs).cuda()
+  torch_models.init_weights(m.net)
+
+  ## describe input shape
+  ta.axes = "TCZYX"
+  ta.dims = {k:v for k,v in zip(ta.axes, td.input.shape)}
+  ta.in_samples  = td.input.shape[0]
+  ta.in_chan     = td.input.shape[1]
+  ta.in_space    = np.array(td.input.shape[2:])
+  ta.patch_space = config.patch_space
+  ta.patch_full  = config.patch_full
+
+  T = SimpleNamespace(m=m,vd=vd,td=td,ta=ta,c=config)
 
   return T
 
@@ -190,9 +238,9 @@ def train(T):
     if ta.i%500==0:
       with warnings.catch_warnings():
         save(ta , config.savedir/"ta/")
-        save(x[0,0].detach().cpu().numpy()  , config.savedir/f"epoch/x/a{ta.i//100:03d}.npy")
-        save(y[0,0].detach().cpu().numpy()  , config.savedir/f"epoch/y/a{ta.i//100:03d}.npy")
-        save(yt[0,0].detach().cpu().numpy() , config.savedir/f"epoch/yt/a{ta.i//100:03d}.npy")
+        save(x[0,0].detach().cpu().numpy().max(0)  , config.savedir/f"epoch/x/a{ta.i//500:03d}.npy")
+        save(y[0,0].detach().cpu().numpy().max(0)  , config.savedir/f"epoch/y/a{ta.i//500:03d}.npy")
+        save(yt[0,0].detach().cpu().numpy().max(0) , config.savedir/f"epoch/yt/a{ta.i//500:03d}.npy")
 
     if ta.i%config.bp_per_epoch==config.bp_per_epoch-1:
       ta.save_count += 1
@@ -202,79 +250,72 @@ def train(T):
 ## Data Loading, Sampling, Weights, Etc
 
 def add_meta_to_td(td):
-  td.axes = "TCYX"
+  td.axes = "TCZYX"
   td.dims = {k:v for k,v in zip(td.axes, td.input.shape)}
   td.in_samples  = td.input.shape[0]
   td.in_chan     = td.input.shape[1]
+  # td.in_space    = td.input.shape[2:]
   td.in_space    = np.array(td.input.shape[2:])
 
+
 def validate(vd, T):
+  # m,d,ta = T.m
   vs = []
-  vali_imgs = []
   with torch.no_grad():
     for i in range(vd.input.shape[0]):
-      res = T.m.net(torch.from_numpy(vd.input[[i]]).float().cuda()).cpu().numpy()[0]
-      if vd.input.shape[0] > 10: vali_imgs.append(res)
-      else: save(res[0].astype(np.float16),T.config.savedir / f"ta/vali_pred/e{T.ta.save_count:02d}_i{i}.tif")
-  if vd.input.shape[0] > 10:
-    vali_imgs = np.array(vali_imgs)
-    save(vali_imgs.astype(np.float16),T.config.savedir / f"ta/vali_pred/e{T.ta.save_count:02d}_all.tif")
+      # res = torch_models.apply_net_tiled_3d(m.net,vd.input[i])
+      res = torch_models.apply_net_tiled_3d(T.m.net,vd.input[i])
+      # pts = peak_local_max(res[0],threshold_abs=.2,exclude_border=False,footprint=np.ones((3,8,8)))
+      # score3  = match_unambiguous_nearestNeib(d.gt[i],pts,dub=3,scale=ta.rescale_for_matching)
+      # score10 = match_unambiguous_nearestNeib(d.gt[i],pts,dub=10,scale=ta.rescale_for_matching)
+      # s3  = [score3.n_matched,  score3.n_proposed,  score3.n_gt]
+      # s10 = [score10.n_matched, score10.n_proposed, score10.n_gt]
+      # print(ta.i,i,s3,s10)
+      # vs.append([s3,s10])
+      # save(res[0],config.savedir / f"ta/pred/e{e}_i{i}.tif")
+      # save(res[0,ta.patch_space[0]//2].astype(np.float16),config.savedir / f"ta/ms_z/e{ta.save_count:02d}_i{i}.tif")
+      save(res[0].max(0).astype(np.float16),T.config.savedir / f"ta/mx_z/e{T.ta.save_count:02d}_i{i}.tif")
+      # save(res[0].max(1).astype(np.float16),ta.savedir / f"ta/mx_y/e{ta.save_count:02d}_i{i}.tif")
+      # save(res[0].max(2).astype(np.float16),ta.savedir / f"ta/mx_x/e{ta.save_count:02d}_i{i}.tif")
+      # save(res[0].astype(np.float16),ta.savedir / f"ta/vali_full/e{ta.save_count:02d}_i{i}.tif")
+  # ta.vali_scores.append(vs)
 
-# def load_isbi_training_data(times,config):
-#   d = SimpleNamespace()
-#   d.input  = np.array([load(config.input_dir / f"t{n:03d}.tif") for n in times])
-#   d.input  = config.norm(d.input)
-#   d.target = d.input
-#   d.target = d.target[:,None]
-#   d.input  = d.input[:,None]
-#   return d
+def load_isbi_training_data(times,config):
+  d = SimpleNamespace()
+  d.input  = np.array([load(config.input_dir / f"t{n:03d}.tif") for n in times])
+  d.input  = config.norm(d.input)
+  d.target = d.input
+  d.target = d.target[:,None]
+  d.input  = d.input[:,None]
+
+  return d
 
 def flat_sampler(T):
   "sample from everywhere independent of annotations"
 
   ## sample from anywhere
-  _pt = np.floor(np.random.rand(2)*(T.td.in_space-T.config.patch_space)).astype(int)
-  sy,sx = [slice(_pt[i],_pt[i] + T.config.patch_space[i]) for i in range(2)]
+  _pt = np.floor(np.random.rand(3)*(T.td.in_space-T.config.patch_space)).astype(int)
+  sz,sy,sx = [slice(_pt[i],_pt[i] + T.config.patch_space[i]) for i in range(3)]
   st = np.random.randint(T.td.dims['T'])
 
-  x  = T.td.input[[st],:,sy,sx]
-  yt = T.td.target[[st],:,sy,sx]
+  x  = T.td.input[[st],:,sz,sy,sx]
+  yt = T.td.target[[st],:,sz,sy,sx]
   # w  = np.ones(x.shape)
   # w  = weights(yt,T.ta,trainer)
   x,yt,w = T.config.masker(x,yt,T)
 
   return x,yt,w
 
-
-def predict_raw(T,img,dims="NCYX"):
+def predict_raw(T,img):
   img = T.config.norm(img)
-  # ipdb.set_trace()
-  with torch.no_grad():
-    if dims=="NCYX":
-      res = T.m.net(torch.from_numpy(img).cuda().float()).cpu().numpy()
-    if dims=="NBCYX":
-      def f(i): return T.m.net(torch.from_numpy(img[i]).cuda().float()).cpu().numpy()
-      res = np.array([f(i) for i in range(img.shape[0])])
-    if dims=="CYX":
-      res = T.m.net(torch.from_numpy(img[None]).cuda().float()).cpu().numpy()[0]
-
+  res = torch_models.apply_net_tiled_3d(T.m.net,img[None])[0]
   return res
 
-import gc,torch,sys,psutil,os,py
+## mask builder
 
-def memReport():
-  for obj in gc.get_objects():
-    if torch.is_tensor(obj):
-      print(type(obj), obj.size())
-    
-def cpuStats():
-  print(sys.version)
-  print(psutil.cpu_percent())
-  print(psutil.virtual_memory())  # physical memory usage
-  pid = os.getpid()
-  py = psutil.Process(pid)
-  memoryUse = py.memory_info()[0] / 2. ** 30  # memory use in GB...I think
-  print('memory GB:', memoryUse)
+
+
+
 
 
 notes = """

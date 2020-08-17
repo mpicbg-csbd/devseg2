@@ -296,7 +296,7 @@ def isbi_train_den(wildcards):
 
 def isbi_train(wildcards):
   deps = build_snakemake_deps()
-  deps = reify_deps(deps.train,wildcards)
+  deps = reify_deps(deps.train, wildcards)
   
   img_meta  = data_specific._get_img_meta(wildcards)
   config    = detector.config(img_meta)

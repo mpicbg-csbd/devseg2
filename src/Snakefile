@@ -40,7 +40,7 @@ import experiments
 deps = experiments.build_snakemake_deps()
 target = experiments.build_list_of_target_files()
 
-bad_nodes = ["r02n08"]
+# bad_nodes = ["r02n08"]
 
 rule runall:
   input:
@@ -62,7 +62,6 @@ rule isbi_prep_all:
     # if os.uname().nodename in bad_nodes: time.sleep(60*60*8)
     experiments.isbi_prep_all(wildcards)
 
-
 rule isbi_train_den:
   input:  deps.train_den.inputs
   output: deps.train_den.outputs, 
@@ -70,7 +69,6 @@ rule isbi_train_den:
     print(os.uname())
     # if os.uname().nodename in bad_nodes: time.sleep(60*60*8)
     experiments.isbi_train_den(wildcards)
-
 
 rule isbi_train:
   output: deps.train.outputs
@@ -83,7 +81,7 @@ rule isbi_predict:
   input:  deps.pred.inputs
   output: deps.pred.outputs, 
   run:
-    print(os.uname())
+    # print(os.uname())
     # if os.uname().nodename in bad_nodes: time.sleep(60*60*8)
     experiments.isbi_predict(wildcards)
 
@@ -94,45 +92,71 @@ rule isbi_evaluate:
     print(os.uname())
     experiments.isbi_evaluate(wildcards)
 
-import ipy
+import experiments2
+from pathlib import Path
+home = Path('/projects/project-broaddus/devseg_2/')
 
-rule special:
+rule experiments2:
   input:
-    "job11_synthetic_membranes_1",
-    # "job12_horst_1",
-    # "job12_horst_2",
-    # "job12_horst_3",
-    # "job10_alex_retina_2D_1",
+    # home / "e08_horst/v2_t01/pred.npy",
+    # home / "e08_horst/v2_t02/pred.npy",
+    # home / "e08_horst/v2_t03/pred.npy",
+    # home / "e08_horst/v2_t04/pred.npy",
+    # home / "e08_horst/v2_t05/pred.npy",
+    # home / "e08_horst/v2_t06/pred.npy",
+    # home / "e08_horst/v2_t07/pred.npy",
+    # home / "e08_horst/v2_t08/pred.npy",
     # "job10_alex_retina_3D_1",
     # "job10_alex_retina_3D_2",
+    # "job10_alex_retina_3D_3",
+    # "job10_alex_retina_2D_1",
+    # "job11_synthetic_membranes_1",
+    # "job11_synthetic_membranes_2",
+    # "job11_synthetic_membranes_3",
+    # "job12_horst_5",
+    # home / "e09_mangalnuclei/v2_t01/pred.npy",
+    # home / "e09_mangalnuclei/v2_t02/pred.npy",
+    # home / "e09_mangalnuclei/v2_t03/pred.npy",
+    # home / "e09_mangalnuclei/v2_t04/pred.npy",
+    home / "e09_mangalnuclei/v3_t01/pred.npy",
+    home / "e09_mangalnuclei/v3_t02/pred.npy",
+    home / "e09_mangalnuclei/v3_t03/pred.npy",
+    home / "e09_mangalnuclei/v3_t04/pred.npy",
+
 
 rule job10_alex_retina_3D:
   output: "job10_alex_retina_3D_{id}"
   run:
-    import ipy
+    import experiments2
     _id = int(wildcards.id)
-    ipy.job10_alex_retina_3D(_id=_id)
+    experiments2.job10_alex_retina_3D(_id=_id)
 
 rule job10_alex_retina_2D:
   output: "job10_alex_retina_2D_{id}"
   run:
-    import ipy
+    import experiments2
     _id = int(wildcards.id)
-    ipy.job10_alex_retina_2D(_id=_id)
+    experiments2.job10_alex_retina_2D(_id=_id)
 
 rule job11_synthetic_membranes:
   output: "job11_synthetic_membranes_{id}"
   run:
-    import ipy
+    import experiments2
     id = int(wildcards.id)
-    ipy.job11_synthetic_membranes(_id=id)  
+    experiments2.job11_synthetic_membranes(_id=id)  
 
 rule job12_horst:
-  output: "job12_horst_{id}"
+  output: home / "e08_horst/v2_t{id}/pred.npy"
   run:
-    import ipy
+    import experiments2
     id = int(wildcards.id)
-    ipy.job12_horst(id=id)
+    experiments2.job12_horst(id=id)
 
+rule job13_mangal:
+  output: home / "e09_mangalnuclei/v3_t{id}/pred.npy"
+  run:
+    import experiments2
+    id = int(wildcards.id)
+    experiments2.job13_mangal(id=id)
 
 

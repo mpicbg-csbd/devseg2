@@ -37,7 +37,7 @@ from segtools.ns2dir import load, save, flatten
 # import predict
 import collections
 
-from denoise_utils import nearest_neib_sampler, footprint_sampler
+from denoise_utils import structN2V_masker
 
 
 def setup_dirs(savedir):
@@ -46,52 +46,35 @@ def setup_dirs(savedir):
   (savedir/'m').mkdir(exist_ok=True)
   shutil.copy("/projects/project-broaddus/devseg_2/src/denoiser.py",savedir)
 
+
 def eg_img_meta():
   img_meta = SimpleNamespace()
-  img_meta.voxel_size = np.array([1.0,0.09,0.09])
+  img_meta.voxel_size = np.array([0.09,0.09])
   img_meta.time_step  = 1 ## 1.5 for second dataset?
   return img_meta
 
 def config(img_meta):
   config = SimpleNamespace()
-  # config.savedir = Path("detector_test/")
 
   print(img_meta)
 
   ## prediction / evaluation / training
-  config.f_net_args    = ((16,[[1],[1]]), dict(finallayer=torch_models.nn.Sequential)) ## *args and **kwargs
-  # config.norm          = lambda img: normalize3(img,2,99.4,clip=True)
-  config.norm          = lambda img: img ## no norm for alex's images
-  ## TODO: add image config.unnorm : (img,norm_state) -> img # to be applied after prediction (only really important for N2V/restoration tasks)
-  ## Also, config.norm should return and image and a norm_state we can use later (But this data will get lost! train/eval/pred are separate tasks! we can save to disk in training_artifacts...)
-  config.pt_norm       = lambda pts: pts
-  config.pt_unnorm     = lambda pts: pts
-
-  ## evaluation / training
-  config.rescale_for_matching = (2,1,1)
-  config.dub=10
-
-  ## training [detector only]
-  # config.sigmas       = np.array([1,7,7])
-  # config.kernel_shape = np.array([43,43,43]) ## 7sigma in each direction
+  config.getnet = lambda : torch_models.Unet3(16, [[1],[1]], finallayer=torch_models.nn.Sequential)
+  
   ## general img2img model ltraining
   config.sampler      = flat_sampler
-  config.masker       = nearest_neib_sampler
-  config.patch_space  = np.array([16,128,128])
-  config.patch_full   = np.array([1,1,16,128,128])
-  config.i_final      = 10**5
-  config.bp_per_epoch = 4*10**3
+  config.masker       = structN2V_masker
+  config.batch_space  = np.array([512,512])
+  config.batch_shape  = np.array([1,1,512,512])
+
+  ## accumulate gradients, print loss, save x,y,yt, save vali_pred, total time in Fwd/Bwd passes
+  config.times = [10,100,500,4000,10**5]
   config.lr = 1e-5
-  ## fg/bg weights stuff for fluorescence images & class-imbalanced data
-  # config.fg_bg_thresh = np.exp(-16/2)
-  # config.bg_weight_multiplier = 0.0
-  # config.weight_decay = True
 
   return config
 
-def _load_net(config):
-  args,kwargs = config.f_net_args
-  net = torch_models.Unet3(*args,**kwargs).cuda()
+def get_net(config):
+  net = config.getnet().cuda()
   try:
     net.load_state_dict(torch.load(config.best_model))
   except:
@@ -99,71 +82,50 @@ def _load_net(config):
     torch_models.init_weights(net)
   return net
 
+def normalize_td_vd(ta,td,vd):
+  """
+  this way we
+  """
+  mu  = np.mean(td.input)
+  sig = np.std(td.input)
+  ta.mu  = mu
+  ta.sig = sig  
+  td.input  = (td.input-mu)/sig
+  td.target = (td.target-mu)/sig
+  vd.input  = (vd.input-mu)/sig
+  vd.target = (vd.target-mu)/sig
+
+def normalize_raw(raw,ta):
+  """
+  this way we
+  """
+  try:
+    mu =ta.mu
+    sig=ta.sig
+  except:
+    mu =np.mean(raw)
+    sig=np.std(raw)
+
+  return (raw-mu)/sig, (mu,sig)
+
 def train_init(config):
   config.savedir = Path(config.savedir).resolve()
   setup_dirs(config.savedir)
 
-  ## load train and vali data
-  vd,td = config.load_train_and_vali_data(config)
-
-  ## model
-  m = SimpleNamespace()
-  m.net = _load_net(config)
-
   ## training params we don't want to control directly, and artifacts that change over training time.
-  ta = SimpleNamespace(i=0,losses=[],lr=config.lr,i_final=config.i_final,save_count=0,vali_scores=[],timings=[],heights=[])
-  # defaults = dict(i=0,losses=[],lr=2e-4,i_final=config.bp_per_epoch*22,save_count=0,vali_scores=[],timings=[],heights=[])
+  ta = SimpleNamespace(i=1,losses=[],lr=config.lr,save_count=0,vali_scores=[],timings=[],heights=[])
   # ta.__dict__.update(**{**defaults,**ta.__dict__})
 
-  T  = SimpleNamespace(m=m,vd=vd,td=td,ta=ta,config=config)
-
-  return T
-
-
-
-@DeprecationWarning
-def init(config):
-  savedir = Path(config.train_dir).resolve()
-  setup_dirs(savedir)
-  config.savedir = savedir
-
-  ## training artifacts
-  ta = SimpleNamespace()
-  ta.savedir = savedir
-  ta.use_denoised = False
-
-  ## Transfer from trainer
-  # ta.i_final = trainer.i_final
-  # ta.rescale_for_matching = trainer.rescale_for_matching
-  # ta.bp_per_epoch = trainer.bp_per_epoch
-
-  # ## test data
-  # ta.valitimes  = trainer.valitimes
-  # ta.traintimes = trainer.traintimes
-
-  print("Training Times : ", config.traintimes)
-  print("Vali Times : ", config.valitimes)
-
-  vd = config.load_data(config.valitimes, config)
-  td = config.load_data(config.traintimes, config)
-  # save(td.target.max(1).astype(np.float16),ta.savedir/'ta/mx_vali/target.tif')
+  ## load train and vali data
+  td,vd = config.load_train_and_vali_data(config)
+  normalize_td_vd(ta,td,vd)
 
   ## model
   m = SimpleNamespace()
-  args,kwargs = config.f_net_args
-  m.net = torch_models.Unet3(*args,**kwargs).cuda()
-  torch_models.init_weights(m.net)
+  m.net = get_net(config)
+  m.opt = torch.optim.Adam(m.net.parameters(), lr = config.lr)
 
-  ## describe input shape
-  ta.axes = "TCZYX"
-  ta.dims = {k:v for k,v in zip(ta.axes, td.input.shape)}
-  ta.in_samples  = td.input.shape[0]
-  ta.in_chan     = td.input.shape[1]
-  ta.in_space    = np.array(td.input.shape[2:])
-  ta.patch_space = config.patch_space
-  ta.patch_full  = config.patch_full
-
-  T = SimpleNamespace(m=m,vd=vd,td=td,ta=ta,c=config)
+  T  = SimpleNamespace(m=m,vd=vd,td=td,ta=ta,config=config)
 
   return T
 
@@ -178,143 +140,134 @@ def train(T):
   td = T.td
   ta = T.ta
   config = T.config
-
-  # defaults = dict(i=0,losses=[],lr=1e-4,i_final=config.bp_per_epoch*22,save_count=0,vali_scores=[],timings=[],heights=[])
-  # ta.__dict__.update(**{**defaults,**ta.__dict__})
-
-  try: m.opt
-  except: m.opt  = torch.optim.Adam(m.net.parameters(), lr = ta.lr)
   
-  # _x,_yt,_w  = config.sampler(T)
-
-  # x  = torch.zeros(_x.shape).float().cuda()
-  # yt = torch.zeros(_yt.shape).float().cuda()
-  # w  = torch.zeros(_w.shape).float().cuda()
-
-  for ta.i in range(ta.i,ta.i_final):
-    ta.timings.append(time()) ## 1
-
-    # _x  = _x + np.random.rand(*_x.shape)*0.05
-    # _yt = _yt + np.random.rand(*_yt.shape)*0.05
-    # _w  = np.ones(_w.shape).float().cuda()
-    x,yt,w  = config.sampler(T)
-
-    # ipdb.set_trace()
-
-    ta.timings.append(time()) ## 2
-
+  for ta.i in range(ta.i,config.times[-1]):
+    x,yt,w  = config.sampler(T,td)
     x  = torch.from_numpy(x).float().cuda()
     yt = torch.from_numpy(yt).float().cuda()
     w  = torch.from_numpy(w).float().cuda()
-    # x[...]  = torch.from_numpy(_x)[...] # torch.from_numpy(x).float().cuda()
-    # yt[...] = torch.from_numpy(_yt)[...] # torch.from_numpy(yt).float().cuda()
-    # w[...]  = torch.from_numpy(_w)[...] # torch.from_numpy(w).float().cuda()
 
-    ta.timings.append(time()) ## 3
-
-    ## put patches through the net, then backprop
     y    = m.net(x)
     loss = torch.abs((w*(y-yt)**2)).mean() #+ weight*torch.abs((y-global_avg)**2).mean()
     loss.backward()
 
-    ta.timings.append(time()) ## 4
+    # continue
 
-    if ta.i%10==0:
+    if ta.i%config.times[0]==0:
       m.opt.step()
       m.opt.zero_grad()
-
-    if ta.i%50==0:
-      ## monitoring training and validation ## takes 0.2 sec!!! so expensive! (but not when inside this mod? i don't understand...)
       ta.losses.append((loss/w.mean()).detach().cpu())
       ta.heights.append(y.max().detach().cpu())
 
-    if ta.i%100==0:
-      dt = ta.timings[-1]-ta.timings[-400] if ta.i>0 else 0
+    if ta.i%config.times[1]==0:
+      ta.timings.append(time())
+      dt = 0 if len(ta.timings)==1 else ta.timings[-1]-ta.timings[-2]
       l  = np.mean(ta.losses[-100:])
       ymax,ystd = float(y.max()), float(y.std())
       ytmax,ytstd = float(yt.max()), float(yt.std())
-      print(f"i={ta.i:04d}, loss={l:7f}, dt={dt:7f}, y={ymax:4f},{ystd:4f} yt={ytmax:4f},{ytstd:4f}", flush=True)
+      print(f"i={ta.i:04d}, shape={x.shape}, loss={l:4f}, dt={dt:4f}, y={ymax:4f},{ystd:4f} yt={ytmax:4f},{ytstd:4f}", flush=True)
 
-    if ta.i%500==0:
+    if ta.i%config.times[2]==0:
       with warnings.catch_warnings():
+        n = ta.i//config.times[2]
         save(ta , config.savedir/"ta/")
-        save(x[0,0].detach().cpu().numpy().max(0)  , config.savedir/f"epoch/x/a{ta.i//500:03d}.npy")
-        save(y[0,0].detach().cpu().numpy().max(0)  , config.savedir/f"epoch/y/a{ta.i//500:03d}.npy")
-        save(yt[0,0].detach().cpu().numpy().max(0) , config.savedir/f"epoch/yt/a{ta.i//500:03d}.npy")
+        save(x[0,0].detach().cpu().numpy().astype(np.float16)  , config.savedir/f"epoch/x/a{n:03d}.npy")
+        save(y[0,0].detach().cpu().numpy().astype(np.float16)  , config.savedir/f"epoch/y/a{n:03d}.npy")
+        save(yt[0,0].detach().cpu().numpy().astype(np.float16) , config.savedir/f"epoch/yt/a{n:03d}.npy")
+        torch.save(m.net.state_dict(), config.savedir / f'm/net{n:03d}.pt')
 
-    if ta.i%config.bp_per_epoch==config.bp_per_epoch-1:
-      ta.save_count += 1
-      validate(vd,T)
-      torch.save(m.net.state_dict(), config.savedir / f'm/net{ta.save_count:02d}.pt')
+    if ta.i%config.times[3]==0:
+      n = ta.i//config.times[3]
+      # validate(vd,T)
 
 ## Data Loading, Sampling, Weights, Etc
 
 def add_meta_to_td(td):
-  td.axes = "TCZYX"
-  td.dims = {k:v for k,v in zip(td.axes, td.input.shape)}
-  td.in_samples  = td.input.shape[0]
-  td.in_chan     = td.input.shape[1]
-  # td.in_space    = td.input.shape[2:]
+  # td.axes = "TCYX"
+  # td.dims = {k:v for k,v in zip(td.axes, td.input.shape)}
+  # td.in_samples  = td.input.shape[0]
+  # td.in_chan     = td.input.shape[1]
   td.in_space    = np.array(td.input.shape[2:])
-
+  td.ndim        = len(td.in_space)
 
 def validate(vd, T):
-  # m,d,ta = T.m
   vs = []
+  vali_imgs = []
+  n = T.ta.i//T.config.times[3]
   with torch.no_grad():
     for i in range(vd.input.shape[0]):
-      # res = torch_models.apply_net_tiled_3d(m.net,vd.input[i])
-      res = torch_models.apply_net_tiled_3d(T.m.net,vd.input[i])
-      # pts = peak_local_max(res[0],threshold_abs=.2,exclude_border=False,footprint=np.ones((3,8,8)))
-      # score3  = match_unambiguous_nearestNeib(d.gt[i],pts,dub=3,scale=ta.rescale_for_matching)
-      # score10 = match_unambiguous_nearestNeib(d.gt[i],pts,dub=10,scale=ta.rescale_for_matching)
-      # s3  = [score3.n_matched,  score3.n_proposed,  score3.n_gt]
-      # s10 = [score10.n_matched, score10.n_proposed, score10.n_gt]
-      # print(ta.i,i,s3,s10)
-      # vs.append([s3,s10])
-      # save(res[0],config.savedir / f"ta/pred/e{e}_i{i}.tif")
-      # save(res[0,ta.patch_space[0]//2].astype(np.float16),config.savedir / f"ta/ms_z/e{ta.save_count:02d}_i{i}.tif")
-      save(res[0].max(0).astype(np.float16),T.config.savedir / f"ta/mx_z/e{T.ta.save_count:02d}_i{i}.tif")
-      # save(res[0].max(1).astype(np.float16),ta.savedir / f"ta/mx_y/e{ta.save_count:02d}_i{i}.tif")
-      # save(res[0].max(2).astype(np.float16),ta.savedir / f"ta/mx_x/e{ta.save_count:02d}_i{i}.tif")
-      # save(res[0].astype(np.float16),ta.savedir / f"ta/vali_full/e{ta.save_count:02d}_i{i}.tif")
-  # ta.vali_scores.append(vs)
+      res = T.m.net(torch.from_numpy(vd.input[[i]]).float().cuda()).cpu().numpy()[0]
+      if vd.input.shape[0] > 10: vali_imgs.append(res)
+      else: save(res[0].astype(np.float16),T.config.savedir / f"ta/vali_pred/e{n:03d}_i{i}.tif")
+  if vd.input.shape[0] > 10:
+    vali_imgs = np.array(vali_imgs)
+    save(vali_imgs.astype(np.float16),T.config.savedir / f"ta/vali_pred/e{n:03d}_all.tif")
 
-def load_isbi_training_data(times,config):
-  d = SimpleNamespace()
-  d.input  = np.array([load(config.input_dir / f"t{n:03d}.tif") for n in times])
-  d.input  = config.norm(d.input)
-  d.target = d.input
-  d.target = d.target[:,None]
-  d.input  = d.input[:,None]
 
-  return d
-
-def flat_sampler(T):
+def flat_sampler(T,td):
   "sample from everywhere independent of annotations"
 
   ## sample from anywhere
-  _pt = np.floor(np.random.rand(3)*(T.td.in_space-T.config.patch_space)).astype(int)
-  sz,sy,sx = [slice(_pt[i],_pt[i] + T.config.patch_space[i]) for i in range(3)]
-  st = np.random.randint(T.td.dims['T'])
+  def patch():
+    _pt = np.floor(np.random.rand(td.ndim)*(td.in_space - T.config.batch_space)).astype(int)
+    ss = [slice(_pt[i],_pt[i] + T.config.batch_space[i]) for i in range(td.ndim)]
+    st = np.random.randint(td.input.shape[0])
+    ss = ([st],slice(None),*ss)
+    x  = td.input[ss]
+    yt = td.target[ss]
+    x,yt,w = T.config.masker(x,yt,T)
+    # ipdb.set_trace()
+    return x,yt,w
 
-  x  = T.td.input[[st],:,sz,sy,sx]
-  yt = T.td.target[[st],:,sz,sy,sx]
-  # w  = np.ones(x.shape)
-  # w  = weights(yt,T.ta,trainer)
+  x,yt,w = zip(*[patch() for _ in range(T.config.batch_shape[0])])
+  x  = np.concatenate(x,0)
+  yt = np.concatenate(yt,0)
+  w  = np.concatenate(w,0)
+
+  return x,yt,w
+
+def index_only_sampler(T,td):
+  "sample from everywhere independent of annotations"
+
+  st = np.random.randint(0,td.input.shape[0],T.config.batch_shape[0])
+  x  = td.input[st]
+  yt = td.target[st]
   x,yt,w = T.config.masker(x,yt,T)
 
   return x,yt,w
 
-def predict_raw(T,img):
-  img = T.config.norm(img)
-  res = torch_models.apply_net_tiled_3d(T.m.net,img[None])[0]
+def predict_raw(net,img,dims,ta=None,**kwargs3d):
+
+  assert dims in ["NCYX","NBCYX","CYX","ZYX","CZYX","NCZYX","NZYX",]
+
+  # if ta:
+  img,(mu,sig) = normalize_raw(img,ta)
+
+  # ipdb.set_trace()
+  with torch.no_grad():
+    if dims=="NCYX":
+      def f(i): return net(torch.from_numpy(img[[i]]).cuda().float()).cpu().numpy()
+      res = np.array([f(i) for i in range(img.shape[0])])
+    if dims=="NBCYX":
+      def f(i): return net(torch.from_numpy(img[i]).cuda().float()).cpu().numpy()
+      res = np.array([f(i) for i in range(img.shape[0])])
+    if dims=="CYX":
+      res = net(torch.from_numpy(img[None]).cuda().float()).cpu().numpy()[0]
+    if dims=="ZYX":
+      ## assume 1 channel. remove after prediction.
+      res = torch_models.apply_net_tiled_3d(net,img[None],**kwargs3d)[0]
+    if dims=="CZYX":
+      res = torch_models.apply_net_tiled_3d(net,img)
+    if dims=="NCZYX":
+      def f(i): return torch_models.apply_net_tiled_3d(net,img[i],**kwargs3d)[0]
+      res = np.array([f(i) for i in range(img.shape[0])])
+    if dims=="NZYX":
+      def f(i): return torch_models.apply_net_tiled_3d(net,img[i,None],**kwargs3d)[0]
+      res = np.array([f(i) for i in range(img.shape[0])])
+
+  img = img*sig + mu ## un-normalize
+
   return res
-
-## mask builder
-
-
-
 
 
 
@@ -348,10 +301,15 @@ And this would give all our functions access to these global names.
 I'm not getting good results with every_30_min_timelapse.tiff.
 But that is the clearest image we have.
 
+# Sat May 23 17:35:10 2020
+
+How do we want to handle normalization?
+1. It should be done by the method (not externally by user), during training and prediction.
+2. You should be able to normalize the predictions in the same way as the training data (using exact same mean and var).
+But let's try without that first, then see if it makes a difference.
 
 
 """
-
 
 
 
