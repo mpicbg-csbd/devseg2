@@ -237,6 +237,36 @@ def j11_sm_analysis():
 
 ## horst's calcium images
 
+def _job12_horst_predict():
+  """
+  run predictions for Horst on his 2nd round of long timeseries.
+  2k timepoints 1 zslice 
+  # TODO: how to upload these?
+  """
+  imglist = [
+    '/projects/project-broaddus/rawdata/HorstObenhaus/60480-openfield_00001_00001.tif',
+    '/projects/project-broaddus/rawdata/HorstObenhaus/60480-openfield_00001_00005.tif',
+    '/projects/project-broaddus/rawdata/HorstObenhaus/60480-openfield_00001_00006.tif',
+    '/projects/project-broaddus/rawdata/HorstObenhaus/88592-openfield_00001_00001.tif',
+  ]
+
+  from segtools.numpy_utils import norm_to_percentile_and_dtype
+
+  model = torch_models.Unet2(16, [[1],[1]], pool=(2,2), kernsize=(5,5), finallayer=torch_models.nn.Sequential).cuda()
+  model.load_state_dict(torch.load("../e08_horst/v2_t02/m/net049.pt"))
+  print(torch_models.summary(model, (1,512,512)))
+
+  for name in imglist:
+    img = load(name)[::2]
+    img = img[:,None] # to conform to "NCYX"
+    print(name, Path(name).exists(), '\n')
+    res = denoiser.predict_raw(model,img,"NCYX")
+    res = norm_to_percentile_and_dtype(res,img,2,99.5)
+    save(res,name.replace("HorstObenhaus/","HorstObenhaus/pred_"))
+    
+
+
+
 def job12_horst(id=1):
 
   # if id>4: img = load('/projects/project-broaddus/rawdata/HorstObenhaus/img88592.npy')
