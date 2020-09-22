@@ -46,41 +46,37 @@ def setup_dirs(savedir):
   (savedir/'m').mkdir(exist_ok=True)
   shutil.copy("/projects/project-broaddus/devseg_2/src/denoiser.py",savedir)
 
-
 def eg_img_meta():
   img_meta = SimpleNamespace()
   img_meta.voxel_size = np.array([0.09,0.09])
   img_meta.time_step  = 1 ## 1.5 for second dataset?
   return img_meta
 
-def config(img_meta):
+def config_example():
   config = SimpleNamespace()
-
-  print(img_meta)
-
   ## prediction / evaluation / training
-  config.getnet = lambda : torch_models.Unet3(16, [[1],[1]], finallayer=torch_models.nn.Sequential)
+  config.getnet = lambda : torch_models.Unet3(16, [[1],[1]], pool=(2,2), kernsize=(5,5), finallayer=torch_models.nn.Sequential)
   
   ## general img2img model ltraining
   config.sampler      = flat_sampler
   config.masker       = structN2V_masker
-  config.batch_space  = np.array([512,512])
   config.batch_shape  = np.array([1,1,512,512])
+  config.batch_space  = np.array([512,512])
 
-  ## accumulate gradients, print loss, save x,y,yt, save vali_pred, total time in Fwd/Bwd passes
+  ## accumulate gradients, print loss, save x,y,yt,model, save vali_pred, total time in Fwd/Bwd passes
   config.times = [10,100,500,4000,10**5]
   config.lr = 1e-5
 
   return config
 
-def get_net(config):
-  net = config.getnet().cuda()
-  try:
-    net.load_state_dict(torch.load(config.best_model))
-  except:
-    print("no best_model, randomizing model weights...")
-    torch_models.init_weights(net)
-  return net
+# def get_net(config):
+#   net = config.getnet().cuda()
+#   try:
+#     net.load_state_dict(torch.load(config.best_model))
+#   except:
+#     print("no best_model, randomizing model weights...")
+#     torch_models.init_weights(net)
+#   return net
 
 def normalize_td_vd(ta,td,vd):
   """
@@ -122,7 +118,7 @@ def train_init(config):
 
   ## model
   m = SimpleNamespace()
-  m.net = get_net(config)
+  m.net = config.getnet().cuda()
   m.opt = torch.optim.Adam(m.net.parameters(), lr = config.lr)
 
   T  = SimpleNamespace(m=m,vd=vd,td=td,ta=ta,config=config)
@@ -202,7 +198,6 @@ def validate(vd, T):
   if vd.input.shape[0] > 10:
     vali_imgs = np.array(vali_imgs)
     save(vali_imgs.astype(np.float16),T.config.savedir / f"ta/vali_pred/e{n:03d}_all.tif")
-
 
 def flat_sampler(T,td):
   "sample from everywhere independent of annotations"
@@ -307,6 +302,12 @@ How do we want to handle normalization?
 1. It should be done by the method (not externally by user), during training and prediction.
 2. You should be able to normalize the predictions in the same way as the training data (using exact same mean and var).
 But let's try without that first, then see if it makes a difference.
+
+# 2020-09-20
+
+Not sure the U-net worked as was prev written. Unet2/Unet3 work with 2D or 3D images, and the 2/3 describes the number of downsamplings.
+So we have to make sure the standard patch size (512,512) goes with a (2,2) pool and (5,5) kern.
+
 
 
 """

@@ -50,72 +50,85 @@ def setup_dirs(savedir):
 #   loader.gt_dir = "base/gtdir_example"
 #   # loader.
 
-def eg_img_meta():
-  img_meta = SimpleNamespace()
-  img_meta.voxel_size = np.array([1.0,0.09,0.09])
-  img_meta.time_step  = 1 ## 1.5 for second dataset?
-  return img_meta
+# def eg_img_meta():
+#   img_meta = SimpleNamespace()
+#   img_meta.voxel_size = np.array([1.0,0.09,0.09])
+#   img_meta.time_step  = 1 ## 1.5 for second dataset?
+#   # img_meta should have the voxel sizes of your image. This is used for scaling kernels.
+#   return img_meta
 
-def config(img_meta):
+def config_example():
   config = SimpleNamespace()
-  # config.savedir = Path("detector_test/")
-
-  print(img_meta)
-
-  ## prediction / evaluation / training
-  config.f_net_args    = ((16,[[1],[1]]), dict(finallayer=torch_models.nn.Sequential)) ## *args and **kwargs
-  config.norm          = lambda img: normalize3(img,2,99.4,clip=True)
-  ## TODO: add image config.unnorm : (img,norm_state) -> img # to be applied after prediction (only really important for N2V/restoration tasks)
-  ## Also, config.norm should return and image and a norm_state we can use later (But this data will get lost! train/eval/pred are separate tasks! we can save to disk in training_artifacts...)
-  config.pt_norm       = lambda pts: pts
-  config.pt_unnorm     = lambda pts: pts
-  config.plm_footprint = np.ones((3,10,10))
-  config.threshold_abs = 0.1
-
-  ## evaluation / training
-  config.rescale_for_matching = (2,1,1)
-  config.dub=10
-
-  ## training [detector only]
+  
+  config.savedir = Path("An/Example/Directory")
+  ## Build the network
+  config.getnet = lambda : torch_models.Unet3(16, [[1],[1]], pool=(1,2,2), kernsize=(3,5,5), finallayer=torch_models.nn.Sequential)
+  ## detector target kernel shape
   config.sigmas       = np.array([1,7,7])
-  config.kernel_shape = np.array([43,43,43]) ## 7sigma in each direction
-  ## general img2img model ltraining
-  config.sampler      = flat_sampler
-  config.patch_space  = np.array([16,128,128])
-  config.patch_full   = np.array([1,1,16,128,128])
-  config.i_final      = 31*600
-  config.bp_per_epoch = 600
+  config.kernel_shape = np.array([43,43,43]) ## 7 sigma in each direction?
+  config.rescale_for_matching = [2,1,1]
   ## fg/bg weights stuff for fluorescence images & class-imbalanced data
   config.fg_bg_thresh = np.exp(-16/2)
   config.bg_weight_multiplier = 0.0
   config.weight_decay = True
-
+  config.time_weightdecay = 400 # for pixelwise weights
+  ## image sampling
+  config.sampler      = flat_sampler ## sampler :: ta,td,config -> x,yt,w
+  config.patch_space  = np.array([16,128,128])
+  config.batch_shape  = np.array([1,1,16,128,128])
+  config.batch_axes   = "BCZYX"
+  # generic
+  # config.times = [10,100,500,4000,100_000]
+  # config.times = [10,100,200,400,1_000]
+  config.time_agg = 10 # aggregate gradients before backprop
+  config.time_print = 100
+  config.time_savecrop = 200
+  config.time_validate = 400
+  config.time_total = 1_000
+  config.lr = 2e-4
+  config.load_train_and_vali_data = lambda config: ("td","vd") # config -> traindata, validata
   return config
 
-def _load_net(config):
-  args,kwargs = config.f_net_args
-  net = torch_models.Unet3(*args,**kwargs).cuda()
-  try:
-    net.load_state_dict(torch.load(config.best_model))
-  except:
-    torch_models.init_weights(net)
-  return net
+def check_config(config):
+  "trivial check that keys match"
+  d = config_example().__dict__
+  e = config.__dict__
+
+  missing = d.keys() - e.keys()
+  extra = e.keys() - d.keys()
+  assert len(missing) is 0
+  print("Extra Keys: ", extra)
+
+  for k,v in d.items(): 
+    print(k,type(d[k]),type(e[k]))
+    assert type(d[k]) is type(e[k])
+  print("Value types agree")
+
+# def add_meta_to_td(td):
+#   # td.axes = "TCYX"
+#   # td.dims = {k:v for k,v in zip(td.axes, td.input.shape)}
+#   # td.in_samples  = td.input.shape[0]
+#   # td.in_chan     = td.input.shape[1]
+#   td.in_space    = np.array(td.input.shape[2:])
+#   td.ndim        = len(td.in_space)
 
 def train_init(config):
+  check_config(config)
   config.savedir = Path(config.savedir).resolve()
   setup_dirs(config.savedir)
 
+  ## training params we don't want to control directly, and artifacts that change over training time.
+  # ta = SimpleNamespace(i=0,losses=[],lr=2e-4,i_final=config.bp_per_epoch*22,save_count=0,vali_scores=[],timings=[],heights=[])
+  ta = SimpleNamespace(i=1,losses=[],lr=config.lr,save_count=0,vali_scores=[],timings=[],heights=[])
+  # ta.__dict__.update(**{**defaults,**ta.__dict__})
+  
   ## load train and vali data
   vd,td = config.load_train_and_vali_data(config)
 
   ## model
   m = SimpleNamespace()
-  m.net = _load_net(config)
-
-  ## training params we don't want to control directly, and artifacts that change over training time.
-  ta = SimpleNamespace(i=0,losses=[],lr=2e-4,i_final=config.bp_per_epoch*22,save_count=0,vali_scores=[],timings=[],heights=[])
-  # defaults = dict(i=0,losses=[],lr=2e-4,i_final=config.bp_per_epoch*22,save_count=0,vali_scores=[],timings=[],heights=[])
-  # ta.__dict__.update(**{**defaults,**ta.__dict__})
+  m.net = config.getnet().cuda()
+  m.opt = torch.optim.Adam(m.net.parameters(), lr = config.lr)
 
   T  = SimpleNamespace(m=m,vd=vd,td=td,ta=ta,c=config)
 
@@ -132,13 +145,8 @@ def train(T):
   td = T.td
   ta = T.ta
   config = T.c
-
-  try: m.opt
-  except: m.opt  = torch.optim.Adam(m.net.parameters(), lr = ta.lr)
   
-  for ta.i in range(ta.i,ta.i_final):
-    ta.timings.append(time())
-
+  for ta.i in range(ta.i,config.time_total):
     x,yt,w = config.sampler(ta,td,config)
     x  = torch.from_numpy(x).float().cuda()
     yt = torch.from_numpy(yt).float().cuda()
@@ -149,32 +157,32 @@ def train(T):
     loss = torch.abs((w*(y-yt)**2)).mean() #+ weight*torch.abs((y-global_avg)**2).mean()
     loss.backward()
 
-    if ta.i%10==0:
+    if ta.i%config.time_agg==0:
       m.opt.step()
       m.opt.zero_grad()
-
-    if ta.i%50==0:
-      ## monitoring training and validation ## takes 0.2 sec!!! so expensive!
       ta.losses.append((loss/w.mean()).detach().cpu())
       ta.heights.append(y.max().detach().cpu())
 
-    if ta.i%100==0:
-      print(f"i={ta.i:04d}, loss={np.mean(ta.losses[-100:])}", flush=True)
-      # print("x", float(x.mean()),float(x.std()))
-      print("y  {:5f} {:5f}".format(float(y.max()),float(y.std())))
-      print("yt {:5f} {:5f}".format(float(yt.max()),float(yt.std())))
-      # print("w", float(w.mean()),float(w.std()))
-      with warnings.catch_warnings():
-        save(ta , config.savedir/"ta/")
-        save(x[0,0].detach().cpu().numpy().max(0)  , config.savedir/f"epoch/x/a{ta.i//100:03d}.npy")
-        save(y[0,0].detach().cpu().numpy().max(0)  , config.savedir/f"epoch/y/a{ta.i//100:03d}.npy")
-        save(yt[0,0].detach().cpu().numpy().max(0) , config.savedir/f"epoch/yt/a{ta.i//100:03d}.npy")
+    if ta.i%config.time_print==0:
+      ta.timings.append(time())
+      dt = 0 if len(ta.timings)==1 else ta.timings[-1]-ta.timings[-2]
+      l  = np.mean(ta.losses[-100:])
+      ymax,ystd = float(y.max()), float(y.std())
+      ytmax,ytstd = float(yt.max()), float(yt.std())
+      print(f"i={ta.i:04d}, shape={x.shape}, loss={l:4f}, dt={dt:4f}, y={ymax:4f},{ystd:4f} yt={ytmax:4f},{ytstd:4f}", flush=True)
 
-    if ta.i%config.bp_per_epoch==0:
-      ta.save_count += 1
-      with torch.no_grad():
-        validate(vd,T)
-        torch.save(m.net.state_dict(), config.savedir / f'm/net{ta.save_count:02d}.pt')
+    if ta.i%config.time_savecrop==0:
+      with warnings.catch_warnings():
+        n = ta.i//config.time_savecrop
+        save(ta , config.savedir/"ta/")
+        save(x[0,0].detach().cpu().numpy().astype(np.float16)  , config.savedir/f"epoch/x/a{n:03d}.npy")
+        save(y[0,0].detach().cpu().numpy().astype(np.float16)  , config.savedir/f"epoch/y/a{n:03d}.npy")
+        save(yt[0,0].detach().cpu().numpy().astype(np.float16) , config.savedir/f"epoch/yt/a{n:03d}.npy")
+        torch.save(m.net.state_dict(), config.savedir / f'm/net{n:03d}.pt')
+
+    if ta.i%config.time_validate==0:
+      n = ta.i//config.time_validate
+      validate(vd,T)
 
 
 ## Task-Specific Stuff: Data Loading, Sampling, Weights, Validation, Etc
@@ -182,6 +190,7 @@ def train(T):
 def validate(vd,T):
   m,ta,config = T.m, T.ta, T.c
   vs = []
+  n = ta.i//config.time_validate
   with torch.no_grad():
     for i in range(vd.input.shape[0]):
       res = torch_models.apply_net_tiled_3d(m.net,vd.input[i])
@@ -192,9 +201,9 @@ def validate(vd,T):
       s10 = [score10.n_matched, score10.n_proposed, score10.n_gt]
       print(ta.i,i,s3,s10)
       vs.append([s3,s10])
+      save(res[0].max(0).astype(np.float16),config.savedir / f"ta/mx_z/e{n:03d}_i{i}.tif")
       # save(res[0],config.savedir / f"ta/pred/e{e}_i{i}.tif")
       # save(res[0,ta.patch_space[0]//2].astype(np.float16),config.savedir / f"ta/ms_z/e{ta.save_count:02d}_i{i}.tif")
-      save(res[0].max(0).astype(np.float16),config.savedir / f"ta/mx_z/e{ta.save_count:02d}_i{i}.tif")
       # save(res[0].max(1).astype(np.float16),config.savedir / f"ta/mx_y/e{ta.save_count:02d}_i{i}.tif")
       # save(res[0].max(2).astype(np.float16),config.savedir / f"ta/mx_x/e{ta.save_count:02d}_i{i}.tif")
       # save(res[0].astype(np.float16),config.savedir / f"ta/vali_full/e{ta.save_count:02d}_i{i}.tif")
@@ -227,20 +236,21 @@ def content_sampler(ta,td,config):
   # w = 1/w
   # w = w/w.sum()
   # st = np.random.choice(np.arange(ta.dims['T']), p=w)
-  st = np.random.randint(td.dims['T'])
+  st = np.random.randint(td.input.shape[0])
 
   ## sample a region near annotations
   _ipt = np.random.randint(0,len(td.gt[st]))
   _pt = td.gt[st][_ipt] ## sample one centerpoint from the chosen time
   _pt = _pt + (2*np.random.rand(3)-1)*config.patch_space*0.1 ## jitter
   _pt = _pt - config.patch_space//2 ## center
-  _pt = _pt.clip(min=[0,0,0],max=[td.in_space - config.patch_space])[0]
+  in_space = np.array(td.input.shape[2:])
+  _pt = _pt.clip(min=[0,0,0],max=[in_space - config.patch_space])[0]
   _pt = _pt.astype(int)
   sz,sy,sx = [slice(_pt[i],_pt[i] + config.patch_space[i]) for i in range(3)]
 
-  x = td.input[[st],:,sz,sy,sx]
+  x  = td.input[[st],:,sz,sy,sx]
   yt = td.target[[st],:,sz,sy,sx]
-  w = weights(yt,ta,config)
+  w  = weights(yt,ta,config)
 
   return x,yt,w
 
@@ -248,13 +258,14 @@ def flat_sampler(ta,td,config):
   "sample from everywhere independent of annotations"
 
   ## sample from anywhere
-  _pt = np.floor(np.random.rand(3)*(td.in_space-config.patch_space)).astype(int)
+  in_space = np.array(td.input.shape[2:])
+  _pt = np.floor(np.random.rand(3)*(in_space - config.patch_space)).astype(int)
   sz,sy,sx = [slice(_pt[i],_pt[i] + config.patch_space[i]) for i in range(3)]
-  st = np.random.randint(td.dims['T'])
+  st = np.random.randint(td.input.shape[0])
 
   x  = td.input[[st],:,sz,sy,sx]
   yt = td.target[[st],:,sz,sy,sx]
-  w  = np.ones(x.shape)
+  # w  = np.ones(x.shape)
   w  = weights(yt,ta,config)
 
   return x,yt,w
@@ -271,9 +282,11 @@ def weights(yt,ta,trainer):
     ws /= ws.mean()
     if np.isnan(ws).any(): ipdb.set_trace()
 
-    ## linearly decay scalar input to value 1 after 3 epochs, then flat
+    # bp_per_epoch = trainer.times[3]
     if trainer.weight_decay:
-      decayto1 = lambda x: x*(1-ta.i/(trainer.bp_per_epoch*3)) + ta.i/(trainer.bp_per_epoch*3) if ta.i<=(trainer.bp_per_epoch*3) else 1
+      t0 = trainer.time_weightdecay
+      ## decayto1 :: linearly decay scalar x to value 1 after 3 epochs, then const
+      decayto1 = lambda x: x*(1-ta.i/(t0*3)) + ta.i/(t0*3) if ta.i<=(t0*3) else 1
     else:
       decayto1 = lambda x: x
     w[yt<thresh]  = decayto1(ws[0])
@@ -283,19 +296,70 @@ def weights(yt,ta,trainer):
 
 ## Prediction and evaluation
 
-def predict_raw(config,net,img):
-  img = config.norm(img)
-  res = torch_models.apply_net_tiled_3d(net,img[None])[0]
+# def predict_raw(config,net,img):
+#   img = config.norm(img)
+#   res = torch_models.apply_net_tiled_3d(net,img[None])[0]
+#   return res
+
+# def normalize_raw(raw,ta):
+#   """
+#   this way we
+#   """
+#   try:
+#     mu =ta.mu
+#     sig=ta.sig
+#   except:
+#     mu =np.mean(raw)
+#     sig=np.std(raw)
+#   return (raw-mu)/sig, (mu,sig)
+
+
+def predict_raw(net,img,dims,**kwargs3d):
+  """
+  Apply independently over N.
+  """
+
+  assert dims in ["NCYX","NBCYX","CYX","ZYX","CZYX","NCZYX","NZYX",]
+
+  # if ta:
+  # img,(mu,sig) = normalize_raw(img,ta)
+
+  # ipdb.set_trace()
+  with torch.no_grad():
+    if dims=="NCYX":
+      def f(i): return net(torch.from_numpy(img[[i]]).cuda().float()).cpu().numpy()
+      res = np.array([f(i) for i in range(img.shape[0])])
+    if dims=="NBCYX":
+      def f(i): return net(torch.from_numpy(img[i]).cuda().float()).cpu().numpy()
+      res = np.array([f(i) for i in range(img.shape[0])])
+    if dims=="CYX":
+      res = net(torch.from_numpy(img[None]).cuda().float()).cpu().numpy()[0]
+    if dims=="ZYX":
+      ## assume 1 channel. remove after prediction.
+      res = torch_models.apply_net_tiled_3d(net,img[None],**kwargs3d)[0]
+    if dims=="CZYX":
+      ## assume 1 batch. can ignore. remove after prediction.
+      res = torch_models.apply_net_tiled_3d(net,img)
+    if dims=="NCZYX":
+      ## apply independently over N
+      def f(i): return torch_models.apply_net_tiled_3d(net,img[i],**kwargs3d)[0]
+      res = np.array([f(i) for i in range(img.shape[0])])
+    if dims=="NZYX":
+      ## apply independently over N
+      def f(i): return torch_models.apply_net_tiled_3d(net,img[i,None],**kwargs3d)[0]
+      res = np.array([f(i) for i in range(img.shape[0])])
+
+  # img = img*sig + mu ## un-normalize
+
   return res
 
-def predict_pts(config,img):
-  pts = peak_local_max(img,exclude_border=False,threshold_abs=config.threshold_abs,footprint=config.plm_footprint)
-  return pts
+# def predict_pts(config,img):
+#   pts = peak_local_max(img,exclude_border=False,threshold_abs=config.threshold_abs,footprint=config.plm_footprint)
+#   return pts
 
-def predict_matches(config, pts_gt, pts_pred):
-  matches = match_unambiguous_nearestNeib(pts_gt,pts_pred,dub=config.dub,scale=config.rescale_for_matching)
-  return matches
-
+# def predict_matches(config, pts_gt, pts_pred):
+#   matches = match_unambiguous_nearestNeib(pts_gt,pts_pred,dub=config.dub,scale=config.rescale_for_matching)
+#   return matches
 
 # def test_load_net_predict_and_evaluate_single_img():
 #   _config = config(eg_img_meta())
@@ -312,7 +376,7 @@ def predict_matches(config, pts_gt, pts_pred):
 #   image_name_right = Path(image_name_right)
 #   image_name = Path(image_name_left) / image_name_right
 
-#   net = _load_net(config)
+#   net = get_net(config)
 #   img = load(image_name)
 #   # assert img.ndim>2 and np.sum(np.array(img.shape)>100)>1 ## should kinda look like a 3D image
 #   img = config.norm(img)
@@ -329,14 +393,14 @@ def predict_matches(config, pts_gt, pts_pred):
 #   save(unambiguous_matches, config.savedir / 'matches' / image_name_right.parent / (image_name_right.stem + '.pkl'))
 
 
-def total_matches(matchdir,name_total_scores,ptsdir,name_total_pts):
-  o = evaluator.out
-  match_list = [load(x) for x in matchdir.glob("t*.pkl")]
-  match_scores = point_matcher.listOfMatches_to_Scores(match_list)
-  save(match_scores, evaluator.name_total_scores)
-  print("SCORES: ", match_scores)
-  allpts = [load(x) for x in ptsdir.glob('t*.tif')]
-  save(allpts, name_total_pts)
+# def total_matches(matchdir,name_total_scores,ptsdir,name_total_pts):
+#   o = evaluator.out
+#   match_list = [load(x) for x in matchdir.glob("t*.pkl")]
+#   match_scores = point_matcher.listOfMatches_to_Scores(match_list)
+#   save(match_scores, evaluator.name_total_scores)
+#   print("SCORES: ", match_scores)
+#   allpts = [load(x) for x in ptsdir.glob('t*.tif')]
+#   save(allpts, name_total_pts)
 
 
 def rasterize_detections(config, traj, imgshape, savedir, pts_transform = lambda x: x,):
@@ -428,6 +492,15 @@ We could make a rule that configs are not allowed to contain paths, and that pat
 What about other places where paths are used?
 - in experiments we manage paths with snakemake and the deps object
 - also for data loading we manage paths with the loader object...
+
+2020-09-19
+
+Let's see if this method still makes sense...
+Trying to make `experiments2.job14_celegans()` work as a detector.
+
+TODO: 
+- Take predict_raw from denoiser.
+- 
 
 
 """
