@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 from segtools import torch_models
 from segtools.numpy_utils import normalize3
-from segtools.math_utils import conv_at_pts_multikern
+from segtools.math_utils import conv_at_pts_multikern,autocorrelation
 from segtools.ns2dir import save,load
 from segtools import point_matcher
 from pathlib import Path
@@ -33,10 +33,12 @@ but it is the actions that really do the work / require the resources / can have
 import pprint as pp
 
 import detector
+import denoiser
 import isbi_tools
 # import train_StructN2V
 import data_specific
 
+@DeprecationWarning
 def add_defaults_to_namespace(namespace,defaults):
   if type(namespace) is not dict: namespace=namespace.__dict__
   if type(defaults) is not dict:  defaults=defaults.__dict__
@@ -44,7 +46,11 @@ def add_defaults_to_namespace(namespace,defaults):
   namespace = SimpleNamespace(**namespace)
   return namespace
 
+@DeprecationWarning
 def run_everything(rawdirs,train_sets=['01','02'],pred_sets=['01','02']):
+  """
+  deprecated now that we don't have dataset-specific functions
+  """
 
   map1 = dict(celegans_isbi='Fluo-N3DH-CE',fly_isbi='Fluo-N3DL-DRO',trib_isbi_proj='Fluo-N3DL-TRIC',trib_isbi='Fluo-N3DL-TRIF')
   map2 = dict(celegans_isbi=celegans_isbi,fly_isbi=fly_isbi,trib_isbi_proj=trib_isbi_proj,trib_isbi=trib_isbi)
@@ -72,10 +78,10 @@ def run_everything(rawdirs,train_sets=['01','02'],pred_sets=['01','02']):
 
 def apply_recursively_to_strings(obj,func,callable_arg=None):
   """
+  Mainly used in reify_deps().
   apply func recursivly to obj, keeping nested structure.
-  apply to values of dicts, not keys. 
-  apply to all elements of lists.
-  evaluate functions (they should return lists), then apply to lists
+  collections can be dicts, lists, SimpleNamespace's or functions that return one of the above.
+  atomic elements (leaves) must be strings.
   """
   if type(obj) is str: return func(obj)
 
@@ -99,12 +105,17 @@ def apply_recursively_to_strings(obj,func,callable_arg=None):
   return obj
 
 def reify_deps(deps,wildcards):
-  "recursively replace wildcards in all strings with their values"
+  "recursively replace wildcards in nested collections of strings with their values"
   func = lambda s: s.format(**wildcards.__dict__)
   res = apply_recursively_to_strings(deps,func,callable_arg=wildcards)
   return res 
 
 def build_snakemake_deps():
+  """
+  Captures the abstract dependencies between different jobs in strings+wildcards style.
+  The values of all wildcards we want to use are in build_wildcard_list().
+  Instantiating the abstract dependencies + wildcards into real file paths is done via reify_deps().
+  """
   deps = SimpleNamespace()
 
   deps.train_den = SimpleNamespace()
@@ -127,11 +138,10 @@ def build_snakemake_deps():
     return [raw, allac]
 
   deps.prep_all = SimpleNamespace()
-  deps.prep_all.rawdir        = "/projects/project-broaddus/rawdata/{rawdir}/{isbiname}/{pred}/"
+  deps.prep_all.rawdir     = "/projects/project-broaddus/rawdata/{rawdir}/{isbiname}/{pred}/"
   deps.prep_all.avg        = "/projects/project-broaddus/rawdata/{rawdir}/autocorr/{isbiname}/{pred}/avg.tif"
   deps.prep_all.inputs     = [] #[deps.pred.raw, deps.train.best_model, deps.pred.traj_gt]
   deps.prep_all.outputs    = [deps.prep_all.avg] #[deps.pred.matches, deps.pred.netpred, deps.pred.netpredmxz, deps.pred.pts,]
-
 
   deps.train = SimpleNamespace()
   deps.train.rawdir   = "/projects/project-broaddus/{rawdir}/{isbiname}/{train_set}/"
@@ -168,6 +178,9 @@ def build_snakemake_deps():
   return deps
   
 def build_wildcard_list():
+  """
+  Construct a SimpleNamespace mapping 
+  """
   p = SimpleNamespace()
 
   p.map1 = {'celegans_isbi'  :'Fluo-N3DH-CE',
@@ -191,7 +204,7 @@ def build_wildcard_list():
 
   def _param_id2params(pid):
     res = SimpleNamespace()
-    a,b = p.extra_params[pi]
+    a,b = p.extra_params[pid]
     res.kernxy = a
     res.kernz  = b
     return res
@@ -212,9 +225,14 @@ def eg_wildcards():
   return wildcards
 
 def build_list_of_target_files():
+  """
+  Full list of all target files produced by all experiments.
+  This function is only called within Snakemake file! (or anytime you want to know/change what's being produced)
+  """
   deps = build_snakemake_deps()
   wcl  = build_wildcard_list()
   def wc2files(wc):
+    # CHANGE ME (to determine the stopping point of the experiments)
     maxtime    = len(list(Path(f"/projects/project-broaddus/rawdata/{wc.rawdir}/{wc.isbiname}/{wc.pred}_GT/TRA/").glob("man_track*.tif")))
     # allmatches = [f"/projects/project-broaddus/devseg_2/ex7/{wc.rawdir}/train{wc.tid}/p{wc.param_id}/{wc.train_set}/matches/{wc.isbiname}/{wc.pred}/t{time:03d}.pkl" for time in range(maxtime)]
     # autocorr   = [f"/projects/project-broaddus/rawdata/{wc.rawdir}/autocorr/{wc.isbiname}/{wc.pred}/t{time:03d}.tif" for time in range(maxtime)]
@@ -225,28 +243,18 @@ def build_list_of_target_files():
   list_of_target_files = [wc2files(wc) for wc in wcl.wildcard_list]
   return list_of_target_files
 
-def autocorrelation(x):
-  """
-  2D autocorrelation
-  remove mean per-patch (not global GT)
-  normalize stddev to 1
-  autocorrelation at zero shift normalized to 1...
-  """
-  # assert x.ndim == 3
-  x = (x - np.mean(x))/np.std(x)
-  # x = np.pad(x, [(50,50),(50,50)], mode='constant')
-  x  = np.fft.fftn(x)
-  x  = np.abs(x)**2
-  x = np.fft.ifftn(x).real
-  x = x / x.flat[0]
-  x = np.fft.fftshift(x)
-  return x
-
 ## Below are entry points from snakemake
+"""
+These rule-functions correspond to individual snakemake rules, each of instance of which will be run as independent processes.
+A rule-function takes a `wildcards` and writes files to disk where they can be read in by later processes.
+A `wildcards` maps wildcard variables to their specific values for this task instance.
+The specific filenames read/written by the rule-function may depend on these params, and their abstract dependencies described in `build_snakemake_deps` need to be reified into real file names via `reify_deps()`.
+"""
 
 def isbi_prep_all(wildcards):
   deps = build_snakemake_deps()
   deps = reify_deps(deps.prep_all,wildcards)
+  
   # all_ac = np.array([load(x) for x in deps.all_ac])
   all_ac = []
   for name in sorted(Path(deps.rawdir).glob("t*.tif")):
@@ -264,18 +272,20 @@ def isbi_prep_all(wildcards):
   return all_ac
 
 def isbi_train_den(wildcards):
+  w = wildcards
   deps = build_snakemake_deps()
-  deps = reify_deps(deps.train_den,wildcards)
+  deps = reify_deps(deps.train_den,w)
+  wcl  = build_wildcard_list()
+  params = wcl.param_id2params(w.param_id)
 
   # wildcards = convert_snakemake_wcs(wildcards)
   img_meta  = data_specific._get_img_meta(wildcards)
   config = denoiser.config(img_meta)
   
   ## update variables we want to control globally via snakemake
-  config.savedir = outputs[0] #Path(f"/projects/project-broaddus/devseg_2/ex7/{w.rawdir}/train{w.tid}/{w.kernxy}_{w.kernz}/{w.train_set}/")
-  w = wildcards
-  wcl = build_wildcard_list()
-  params = wcl.param_id2params(w.param_id)
+  config.savedir = deps.outputs[0] #
+  # config.savedir = Path(f"/projects/project-broaddus/devseg_2/ex7/{w.rawdir}/train{w.tid}/{w.kernxy}_{w.kernz}/{w.train_set}/")
+  # config.savedir = 
   config.sigmas  = np.array([params.kernz, params.kernxy, params.kernxy])
 
   loader = SimpleNamespace()
@@ -284,7 +294,7 @@ def isbi_train_den(wildcards):
   maxtime_train        = len(list(loader.input_dir.glob("*.tif")))
   _times = np.linspace(0,maxtime_train - 1,8).astype(np.int)
   loader.valitimes     = _times[[2,5]]
-  loader.traintimes    = _times[[0,1,3,4,6,7]]  
+  loader.traintimes    = _times[[0,1,3,4,6,7]]
 
   ## update variables in a data-dependent way
   loader,config = data_specific._specialize_train(wildcards,loader,config)
@@ -297,15 +307,15 @@ def isbi_train_den(wildcards):
 def isbi_train(wildcards):
   deps = build_snakemake_deps()
   deps = reify_deps(deps.train, wildcards)
+  w = wildcards
+  wcl = build_wildcard_list()
+  params = wcl.param_id2params(w.param_id)
   
   img_meta  = data_specific._get_img_meta(wildcards)
   config    = detector.config(img_meta)
   
   ## update variables we want to control globally via snakemake
   config.savedir = deps.traindir
-  w = wildcards
-  wcl = build_wildcard_list()
-  params = wcl.param_id2params(w.param_id)
   config.sigmas  = np.array([params.kernz, params.kernxy, params.kernxy])
 
   loader = SimpleNamespace()
@@ -327,7 +337,7 @@ def isbi_train(wildcards):
 def isbi_predict(wildcards):
   deps = build_snakemake_deps()
   deps = reify_deps(deps.pred, wildcards)
-  wildcards = convert_snakemake_wcs(wildcards)
+  # wildcards = convert_snakemake_wcs(wildcards)
   img_meta  = data_specific._get_img_meta(wildcards)
   config    = detector.config(img_meta)
 
@@ -354,7 +364,7 @@ def isbi_evaluate(wildcards):
   deps = build_snakemake_deps()
   deps = reify_deps(deps.eval,wildcards)
 
-  wildcards = convert_snakemake_wcs(wildcards)
+  # wildcards = convert_snakemake_wcs(wildcards)
   img_meta  = data_specific._get_img_meta(wildcards)
   config    = detector.config(img_meta)
 
@@ -384,9 +394,6 @@ def isbi_evaluate(wildcards):
   # detector.rasterize_isbi_detections(config.evaluator)
   # detector.evaluate_isbi_DET(config.evaluator)
 
-def special():
-  import ipy
-  ipy.job10_alex_retina_3D()
 
 notes = """
 
@@ -526,7 +533,16 @@ Now how are we going to add:
 - tracking and track evaluation?
 - fisheye data...
 
+# 2020-09-17 15:00:01
 
+What is the status of this module?
+Do all the experiments run?
+Is this multiple experiments or one giant one?
+
+1. prep_all doesn't really depend on anything and can probably be removed/made independent. 
+2. We could run segmentation before/after denoising with this scheme...
+3. It's annoying not to see what kind of inputs your function takes immediately at the top of the function definition.
+    It would be nice to have example wildcards to give as input for each function.
 
 
 """

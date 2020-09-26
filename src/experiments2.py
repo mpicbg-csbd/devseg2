@@ -3,7 +3,7 @@
 export CUDA_LAUNCH_BLOCKING=1
 ipython
 
-import denoiser
+import denoiser, detector
 from segtools.ns2dir import load,save,toarray
 import experiments2
 import numpy as np
@@ -11,12 +11,17 @@ import numpy as np
 """
 
 """
-Each function not prefixed by an underscore corresponds to a snakemake rule.
-They accept only one params from snakemake, which is an integer pid, to vary the task (and the output) in some way.
-The underscore functions are only for building method configs (denoiser/detector).
-All jobs are totally self contained in terms of filenames/input/output (all hardcoded) and parameter values.
-It's easy to run these jobs interactively from ipython.
+Each function of the form `eXX_name` is a self-contained experiment.
+Each is parameterized by a single integer param ID (pid).
+The remaining functions are helpers in some way: usually building method configurations.
+The top level function `run_slurm` will submit All Experiments x All Parameters to SLURM for parallel running on the cluster.
+The top level value `savedir` controls a single global output home for all experiments.
 """
+
+"""
+Detection and denoising.
+"""
+
 
 # import torch
 # from torch import nn
@@ -36,11 +41,58 @@ import detector #, detect_utils
 import torch
 from segtools.numpy_utils import normalize3, perm2, collapse2, splt
 from segtools import point_matcher
+from subprocess import run, Popen
 
 savedir = Path('/projects/project-broaddus/devseg_2/expr/')
 
-# def qsave(img):
-#   save(img.astype(np.float16), savedir / "qsave.tif")
+def run_slurm():
+  """
+  Submit all experiments as independent jobs to the SLURM cluster job manager.
+  Each job has specific SLURM params, and function params, identified with a certain pid (int).
+
+  cmd = "sbatch -J {rule} -p {cluster.p} --gres {cluster.gres} -n {cluster.n} -t {cluster.t} -c {cluster.c} --mem {cluster.mem} -o slurm/slurm-%j.out -e slurm/slurm-%j.err "
+
+  """
+
+  # ## job10_alex_retina_3D
+  # cmd = 'sbatch -J e10-3D_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 12:00:00 -c 1 --mem 128000 -o slurm/e10-3D_pid{pid:02d}.out -e slurm/e10-3D_pid{pid:02d}.err --wrap \'python3 -c \"import experiments2; experiments2.job10_alex_retina_3D({pid})\"\' '
+  # for pid in [1,2,3]: Popen(cmd.format(pid=pid),shell=True)
+
+  # ## job10_alex_retina_2D
+  # cmd = 'sbatch -J e10-2D_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 12:00:00 -c 1 --mem 128000 -o slurm/e10-2D_pid{pid:02d}.out -e slurm/e10-2D_pid{pid:02d}.err --wrap \'python3 -c \"import experiments2; experiments2.job10_alex_retina_2D({pid})\"\' '
+  # for pid in [1]: Popen(cmd.format(pid=pid),shell=True)
+
+  # ## job11_synthetic_membranes
+  # cmd = 'sbatch -J e11_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 12:00:00 -c 1 --mem 128000 -o slurm/e11_pid{pid:02d}.out -e slurm/e11_pid{pid:02d}.err --wrap \'python3 -c \"import experiments2; experiments2.job11_synthetic_membranes({pid})\"\' '
+  # for pid in [1,2,3]: Popen(cmd.format(pid=pid),shell=True)
+
+  # ## job12_horst
+  # cmd = 'sbatch -J e12_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 12:00:00 -c 1 --mem 128000 -o slurm/e12_pid{pid:02d}.out -e slurm/e12_pid{pid:02d}.err --wrap \'python3 -c \"import experiments2; experiments2.job12_horst({pid})\"\' '
+  # for pid in range(1,9): Popen(cmd.format(pid=pid),shell=True)
+
+  # ## job13_mangal
+  # cmd = 'sbatch -J e13_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 12:00:00 -c 1 --mem 128000 -o slurm/e13_pid{pid:02d}.out -e slurm/e13_pid{pid:02d}.err --wrap \'python3 -c \"import experiments2; experiments2.job13_mangal({pid})\"\' '
+  # for pid in range(1,9): Popen(cmd.format(pid=pid),shell=True)
+
+  ## e14_celegans
+  cmd = 'sbatch -J e14_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 12:00:00 -c 1 --mem 128000 -o slurm/e14_pid{pid:02d}.out -e slurm/e14_pid{pid:02d}.err --wrap \'python3 -c \"import experiments2; experiments2.e14_celegans({pid})\"\' '
+  # for pid in range(27): Popen(cmd.format(pid=pid),shell=True)
+  for pid in [27]: Popen(cmd.format(pid=pid),shell=True)
+
+  ## e15_celegans
+  cmd = 'sbatch -J e15_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 12:00:00 -c 1 --mem 128000 -o slurm/e15_pid{pid:02d}.out -e slurm/e15_pid{pid:02d}.err --wrap \'python3 -c \"import experiments2; experiments2.e15_celegans({pid})\"\' '
+  for pid in range(3): Popen(cmd.format(pid=pid),shell=True)
+
+  ## e16_celegans
+  cmd = 'sbatch -J e16_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 12:00:00 -c 1 --mem 128000 -o slurm/e16_pid{pid:02d}.out -e slurm/e16_pid{pid:02d}.err --wrap \'python3 -c \"import experiments2; experiments2.e16_celegans({pid})\"\' '
+  # for pid in range(27): Popen(cmd.format(pid=pid),shell=True)
+  for pid in range(2*3*5): Popen(cmd.format(pid=pid),shell=True)
+
+
+def testme(pid):
+  print(f"The pid is {pid}.")
+
+
 
 ## Alex's retina 3D
 
@@ -79,16 +131,12 @@ def _job10_alex_retina_3D(img,pid=1):
     # kern = np.zeros((1,1,1)) ## must be odd
     # kern[0,0,0]  = 2
     # cfig.mask = kern
-    cfig.savedir = Path(savedir / 'e01_alexretina/v2_timelapse1/')
-    # cfig.best_model = savedir / 'e01_alexretina/v2_timelapse1/m/'
     cfig.masker  = denoise_utils.nearest_neib_masker
   if pid==2:
     kern = np.zeros((40,1,1)) ## must be odd
     kern[:,0,0]  = 1
     kern[20,0,0] = 2
     cfig.mask = kern
-    cfig.savedir = Path(savedir / 'e01_alexretina/v2_timelapse2/')
-    # cfig.best_model = savedir / 'e01_alexretina/v2_timelapse2/m/'
     cfig.masker  = denoise_utils.structN2V_masker
   if pid==3:
     kern = np.zeros((40,1,1)) ## must be odd
@@ -96,8 +144,9 @@ def _job10_alex_retina_3D(img,pid=1):
     kern[20,0,0] = 2
     cfig.mask = kern
     cfig.masker  = denoise_utils.footprint_masker
-    cfig.savedir = Path(savedir / 'e01_alexretina/v2_timelapse3/')
-    # cfig.best_model = savedir / 'e01_alexretina/v2_timelapse3/m/'
+
+  cfig.savedir = savedir / f'e01_alexretina/v2_timelapse3d_{pid}/'
+
 
   def _ltvd(config):
     td = SimpleNamespace()    
@@ -122,7 +171,7 @@ def job10_alex_retina_2D(pid=1):
   T = denoiser.train_init(cfig)
   denoiser.train(T)
   res = denoiser.predict_raw(T.m.net,img[33,:,None],dims="NCYX",ta=T.ta)
-  # save(res.astype(np.float16),T.config.savedir / 'pred_t33.tif')
+  save(res.astype(np.float16),T.config.savedir / 'pred_t33.tif')
 
 def _job10_alex_retina_2D(img,pid=1):
   """
@@ -142,7 +191,8 @@ def _job10_alex_retina_2D(img,pid=1):
   ## 2
   if pid==1:
     cfig.masker  = denoise_utils.nearest_neib_masker
-    cfig.savedir = savedir / 'e01_alexretina/v2_timelapse2d_0/'
+
+  cfig.savedir = savedir / f'e01_alexretina/v2_timelapse2d_{pid:d}/'
 
   def _ltvd(config):
     td = SimpleNamespace()
@@ -260,35 +310,53 @@ def job12_horst_predict():
     '/projects/project-broaddus/rawdata/HorstObenhaus/60480-openfield_00001_00004.tif',
     '/projects/project-broaddus/rawdata/HorstObenhaus/60480-openfield_00001_00005.tif',
     '/projects/project-broaddus/rawdata/HorstObenhaus/60480-openfield_00001_00006.tif',
-    '/projects/project-broaddus/rawdata/HorstObenhaus/88592-openfield_00001_00003.tif',
     '/projects/project-broaddus/rawdata/HorstObenhaus/88592-openfield_00001_00001.tif',
     '/projects/project-broaddus/rawdata/HorstObenhaus/88592-openfield_00001_00002.tif',
+    '/projects/project-broaddus/rawdata/HorstObenhaus/88592-openfield_00001_00003.tif',
     '/projects/project-broaddus/rawdata/HorstObenhaus/88592-openfield_00001_00004.tif',
   ]
 
   from segtools.numpy_utils import norm_to_percentile_and_dtype
 
   model = torch_models.Unet2(16, [[1],[1]], pool=(2,2), kernsize=(5,5), finallayer=torch_models.nn.Sequential).cuda()
-  model.load_state_dict(torch.load(savedir / "e08_horst/v2_t02/m/net049.pt"))
   print(torch_models.summary(model, (1,512,512)))
 
-  for name in imglist:
-    resname = name.replace("HorstObenhaus/","HorstObenhaus/pred_")
-    if Path(resname).exists(): continue
+  model.load_state_dict(torch.load(savedir / "e08_horst/v2_t02/m/net049.pt"))
+
+  for i in range(10):
+    if i<6: model.load_state_dict(torch.load(savedir / "e08_horst/v2_t06/m/net049.pt"))
+    else: model.load_state_dict(torch.load(savedir / "e08_horst/v2_t02/m/net049.pt"))
+    
+    name = imglist[i]
+    resname = name.replace("HorstObenhaus/","HorstObenhaus/test/pred_")
+
+    # if Path(resname).exists(): continue
     img = load(name)[::2]
     img = img[:,None] # to conform to "NCYX"
     print(name, Path(name).exists(), '\n')
     res = denoiser.predict_raw(model,img,"NCYX")
     res = norm_to_percentile_and_dtype(res,img,2,99.5)
     save(res,resname)
+    save(res[:20],resname.replace("test/pred","test/f20_pred"))
+    save(img[:20],resname.replace("test/pred","test/f20_img"))
     
 def job12_horst(pid=1):
 
-  if pid <= 4: img = load('/projects/project-broaddus/rawdata/HorstObenhaus/img60480.npy')
-  elif 4 < pid <= 8: img = load('/projects/project-broaddus/rawdata/HorstObenhaus/img88592.npy')
-  elif 8 < pid <= 12:
-    img = load(f'/projects/project-broaddus/rawdata/HorstObenhaus/60480-openfield_00001_0000{pid-8}.tif')
-    img = img[:2000:20] ## odd frames are blank (seperate channel). subsample for easy training.
+  p0,p1 = np.unravel_index(pid,[2,4])
+
+  names = [
+    '/projects/project-broaddus/rawdata/HorstObenhaus/img60480.npy',
+    '/projects/project-broaddus/rawdata/HorstObenhaus/img88592.npy',
+  ]
+  # if p0==0: img = load('/projects/project-broaddus/rawdata/HorstObenhaus/img60480.npy')
+  # elif p0==1: img = load('/projects/project-broaddus/rawdata/HorstObenhaus/img88592.npy')
+
+  img = load(names[p0])
+
+  # elif p0==2:
+  #   img = load(f'/projects/project-broaddus/rawdata/HorstObenhaus/60480-openfield_00001_0000{pid-8}.tif')
+  #   img = load(f'/projects/project-broaddus/rawdata/HorstObenhaus/60480-openfield_00001_0000{p1}.tif')
+  #   img = img[:2000:20] ## odd frames are blank (seperate channel). subsample for easy training.
 
   # img = load('/projects/project-broaddus/rawdata/HorstObenhaus/img60480.npy')
   # if pid==9:
@@ -296,7 +364,7 @@ def job12_horst(pid=1):
   #   _job12_nlm_horst(img)
   #   return
 
-  img = img[:,None]
+  img  = img[:,None]
   cfig = _job12_horst(img,pid=pid)
 
   T   = denoiser.train_init(cfig)
@@ -325,22 +393,23 @@ def _job12_horst(data,pid=1):
   cfig.sampler      = denoiser.flat_sampler
   cfig.getnet       = lambda : torch_models.Unet2(16, [[1],[1]], pool=(2,2), kernsize=(5,5), finallayer=torch_models.nn.Sequential)
 
-  if pid in [1,5]:
+  if p1==0:
     kern = np.array([[1,1,1,1,1]])
     cfig.mask = kern
     cfig.masker = denoise_utils.structN2V_masker
-  if pid in [2,6]:
+  if p1==1:
     kern = np.array([[1,1,1]])
     cfig.mask = kern
     cfig.masker = denoise_utils.structN2V_masker
-  elif pid in [3,7]:
+  if p1==2:
     kern = np.array([[1]])
     cfig.mask = kern
     cfig.masker = denoise_utils.structN2V_masker
-  elif pid in [4,8]:
+  if p1==3:
     cfig.masker = denoise_utils.nearest_neib_masker
 
-  cfig.savedir = savedir / f'e08_horst/v2_t{pid:02d}/'
+  cfig.savedir = savedir / f'e08_horst/pid{pid:02d}/'
+  # cfig.savedir = savedir / f'e08_horst/v2_t{pid+1:02d}/'
   # cfig.best_model = savedir / f'e08_horst/v2_t{pid-4:02d}' / 'm/net049.pt'
 
   def _ltvd(config):
@@ -380,7 +449,6 @@ def job13_mangal(pid=3):
   cfig = _job13_mangal(img,pid=pid)
 
   T = denoiser.train_init(cfig)
-
   denoiser.train(T)
   net, ta = T.m.net, T.ta
   # ta = None
@@ -443,43 +511,58 @@ def _job13_mangal(data,pid):
 
 ## train 7x1 c. elegans gaussian detector
 
-def job14_celegans(pid=0):
+def e14_celegans(pid=0):
   """
   train on a single timepoint with an appropriate kernel size.
   see how predictions decay at other times.
   """
 
+  p0,p1,p2 = np.unravel_index(pid,[3,3,3]) ## train timepoint, kernel size, n repeats
+  ## NOTE: pid = np.ravel_multi_index([p0,p1,p2],[3,3,3])
+
   ## Train a detection model on a single timepoint
-  train_time = {0:0,1:100,2:180}[pid]
+  train_time = {0:6,1:100,2:180}[p0]
+
   trainset = "01"
-  testset = "01"
+  testset  = "01"
   
-  img  = load(f"/projects/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/{trainset}/t{train_time:03d}.tif")
-  img  = img[None,None]
+  img  = np.array([load(f"/projects/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/{trainset}/t{n:03d}.tif") for n in [train_time, train_time+1]])
+  img  = img[:,None]
   img  = normalize3(img,2,99.4,clip=False)
-  pts  = np.array(load(f"/projects/project-broaddus/rawdata/celegans_isbi/traj/Fluo-N3DH-CE/{trainset}_traj.pkl"))[[train_time]]
-  cfig = _job14_celegans(img,pts,pid=pid)
+  pts  = np.array(load(f"/projects/project-broaddus/rawdata/celegans_isbi/traj/Fluo-N3DH-CE/{trainset}_traj.pkl"))[[train_time, train_time+1]]
+  cfig = _e14_celegans(img,pts,pid=pid)
+
+  # return SimpleNamespace(**locals())
   
   ## Don't retrain if not necessary
-  if Path(cfig.savedir / "m/net099.pt").exists():
-    net = cfig.getnet().cuda()
-    net.load_state_dict(torch.load(cfig.savedir / "m/net099.pt"))
-  else:
+  # if not Path(cfig.savedir / "m/net020.pt").exists():
+  if True:
     T = detector.train_init(cfig)
     detector.train(T)
-    net, ta = T.m.net, T.ta
-    res = detector.predict_raw(net,img,dims="NCZYX").astype(np.float16)
-    save(res, cfig.savedir / 'pred.npy')
 
-  ## Predict and Evaluate model result
+  ## best model decided by vali score
+  ## WARNING: only works with one vali image (index [0]) and takes the first index when scores are tied (this is good).
+  net = cfig.getnet().cuda()
+  vali_scores = load(cfig.savedir / "ta/vali_scores.pkl")
+  def _f1(x):
+    if x.n_proposed==0: return 0.0
+    return 2*x.n_matched / (x.n_proposed + x.n_gt)
+  best_weights = np.array([_f1(x[0][10]) for x in vali_scores]).argmax() + 1
+  if best_weights == 1: best_weights = len(vali_scores)
+  # best_weights = 16
+  net.load_state_dict(torch.load(cfig.savedir / f"m/net{best_weights:03d}.pt"))
+
+  ## show prediction on train & vali data
+  res = detector.predict_raw(net,img,dims="NCZYX").astype(np.float16)
+  save(res, cfig.savedir / 'pred.npy')
+
+  ## Predict and Evaluate model result on all available data
   gtpts = load(f"/projects/project-broaddus/rawdata/celegans_isbi/traj/Fluo-N3DH-CE/{testset}_traj.pkl")
   scores = []
-
-  # for i in [100,180]:
   for i in range(190):
     print(f"pred on {i}")
-    outfile = cfig.savedir / f'scores{testset}/t{i:03d}.pkl'
-    # if outfile.exists(): continue
+    outfile = cfig.savedir / f'dscores{testset}/t{i:03d}.pkl'
+    if outfile.exists(): continue
     x = load(f"/projects/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/{testset}/t{i:03d}.tif")
     x = normalize3(x,2,99.4,clip=False)
     res = detector.predict_raw(net,x,dims="ZYX").astype(np.float32)
@@ -489,64 +572,249 @@ def job14_celegans(pid=0):
     s = {3:score3,10:score10}
     scores.append(s)
     save(s,outfile)
-    if i in [0,100,180]: save(res, cfig.savedir/f'dpred/t{i:03d}.tif')
+    if i in [6,100,180]: save(res, cfig.savedir/f'dpred/t{i:03d}.tif')
     print(score10.n_gt, score10.n_matched, score10.n_proposed)
   save(scores, cfig.savedir / f'scores{testset}.pkl')
 
-def _job14_celegans(img,pts,pid):
+def _e14_celegans(img,pts,pid):
   
+  p0,p1,p2 = np.unravel_index(pid,[3,3,3]) ## train timepoint, kernel size, repeat n, 
+  kernelshape = {0:(1,3,3), 1:(1.5,7,7), 2:(2,11,11)}[p1]
+
+  ## all config params
   cfig = SimpleNamespace()
   cfig.savedir = savedir / f'e14_celegans/pid{pid:02d}/'
-  ## prediction / evaluation / training
-  cfig.getnet = lambda : torch_models.Unet3(16, [[1],[1]], finallayer=torch_models.nn.Sequential)
-  ## detector target kernel shape
-  cfig.sigmas       = np.array([1,7,7])
-  cfig.kernel_shape = np.array([43,43,43]) ## 7sigma in each direction
+  cfig.getnet = lambda : torch_models.Unet3(16, [[1],[1]], pool=(1,2,2), kernsize=(3,5,5), finallayer=torch_models.nn.Sequential)
+  cfig.sigmas         = np.array(kernelshape)
+  cfig.kernel_shape = np.array([43,43,43]) ## 7sigma in each direction?
   cfig.rescale_for_matching = [2,1,1]
-  ## fg/bg weights stuff for fluorescence images & class-imbalanced data
   cfig.fg_bg_thresh = np.exp(-16/2)
   cfig.bg_weight_multiplier = 0.0
   cfig.weight_decay = True
-  ## img sampling
-  cfig.sampler      = detector.content_sampler # if pid%2==0 else detector.content_sampler
+  cfig.sampler      = detector.content_sampler
   cfig.patch_space  = np.array([16,128,128])
   cfig.batch_shape  = np.array([1,1,16,128,128])
   cfig.batch_axes   = "BCZYX"
-  ## accumulate gradients, print loss, save x,y,yt,model, save vali_pred, total time in Fwd/Bwd passes
-  # cfig.times = [10,100,500,4000,100_000] ##1k = 5mins 100k = 7 hours ? 100/25 = 4/s 
-  time_total = 10_000
+  time_total = 60_000
   cfig.time_weightdecay = 400 # for pixelwise weights
-  cfig.time_agg = 10 # aggregate gradients before backprop
+  cfig.time_agg = 1 # aggregate gradients before backprop
   cfig.time_print = 100
-  cfig.time_savecrop = max(400,time_total//50)
-  cfig.time_validate = max(500,time_total//50)
+  cfig.time_savecrop = max(200,time_total//50)
+  cfig.time_validate = max(200,time_total//50)
   cfig.time_total = time_total
   cfig.lr = 4e-4
+  cfig.continue_training = False
 
   def _ltvd(config):
     td = SimpleNamespace()
     td.input  = img[[0]]
     td.target = detector._pts2target(pts[[0]],img[0,0].shape,cfig)[None]
     td.gt = pts[[0]]
-    # detector.add_meta_to_td(td)
     vd = SimpleNamespace()
-    vd.input  = img[[0]]
-    vd.target = detector._pts2target(pts[[0]],img[0,0].shape,cfig)[None]
-    vd.gt = pts[[0]]
-    # detector.add_meta_to_td(vd)
+    vd.input  = img[[1]]
+    vd.target = detector._pts2target(pts[[1]],img[1,0].shape,cfig)[None]
+    vd.gt = pts[[1]]
     return td,vd
   cfig.load_train_and_vali_data = _ltvd
 
-  detector.check_config(cfig)
+  return cfig
+
+
+## example detection in c. elegans with StructN2V denoising
+
+def e15_celegans(pid=0):
+  """
+  denoise c. elegans images
+  """
+  p0,p1,p2 = np.unravel_index(pid,[3,3,3]) ## train timepoint, kernel size, n repeats
+  ## NOTE: pid = np.ravel_multi_index([p0,p1,p2],[3,3,3])
+
+  ## Train a detection model on a single timepoint
+  train_time = {0:6,1:100,2:180}[p0]
+
+  trainset = "01"
+  testset  = "01"
+  
+  img  = np.array([load(f"/projects/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/{trainset}/t{n:03d}.tif") for n in [train_time, train_time+1]])
+  img  = img[:,None]
+  img  = normalize3(img,2,99.4,clip=False)
+  pts  = np.array(load(f"/projects/project-broaddus/rawdata/celegans_isbi/traj/Fluo-N3DH-CE/{trainset}_traj.pkl"))[[train_time, train_time+1]]
+  cfig = _e15_celegans(img,pid=pid)
+
+  if True:
+    T = denoiser.train_init(cfig)
+    # return SimpleNamespace(**locals())
+    denoiser.train(T)
+    net, ta = T.m.net, T.ta
+
+
+  res = denoiser.predict_raw(net,img,dims="NCZYX",ta=ta)
+  save(res,cfig.savedir / 'pred.npy')
+
+def _e15_celegans(img,pid=0):
+  # cfig = denoiser.config_example()
+  cfig = SimpleNamespace()
+
+  t=5_000
+  cfig.times = [10,100,t//50,t//50,t]
+  cfig.lr = 1e-4
+  cfig.batch_space  = np.array([16,128,128])
+  cfig.batch_shape  = np.array([1,1,16,128,128])
+  cfig.sampler      = denoiser.flat_sampler
+  cfig.getnet       = lambda : torch_models.Unet2(16, [[1],[1]], pool=(1,2,2), kernsize=(3,5,5), finallayer=torch_models.nn.Sequential)
+
+  kern = np.ones([1,17,1]) #np.array([[[1]]])
+  cfig.mask = kern
+  cfig.masker = denoise_utils.structN2V_masker
+
+  # if pid in [1,5]:
+  #   kern = np.array([[1,1,1,1,1]])
+  #   cfig.mask = kern
+  #   cfig.masker = denoise_utils.structN2V_masker
+  # if pid in [2,6]:
+  #   kern = np.array([[1,1,1]])
+  #   cfig.mask = kern
+  #   cfig.masker = denoise_utils.structN2V_masker
+  # elif pid in [3,7]:
+  #   kern = np.array([[1]])
+  #   cfig.mask = kern
+  #   cfig.masker = denoise_utils.structN2V_masker
+  # elif pid in [4,8]:
+  #   cfig.masker = denoise_utils.nearest_neib_masker
+
+  cfig.savedir = savedir / f'e15_celegans/pid{pid:02d}/'
+  cfig.continue_training = False
+
+  def _ltvd(config):
+    td = SimpleNamespace()
+    td.input  = img[[0]]
+    td.target = img[[0]]
+    denoiser.add_meta_to_td(td)
+    vd = SimpleNamespace()
+    vd.input  = img[[1]]
+    vd.target = img[[1]]
+    denoiser.add_meta_to_td(vd)
+    return td,vd
+  cfig.load_train_and_vali_data = _ltvd
+
+  return cfig
+
+## c_elegans train on multiple timepoints
+
+def e16_celegans(pid=0):
+  """
+  train on a single timepoint with an appropriate kernel size.
+  see how predictions decay at other times.
+  """
+
+  p0,p1,p2 = np.unravel_index(pid,[2,3,5]) ## sampler type, kernel size, repeat n, 
+
+  ## Train a detection model on a single timepoint
+  # train_time = {0:6,1:100,2:180}[p0]
+  # train_times = [6,100,180]
+
+  trainset = "01"
+  testset  = "01"
+  
+  img  = np.array([load(f"/projects/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/{trainset}/t{n:03d}.tif") for n in [6,7,100,101,180,181]])
+  img  = img[:,None]
+  img  = normalize3(img,2,99.4,clip=False)
+  pts  = np.array(load(f"/projects/project-broaddus/rawdata/celegans_isbi/traj/Fluo-N3DH-CE/{trainset}_traj.pkl"))[[6,7,100,101,180,181]]
+  cfig = _e16_celegans(img,pts,pid=pid)
+
+  # return SimpleNamespace(**locals())
+  
+  ## Don't retrain if not necessary
+  # if not Path(cfig.savedir / "m/net020.pt").exists():
+  if True:
+    T = detector.train_init(cfig)
+    detector.train(T)
+
+  ## best model decided by vali score
+  ## WARNING: only works with one vali image (index [0]) and takes the first index when scores are tied (this is good).
+  net = cfig.getnet().cuda()
+  vali_scores = load(cfig.savedir / "ta/vali_scores.pkl")
+  def _f1(x):
+    if x.n_proposed==0: return 0.0
+    return 2*x.n_matched / (x.n_proposed + x.n_gt)
+  best_weights = np.array([sum([_f1(x[0][10]), _f1(x[1][10]), _f1(x[2][10])]) for x in vali_scores]).argmax() + 1
+  if best_weights == 1: best_weights = len(vali_scores)
+  # best_weights = 16
+  net.load_state_dict(torch.load(cfig.savedir / f"m/net{best_weights:03d}.pt"))
+
+  ## show prediction on train & vali data
+  res = detector.predict_raw(net,img,dims="NCZYX").astype(np.float16)
+  save(res, cfig.savedir / 'pred.npy')
+
+  ## Predict and Evaluate model result on all available data
+  gtpts = load(f"/projects/project-broaddus/rawdata/celegans_isbi/traj/Fluo-N3DH-CE/{testset}_traj.pkl")
+  scores = []
+  for i in range(190):
+    print(f"pred on {i}")
+    outfile = cfig.savedir / f'dscores{testset}/t{i:03d}.pkl'
+    if outfile.exists(): continue
+    x = load(f"/projects/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/{testset}/t{i:03d}.tif")
+    x = normalize3(x,2,99.4,clip=False)
+    res = detector.predict_raw(net,x,dims="ZYX").astype(np.float32)
+    pts = peak_local_max(res,threshold_abs=.2,exclude_border=False,footprint=np.ones((3,8,8)))
+    score3  = point_matcher.match_unambiguous_nearestNeib(gtpts[i],pts,dub=3,scale=[2,1,1])
+    score10 = point_matcher.match_unambiguous_nearestNeib(gtpts[i],pts,dub=10,scale=[2,1,1])
+    s = {3:score3,10:score10}
+    scores.append(s)
+    save(s,outfile)
+    if i in [6,7,100,101,180,181]: save(res, cfig.savedir/f'dpred/t{i:03d}.tif')
+    print(score10.n_gt, score10.n_matched, score10.n_proposed)
+  save(scores, cfig.savedir / f'scores{testset}.pkl')
+
+def _e16_celegans(img,pts,pid):
+  
+  p0,p1,p2 = np.unravel_index(pid,[2,3,5]) ## sampler type, kernel size, repeat n, 
+  kernelshape = [(1,3,3), (1.5,7,7), (2,11,11)][p1]
+
+  ## all config params
+  cfig = SimpleNamespace()
+  cfig.savedir = savedir / f'e14_celegans/pid{pid:02d}/'
+  cfig.getnet = lambda : torch_models.Unet3(16, [[1],[1]], pool=(1,2,2), kernsize=(3,5,5), finallayer=torch_models.nn.Sequential)
+  cfig.sigmas         = np.array(kernelshape)
+  cfig.kernel_shape = cfig.sigmas * 7 #np.array([43,43,43]) ## 7sigma in each direction?
+  cfig.rescale_for_matching = [3,1,1]
+  cfig.fg_bg_thresh = np.exp(-16/2)
+  cfig.bg_weight_multiplier = 0.0
+  cfig.weight_decay = True
+  cfig.sampler      = [detector.flat_sampler, detector.content_sampler][p0]
+  cfig.patch_space  = np.array([16,128,128])
+  cfig.batch_shape  = np.array([1,1,16,128,128])
+  cfig.batch_axes   = "BCZYX"
+  time_total = 1_000
+  cfig.time_weightdecay = 400 # for pixelwise weights
+  cfig.time_agg = 1 # aggregate gradients before backprop
+  cfig.time_print = 100
+  cfig.time_savecrop = max(200,time_total//50)
+  cfig.time_validate = max(200,time_total//50)
+  cfig.time_total = time_total
+  cfig.lr = 4e-4
+  cfig.continue_training = False
+
+  def _ltvd(config):
+    td = SimpleNamespace()
+    td.input  = img[[0,2,4]]
+    td.target = detector._pts2target(pts[[0,2,4]],img[0,0].shape,cfig)[None]
+    td.gt = pts[[0,2,4]]
+    vd = SimpleNamespace()
+    vd.input  = img[[1,3,5]]
+    vd.target = detector._pts2target(pts[[1,3,5]],img[1,0].shape,cfig)[None]
+    vd.gt = pts[[1,3,5]]
+    return td,vd
+  cfig.load_train_and_vali_data = _ltvd
 
   return cfig
 
 
 
-## run single job from command line
 
 if __name__ == '__main__':
-  job12_horst(pid=4)
+  "RUN ALL THE EXPERIMENTS!"
+  run_slurm()
 
 
 history = """
@@ -569,6 +837,13 @@ We have two Horst datasets. Should we train on one, pred on the other? Or do it 
 Adding Mangal's nuclei datasets to see if my code produces stripes like the juglab StructN2V implementation does.
 
 # 2020-09-17 15:36:53
+
+# Thu Sep 24 01:39:44 2020
+
+OK, I realized that for this type of experiment structure I don't need snakemake at all, nor any other fancy shit.
+Each experiment function is totally self contained, with all paths, etc, except for a single, global savedir path.
+Also, I can run all parameter versions of all jobs via SLURM with a single run_slurm() function!
+
 
 
 

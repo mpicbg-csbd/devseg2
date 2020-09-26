@@ -38,10 +38,11 @@ from segtools.ns2dir import load, save, flatten
 import collections
 import isbi_tools
 
-def setup_dirs(savedir):
-  if savedir.exists(): shutil.rmtree(savedir)
-  savedir.mkdir(exist_ok=True,parents=True)
-  (savedir/'m').mkdir(exist_ok=True)
+def setup_dirs(config):
+
+  savedir = config.savedir
+  if savedir.exists() and not config.continue_training: shutil.rmtree(savedir)
+  (savedir/'m').mkdir(exist_ok=True,parents=True)
   shutil.copy("/projects/project-broaddus/devseg_2/src/detector.py",savedir)
 
 # def load_object():
@@ -86,6 +87,8 @@ def config_example():
   config.time_validate = 400
   config.time_total = 1_000
   config.lr = 2e-4
+  config.continue_training = True
+
   config.load_train_and_vali_data = lambda config: ("td","vd") # config -> traindata, validata
   return config
 
@@ -96,13 +99,13 @@ def check_config(config):
 
   missing = d.keys() - e.keys()
   extra = e.keys() - d.keys()
-  assert len(missing) is 0
-  print("Extra Keys: ", extra)
+  assert len(missing) is 0, str(missing)
+  # print("Extra Keys: ", extra)
 
   for k,v in d.items(): 
-    print(k,type(d[k]),type(e[k]))
-    assert type(d[k]) is type(e[k])
-  print("Value types agree")
+    # print(k,type(d[k]),type(e[k]))
+    assert type(d[k]) is type(e[k]), str(type(d[k]))
+  print("Keys and Value Types Agree: Config Check Passed.")
 
 # def add_meta_to_td(td):
 #   # td.axes = "TCYX"
@@ -115,20 +118,34 @@ def check_config(config):
 def train_init(config):
   check_config(config)
   config.savedir = Path(config.savedir).resolve()
-  setup_dirs(config.savedir)
+  setup_dirs(config)
 
   ## training params we don't want to control directly, and artifacts that change over training time.
   # ta = SimpleNamespace(i=0,losses=[],lr=2e-4,i_final=config.bp_per_epoch*22,save_count=0,vali_scores=[],timings=[],heights=[])
-  ta = SimpleNamespace(i=1,losses=[],lr=config.lr,save_count=0,vali_scores=[],timings=[],heights=[])
+
+  ## load model, save receptive field, randomize weights...
+  m = SimpleNamespace()
+  m.net = config.getnet().cuda()
+  m.opt = torch.optim.Adam(m.net.parameters(), lr = config.lr)
+  save(torch_models.receptivefield(m.net,kern=(3,5,5)),config.savedir / 'receptive_field.tif')
+  torch_models.init_weights(m.net)
+  print("Weights randomized...")
+
+  i = 1
+  if config.continue_training:
+    last_weights = str(sorted(Path(config.savedir/'m/').glob("net*.pt"))[-1])
+    n = int(last_weights[-6:-3])
+    i = n*config.time_validate + 1
+    m.net.load_state_dict(torch.load(last_weights))
+    print(last_weights)
+
+  # ipdb.set_trace()
+
+  ta = SimpleNamespace(i=i,losses=[],lr=config.lr,save_count=0,vali_scores=[],timings=[],heights=[])
   # ta.__dict__.update(**{**defaults,**ta.__dict__})
   
   ## load train and vali data
   vd,td = config.load_train_and_vali_data(config)
-
-  ## model
-  m = SimpleNamespace()
-  m.net = config.getnet().cuda()
-  m.opt = torch.optim.Adam(m.net.parameters(), lr = config.lr)
 
   T  = SimpleNamespace(m=m,vd=vd,td=td,ta=ta,c=config)
 
@@ -178,10 +195,10 @@ def train(T):
         save(x[0,0].detach().cpu().numpy().astype(np.float16)  , config.savedir/f"epoch/x/a{n:03d}.npy")
         save(y[0,0].detach().cpu().numpy().astype(np.float16)  , config.savedir/f"epoch/y/a{n:03d}.npy")
         save(yt[0,0].detach().cpu().numpy().astype(np.float16) , config.savedir/f"epoch/yt/a{n:03d}.npy")
-        torch.save(m.net.state_dict(), config.savedir / f'm/net{n:03d}.pt')
 
     if ta.i%config.time_validate==0:
       n = ta.i//config.time_validate
+      torch.save(m.net.state_dict(), config.savedir / f'm/net{n:03d}.pt')
       validate(vd,T)
 
 
@@ -191,22 +208,25 @@ def validate(vd,T):
   m,ta,config = T.m, T.ta, T.c
   vs = []
   n = ta.i//config.time_validate
-  with torch.no_grad():
-    for i in range(vd.input.shape[0]):
-      res = torch_models.apply_net_tiled_3d(m.net,vd.input[i])
-      pts = peak_local_max(res[0],threshold_abs=.2,exclude_border=False,footprint=np.ones((3,8,8)))
-      score3  = match_unambiguous_nearestNeib(vd.gt[i],pts,dub=3,scale=config.rescale_for_matching)
-      score10 = match_unambiguous_nearestNeib(vd.gt[i],pts,dub=10,scale=config.rescale_for_matching)
-      s3  = [score3.n_matched,  score3.n_proposed,  score3.n_gt]
-      s10 = [score10.n_matched, score10.n_proposed, score10.n_gt]
-      print(ta.i,i,s3,s10)
-      vs.append([s3,s10])
-      save(res[0].max(0).astype(np.float16),config.savedir / f"ta/mx_z/e{n:03d}_i{i}.tif")
-      # save(res[0],config.savedir / f"ta/pred/e{e}_i{i}.tif")
-      # save(res[0,ta.patch_space[0]//2].astype(np.float16),config.savedir / f"ta/ms_z/e{ta.save_count:02d}_i{i}.tif")
-      # save(res[0].max(1).astype(np.float16),config.savedir / f"ta/mx_y/e{ta.save_count:02d}_i{i}.tif")
-      # save(res[0].max(2).astype(np.float16),config.savedir / f"ta/mx_x/e{ta.save_count:02d}_i{i}.tif")
-      # save(res[0].astype(np.float16),config.savedir / f"ta/vali_full/e{ta.save_count:02d}_i{i}.tif")
+  for i in range(vd.input.shape[0]):
+    res = torch_models.apply_net_tiled_3d(m.net,vd.input[i])
+
+    ## validation loss
+    # with torch.no_grad:
+    valloss = (np.abs(res-vd.target[i])**2).mean()
+
+    ## detection scores
+    pts = peak_local_max(res[0],threshold_abs=.2,exclude_border=False,footprint=np.ones((3,8,8)))
+    score3  = match_unambiguous_nearestNeib(vd.gt[i],pts,dub=3,scale=config.rescale_for_matching)
+    score10 = match_unambiguous_nearestNeib(vd.gt[i],pts,dub=10,scale=config.rescale_for_matching)
+    s3  = [score3.n_matched,  score3.n_proposed,  score3.n_gt]
+    s10 = [score10.n_matched, score10.n_proposed, score10.n_gt]
+    print(ta.i,i,s3,s10)
+
+    ## save it
+    vs.append({3:score3, 10:score3, 'loss':valloss})
+    save(res[0].max(0).astype(np.float16),config.savedir / f"ta/mx_z/e{n:03d}_i{i}.tif")
+
   ta.vali_scores.append(vs)
 
 def _pts2target(list_of_pts,sh,config):

@@ -34,7 +34,8 @@ from segtools.numpy_utils import collapse2, normalize3, plotgrid
 from segtools import color
 from segtools.defaults.ipython import moviesave
 
-from ns2dir import ns2dir, dir2ns
+# from ns2dir import ns2dir, dir2ns
+#TODO: replace with `from segtools.ns2dir import load, save, flatten` and refactor
 
 import torch_models
 import predict

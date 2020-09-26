@@ -40,10 +40,10 @@ import collections
 from denoise_utils import structN2V_masker
 
 
-def setup_dirs(savedir):
-  if savedir.exists(): shutil.rmtree(savedir)
-  savedir.mkdir(exist_ok=True,parents=True)
-  (savedir/'m').mkdir(exist_ok=True)
+def setup_dirs(config):
+  savedir = config.savedir
+  if savedir.exists() and not config.continue_training: shutil.rmtree(savedir)
+  (savedir/'m').mkdir(exist_ok=True,parents=True)
   shutil.copy("/projects/project-broaddus/devseg_2/src/denoiser.py",savedir)
 
 def eg_img_meta():
@@ -57,11 +57,15 @@ def config_example():
   ## prediction / evaluation / training
   config.getnet = lambda : torch_models.Unet3(16, [[1],[1]], pool=(2,2), kernsize=(5,5), finallayer=torch_models.nn.Sequential)
   
+  config.savedir = Path("An/Example/Directory")
+  config.load_train_and_vali_data = lambda config: ("td","vd") # config -> traindata, validata
   ## general img2img model ltraining
   config.sampler      = flat_sampler
+  config.mask         = np.ones([1,17])
   config.masker       = structN2V_masker
   config.batch_shape  = np.array([1,1,512,512])
   config.batch_space  = np.array([512,512])
+  config.continue_training = True
 
   ## accumulate gradients, print loss, save x,y,yt,model, save vali_pred, total time in Fwd/Bwd passes
   config.times = [10,100,500,4000,10**5]
@@ -69,14 +73,23 @@ def config_example():
 
   return config
 
-# def get_net(config):
-#   net = config.getnet().cuda()
-#   try:
-#     net.load_state_dict(torch.load(config.best_model))
-#   except:
-#     print("no best_model, randomizing model weights...")
-#     torch_models.init_weights(net)
-#   return net
+def check_config(config):
+  "trivial check that keys match"
+  d = config_example().__dict__
+  e = config.__dict__
+
+  missing = d.keys() - e.keys()
+  print("missing: ", missing)
+  assert len(missing) is 0, str(missing)
+
+  extra = e.keys() - d.keys()
+  print("extra: ", extra)
+  assert len(extra) is 0, str(extra)
+
+  for k,v in d.items(): 
+    assert type(d[k]) is type(e[k]), str(type(d[k]))
+  print("Keys and Value Types Agree: Config Check Passed.")
+
 
 def normalize_td_vd(ta,td,vd):
   """
@@ -104,26 +117,65 @@ def normalize_raw(raw,ta):
 
   return (raw-mu)/sig, (mu,sig)
 
+
 def train_init(config):
+  check_config(config)
   config.savedir = Path(config.savedir).resolve()
-  setup_dirs(config.savedir)
+  setup_dirs(config)
 
   ## training params we don't want to control directly, and artifacts that change over training time.
-  ta = SimpleNamespace(i=1,losses=[],lr=config.lr,save_count=0,vali_scores=[],timings=[],heights=[])
-  # ta.__dict__.update(**{**defaults,**ta.__dict__})
+  # ta = SimpleNamespace(i=0,losses=[],lr=2e-4,i_final=config.bp_per_epoch*22,save_count=0,vali_scores=[],timings=[],heights=[])
 
-  ## load train and vali data
-  td,vd = config.load_train_and_vali_data(config)
-  normalize_td_vd(ta,td,vd)
-
-  ## model
+  ## load model, save receptive field, randomize weights...
   m = SimpleNamespace()
   m.net = config.getnet().cuda()
   m.opt = torch.optim.Adam(m.net.parameters(), lr = config.lr)
+  save(torch_models.receptivefield(m.net,kern=(3,5,5)),config.savedir / 'receptive_field.tif')
+  torch_models.init_weights(m.net)
+  print("Weights randomized...")
+
+  i = 1
+  if config.continue_training:
+    last_weights = str(sorted(Path(config.savedir/'m/').glob("net*.pt"))[-1])
+    n = int(last_weights[-6:-3])
+    i = n*config.times[2] + 1
+    m.net.load_state_dict(torch.load(last_weights))
+    print(last_weights)
+
+  # ipdb.set_trace()
+
+  ta = SimpleNamespace(i=i,losses=[],lr=config.lr,save_count=0,vali_scores=[],timings=[],heights=[])
+  # ta.__dict__.update(**{**defaults,**ta.__dict__})
+  
+  ## load train and vali data
+  vd,td = config.load_train_and_vali_data(config)
+  normalize_td_vd(ta,td,vd)
 
   T  = SimpleNamespace(m=m,vd=vd,td=td,ta=ta,config=config)
 
   return T
+
+# def train_init(config):
+#   config.savedir = Path(config.savedir).resolve()
+#   setup_dirs(config.savedir)
+
+#   ## model
+#   m = SimpleNamespace()
+#   m.net = config.getnet().cuda()
+#   m.opt = torch.optim.Adam(m.net.parameters(), lr = config.lr)
+
+
+#   ## training params we don't want to control directly, and artifacts that change over training time.
+#   ta = SimpleNamespace(i=1,losses=[],lr=config.lr,save_count=0,vali_scores=[],timings=[],heights=[])
+#   # ta.__dict__.update(**{**defaults,**ta.__dict__})
+
+#   ## load train and vali data
+#   td,vd = config.load_train_and_vali_data(config)
+#   normalize_td_vd(ta,td,vd)
+
+#   T  = SimpleNamespace(m=m,vd=vd,td=td,ta=ta,config=config)
+
+#   return T
 
 def train(T):
   """
@@ -172,9 +224,9 @@ def train(T):
         save(yt[0,0].detach().cpu().numpy().astype(np.float16) , config.savedir/f"epoch/yt/a{n:03d}.npy")
         torch.save(m.net.state_dict(), config.savedir / f'm/net{n:03d}.pt')
 
-    if ta.i%config.times[3]==0:
-      n = ta.i//config.times[3]
-      # validate(vd,T)
+    # if ta.i%config.times[3]==0:
+    #   n = ta.i//config.times[3]
+    #   # validate(vd,T)
 
 ## Data Loading, Sampling, Weights, Etc
 

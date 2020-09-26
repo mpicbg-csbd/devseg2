@@ -97,20 +97,20 @@ home = experiments2.savedir
 
 rule experiments2:
   input:
-    [home / f'e14_celegans/pid{pid:02d}/scores01.pkl' for pid in [0,1,2]],
-    [home / f"e08_horst/v2_t{pid:02d}/pred.npy" for pid in range(1,9)],
-    [f"job10_alex_retina_3D_{pid:d}" for pid in [1,2,3]],
-    "job10_alex_retina_2D_1",
-    [home / f'e07_synmem/v2_t{pid:02d}/pred.npy' for pid in [0,1,2]],
-    [home / f"e09_mangalnuclei/v3_t{pid:02d}/pred.npy" for pid in range(1,9)],
+    [home / f'e14_celegans/pid{pid:02d}/scores01.pkl' for pid in range(9,3*9)],
+    # [home / f'e01_alexretina/v2_timelapse3d_{pid:d}/pred_t33.tif' for pid in [1,2,3]],
+    # [home / f'e01_alexretina/v2_timelapse2d_{pid:d}/pred_t33.tif' for pid in [1]],
+    # [home / f'e07_synmem/v2_t{pid:02d}/pred.npy' for pid in [1,2,3]],
+    # [home / f"e08_horst/v2_t{pid:02d}/pred.npy" for pid in range(1,9)],
+    # [home / f"e09_mangalnuclei/v3_t{pid:02d}/pred.npy" for pid in range(1,9)],
 
 rule job10_alex_retina_3D:
-  output: "job10_alex_retina_3D_{pid}"
+  output: home / 'e01_alexretina/v2_timelapse3d_{pid}/pred_t33.tif'
   run:
     experiments2.job10_alex_retina_3D(pid=int(wildcards.pid))
 
 rule job10_alex_retina_2D:
-  output: "job10_alex_retina_2D_{pid}"
+  output: home / 'e01_alexretina/v2_timelapse2d_{pid}/pred_t33.tif'
   run:
     experiments2.job10_alex_retina_2D(pid=int(wildcards.pid))
 
@@ -129,8 +129,8 @@ rule job13_mangal:
   run:
     experiments2.job13_mangal(pid=int(wildcards.pid))
 
-rule job14_celegans:
+rule e14_celegans:
   output: home / 'e14_celegans/pid{pid}/scores01.pkl'
   run:
-    experiments2.job13_mangal(pid=int(wildcards.pid))
+    experiments2.e14_celegans(pid=int(wildcards.pid))
 
