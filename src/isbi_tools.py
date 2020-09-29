@@ -50,6 +50,13 @@ def evaluate_isbi_DET(base_dir,detname,pred='01',fullanno=True):
   """
   run([DET_command],shell=True)
 
+def rasterize_detections(sigmas, traj, imgshape):
+  for i in range(len(traj)):
+    pts = traj[i]
+    kerns = [np.zeros(3*sigmas) + j + 1 for j in range(len(pts))]
+    lab   = conv_at_pts_multikern(pts,kerns,shape).astype(np.uint16)
+    return lab
+
 
 
 

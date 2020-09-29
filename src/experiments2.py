@@ -74,24 +74,21 @@ def run_slurm():
   # cmd = 'sbatch -J e13_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 12:00:00 -c 1 --mem 128000 -o slurm/e13_pid{pid:02d}.out -e slurm/e13_pid{pid:02d}.err --wrap \'python3 -c \"import experiments2; experiments2.job13_mangal({pid})\"\' '
   # for pid in range(1,9): Popen(cmd.format(pid=pid),shell=True)
 
-  ## e14_celegans
+  # e14_celegans
   cmd = 'sbatch -J e14_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 12:00:00 -c 1 --mem 128000 -o slurm/e14_pid{pid:02d}.out -e slurm/e14_pid{pid:02d}.err --wrap \'python3 -c \"import experiments2; experiments2.e14_celegans({pid})\"\' '
-  # for pid in range(27): Popen(cmd.format(pid=pid),shell=True)
-  for pid in [27]: Popen(cmd.format(pid=pid),shell=True)
+  for pid in range(3*3*5): Popen(cmd.format(pid=pid),shell=True)
 
-  ## e15_celegans
-  cmd = 'sbatch -J e15_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 12:00:00 -c 1 --mem 128000 -o slurm/e15_pid{pid:02d}.out -e slurm/e15_pid{pid:02d}.err --wrap \'python3 -c \"import experiments2; experiments2.e15_celegans({pid})\"\' '
-  for pid in range(3): Popen(cmd.format(pid=pid),shell=True)
+  # ## e15_celegans
+  # cmd = 'sbatch -J e15_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 12:00:00 -c 1 --mem 128000 -o slurm/e15_pid{pid:02d}.out -e slurm/e15_pid{pid:02d}.err --wrap \'python3 -c \"import experiments2; experiments2.e15_celegans({pid})\"\' '
+  # for pid in range(3): Popen(cmd.format(pid=pid),shell=True)
 
-  ## e16_celegans
-  cmd = 'sbatch -J e16_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 12:00:00 -c 1 --mem 128000 -o slurm/e16_pid{pid:02d}.out -e slurm/e16_pid{pid:02d}.err --wrap \'python3 -c \"import experiments2; experiments2.e16_celegans({pid})\"\' '
-  # for pid in range(27): Popen(cmd.format(pid=pid),shell=True)
-  for pid in range(2*3*5): Popen(cmd.format(pid=pid),shell=True)
-
+  # ## e16_celegans
+  # cmd = 'sbatch -J e16_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 12:00:00 -c 1 --mem 128000 -o slurm/e16_pid{pid:02d}.out -e slurm/e16_pid{pid:02d}.err --wrap \'python3 -c \"import experiments2; experiments2.e16_celegans({pid})\"\' '
+  # # for pid in range(27): Popen(cmd.format(pid=pid),shell=True)
+  # for pid in range(2*3*5): Popen(cmd.format(pid=pid),shell=True)
 
 def testme(pid):
   print(f"The pid is {pid}.")
-
 
 
 ## Alex's retina 3D
@@ -515,13 +512,15 @@ def e14_celegans(pid=0):
   """
   train on a single timepoint with an appropriate kernel size.
   see how predictions decay at other times.
+  v2 changed the size of the target kernel container, because the big kernel had square boundaries.
+  v3 added augmentation
   """
 
-  p0,p1,p2 = np.unravel_index(pid,[3,3,3]) ## train timepoint, kernel size, n repeats
-  ## NOTE: pid = np.ravel_multi_index([p0,p1,p2],[3,3,3])
+  p0,p1,p2 = np.unravel_index(pid,[3,3,5]) ## train timepoint, kernel size, repeat n, 
+  print("params: ", p0, p1, p2)
 
   ## Train a detection model on a single timepoint
-  train_time = {0:6,1:100,2:180}[p0]
+  train_time = [6,100,180][p0]
 
   trainset = "01"
   testset  = "01"
@@ -531,26 +530,23 @@ def e14_celegans(pid=0):
   img  = normalize3(img,2,99.4,clip=False)
   pts  = np.array(load(f"/projects/project-broaddus/rawdata/celegans_isbi/traj/Fluo-N3DH-CE/{trainset}_traj.pkl"))[[train_time, train_time+1]]
   cfig = _e14_celegans(img,pts,pid=pid)
-
-  # return SimpleNamespace(**locals())
   
-  ## Don't retrain if not necessary
-  # if not Path(cfig.savedir / "m/net020.pt").exists():
-  if True:
-    T = detector.train_init(cfig)
-    detector.train(T)
+  T = detector.train_init(cfig)
+  # T = detector.train_continue(cfig)
+  detector.train(T)
 
   ## best model decided by vali score
   ## WARNING: only works with one vali image (index [0]) and takes the first index when scores are tied (this is good).
   net = cfig.getnet().cuda()
-  vali_scores = load(cfig.savedir / "ta/vali_scores.pkl")
-  def _f1(x):
-    if x.n_proposed==0: return 0.0
-    return 2*x.n_matched / (x.n_proposed + x.n_gt)
-  best_weights = np.array([_f1(x[0][10]) for x in vali_scores]).argmax() + 1
-  if best_weights == 1: best_weights = len(vali_scores)
-  # best_weights = 16
-  net.load_state_dict(torch.load(cfig.savedir / f"m/net{best_weights:03d}.pt"))
+  net.load_state_dict(torch.load(cfig.savedir / "m/best_weights.pt"))
+  # vali_scores = load(cfig.savedir / "ta/vali_scores.pkl")
+  # def _f1(x):
+  #   if x.n_proposed==0: return 0.0
+  #   return 2*x.n_matched / (x.n_proposed + x.n_gt)
+  # best_weights = np.array([_f1(x[0][10]) for x in vali_scores]).argmax() + 1
+  # if best_weights == 1: best_weights = len(vali_scores)
+  # # best_weights = 16
+  # net.load_state_dict(torch.load(cfig.savedir / f"m/net{best_weights:03d}.pt"))
 
   ## show prediction on train & vali data
   res = detector.predict_raw(net,img,dims="NCZYX").astype(np.float16)
@@ -559,7 +555,7 @@ def e14_celegans(pid=0):
   ## Predict and Evaluate model result on all available data
   gtpts = load(f"/projects/project-broaddus/rawdata/celegans_isbi/traj/Fluo-N3DH-CE/{testset}_traj.pkl")
   scores = []
-  for i in range(190):
+  for i in [6,7,100,101,180,181]:
     print(f"pred on {i}")
     outfile = cfig.savedir / f'dscores{testset}/t{i:03d}.pkl'
     if outfile.exists(): continue
@@ -578,41 +574,42 @@ def e14_celegans(pid=0):
 
 def _e14_celegans(img,pts,pid):
   
-  p0,p1,p2 = np.unravel_index(pid,[3,3,3]) ## train timepoint, kernel size, repeat n, 
-  kernelshape = {0:(1,3,3), 1:(1.5,7,7), 2:(2,11,11)}[p1]
+  p0,p1,p2 = np.unravel_index(pid,[3,3,5]) ## train timepoint, kernel size, repeat n, 
+
+  kernelshape = [(1,3,3),(1.5,7,7),(2,11,11)][p1]
 
   ## all config params
   cfig = SimpleNamespace()
-  cfig.savedir = savedir / f'e14_celegans/pid{pid:02d}/'
+  cfig.savedir = savedir / f'e14_celegans/v03/pid{pid:02d}/'
   cfig.getnet = lambda : torch_models.Unet3(16, [[1],[1]], pool=(1,2,2), kernsize=(3,5,5), finallayer=torch_models.nn.Sequential)
   cfig.sigmas         = np.array(kernelshape)
-  cfig.kernel_shape = np.array([43,43,43]) ## 7sigma in each direction?
+  cfig.kernel_shape   = (cfig.sigmas*7).astype(np.int) ## 7sigma in each direction?
   cfig.rescale_for_matching = [2,1,1]
   cfig.fg_bg_thresh = np.exp(-16/2)
-  cfig.bg_weight_multiplier = 0.0
+  cfig.bg_weight_multiplier = 1.0
   cfig.weight_decay = True
   cfig.sampler      = detector.content_sampler
   cfig.patch_space  = np.array([16,128,128])
   cfig.batch_shape  = np.array([1,1,16,128,128])
   cfig.batch_axes   = "BCZYX"
-  time_total = 60_000
-  cfig.time_weightdecay = 400 # for pixelwise weights
+  time_total = 4_000
+  cfig.time_weightdecay = 1600 # for pixelwise weights
   cfig.time_agg = 1 # aggregate gradients before backprop
+  cfig.time_loss = 10
   cfig.time_print = 100
-  cfig.time_savecrop = max(200,time_total//50)
+  cfig.time_savecrop = max(100,time_total//50)
   cfig.time_validate = max(200,time_total//50)
   cfig.time_total = time_total
   cfig.lr = 4e-4
-  cfig.continue_training = False
 
   def _ltvd(config):
     td = SimpleNamespace()
     td.input  = img[[0]]
-    td.target = detector._pts2target(pts[[0]],img[0,0].shape,cfig)[None]
+    td.target = detector._pts2target(pts[[0]],img[0,0].shape,cfig)[:,None]
     td.gt = pts[[0]]
     vd = SimpleNamespace()
     vd.input  = img[[1]]
-    vd.target = detector._pts2target(pts[[1]],img[1,0].shape,cfig)[None]
+    vd.target = detector._pts2target(pts[[1]],img[1,0].shape,cfig)[:,None]
     vd.gt = pts[[1]]
     return td,vd
   cfig.load_train_and_vali_data = _ltvd
@@ -667,23 +664,7 @@ def _e15_celegans(img,pid=0):
   cfig.mask = kern
   cfig.masker = denoise_utils.structN2V_masker
 
-  # if pid in [1,5]:
-  #   kern = np.array([[1,1,1,1,1]])
-  #   cfig.mask = kern
-  #   cfig.masker = denoise_utils.structN2V_masker
-  # if pid in [2,6]:
-  #   kern = np.array([[1,1,1]])
-  #   cfig.mask = kern
-  #   cfig.masker = denoise_utils.structN2V_masker
-  # elif pid in [3,7]:
-  #   kern = np.array([[1]])
-  #   cfig.mask = kern
-  #   cfig.masker = denoise_utils.structN2V_masker
-  # elif pid in [4,8]:
-  #   cfig.masker = denoise_utils.nearest_neib_masker
-
   cfig.savedir = savedir / f'e15_celegans/pid{pid:02d}/'
-  cfig.continue_training = False
 
   def _ltvd(config):
     td = SimpleNamespace()
@@ -773,10 +754,10 @@ def _e16_celegans(img,pts,pid):
 
   ## all config params
   cfig = SimpleNamespace()
-  cfig.savedir = savedir / f'e14_celegans/pid{pid:02d}/'
+  cfig.savedir = savedir / f'e16_celegans/pid{pid:02d}/'
   cfig.getnet = lambda : torch_models.Unet3(16, [[1],[1]], pool=(1,2,2), kernsize=(3,5,5), finallayer=torch_models.nn.Sequential)
   cfig.sigmas         = np.array(kernelshape)
-  cfig.kernel_shape = cfig.sigmas * 7 #np.array([43,43,43]) ## 7sigma in each direction?
+  cfig.kernel_shape = (cfig.sigmas * 7).astype(np.int) #np.array([43,43,43]) ## 7sigma in each direction?
   cfig.rescale_for_matching = [3,1,1]
   cfig.fg_bg_thresh = np.exp(-16/2)
   cfig.bg_weight_multiplier = 0.0
@@ -785,24 +766,25 @@ def _e16_celegans(img,pts,pid):
   cfig.patch_space  = np.array([16,128,128])
   cfig.batch_shape  = np.array([1,1,16,128,128])
   cfig.batch_axes   = "BCZYX"
-  time_total = 1_000
+  time_total = 60_000
   cfig.time_weightdecay = 400 # for pixelwise weights
   cfig.time_agg = 1 # aggregate gradients before backprop
+  cfig.time_loss = 10
   cfig.time_print = 100
   cfig.time_savecrop = max(200,time_total//50)
   cfig.time_validate = max(200,time_total//50)
   cfig.time_total = time_total
   cfig.lr = 4e-4
-  cfig.continue_training = False
+
 
   def _ltvd(config):
     td = SimpleNamespace()
     td.input  = img[[0,2,4]]
-    td.target = detector._pts2target(pts[[0,2,4]],img[0,0].shape,cfig)[None]
+    td.target = detector._pts2target(pts[[0,2,4]],img[0,0].shape,cfig)[:,None]
     td.gt = pts[[0,2,4]]
     vd = SimpleNamespace()
     vd.input  = img[[1,3,5]]
-    vd.target = detector._pts2target(pts[[1,3,5]],img[1,0].shape,cfig)[None]
+    vd.target = detector._pts2target(pts[[1,3,5]],img[1,0].shape,cfig)[:,None]
     vd.gt = pts[[1,3,5]]
     return td,vd
   cfig.load_train_and_vali_data = _ltvd
@@ -844,7 +826,9 @@ OK, I realized that for this type of experiment structure I don't need snakemake
 Each experiment function is totally self contained, with all paths, etc, except for a single, global savedir path.
 Also, I can run all parameter versions of all jobs via SLURM with a single run_slurm() function!
 
+# Sat Sep 26 23:19:00 2020
 
+Adding e16.
 
 
 """

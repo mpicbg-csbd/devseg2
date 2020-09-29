@@ -38,25 +38,12 @@ from segtools.ns2dir import load, save, flatten
 import collections
 import isbi_tools
 
-def setup_dirs(config):
 
-  savedir = config.savedir
-  if savedir.exists() and not config.continue_training: shutil.rmtree(savedir)
+
+def setup_dirs(savedir):
+  if savedir.exists(): shutil.rmtree(savedir)
   (savedir/'m').mkdir(exist_ok=True,parents=True)
   shutil.copy("/projects/project-broaddus/devseg_2/src/detector.py",savedir)
-
-# def load_object():
-#   loader = SimpleNamespace()
-#   loader.input_dir = "base/indir1_example"
-#   loader.gt_dir = "base/gtdir_example"
-#   # loader.
-
-# def eg_img_meta():
-#   img_meta = SimpleNamespace()
-#   img_meta.voxel_size = np.array([1.0,0.09,0.09])
-#   img_meta.time_step  = 1 ## 1.5 for second dataset?
-#   # img_meta should have the voxel sizes of your image. This is used for scaling kernels.
-#   return img_meta
 
 def config_example():
   config = SimpleNamespace()
@@ -87,7 +74,6 @@ def config_example():
   config.time_validate = 400
   config.time_total = 1_000
   config.lr = 2e-4
-  config.continue_training = True
 
   config.load_train_and_vali_data = lambda config: ("td","vd") # config -> traindata, validata
   return config
@@ -107,21 +93,27 @@ def check_config(config):
     assert type(d[k]) is type(e[k]), str(type(d[k]))
   print("Keys and Value Types Agree: Config Check Passed.")
 
-# def add_meta_to_td(td):
-#   # td.axes = "TCYX"
-#   # td.dims = {k:v for k,v in zip(td.axes, td.input.shape)}
-#   # td.in_samples  = td.input.shape[0]
-#   # td.in_chan     = td.input.shape[1]
-#   td.in_space    = np.array(td.input.shape[2:])
-#   td.ndim        = len(td.in_space)
+
+def train_continue(config):
+  check_config(config)
+  config.savedir = Path(config.savedir).resolve()
+
+  m = SimpleNamespace()
+  m.net = config.getnet().cuda()
+  m.net.load_state_dict(torch.load(config.savedir / 'm/best_weights.pt'))
+  m.opt = torch.optim.Adam(m.net.parameters(), lr = config.lr)
+
+  ta = load(config.savedir / "ta/")
+  vd,td = config.load_train_and_vali_data(config)
+  T  = SimpleNamespace(m=m,vd=vd,td=td,ta=ta,c=config)
+
+  return T
+
 
 def train_init(config):
   check_config(config)
   config.savedir = Path(config.savedir).resolve()
-  setup_dirs(config)
-
-  ## training params we don't want to control directly, and artifacts that change over training time.
-  # ta = SimpleNamespace(i=0,losses=[],lr=2e-4,i_final=config.bp_per_epoch*22,save_count=0,vali_scores=[],timings=[],heights=[])
+  setup_dirs(config.savedir)
 
   ## load model, save receptive field, randomize weights...
   m = SimpleNamespace()
@@ -131,22 +123,8 @@ def train_init(config):
   torch_models.init_weights(m.net)
   print("Weights randomized...")
 
-  i = 1
-  if config.continue_training:
-    last_weights = str(sorted(Path(config.savedir/'m/').glob("net*.pt"))[-1])
-    n = int(last_weights[-6:-3])
-    i = n*config.time_validate + 1
-    m.net.load_state_dict(torch.load(last_weights))
-    print(last_weights)
-
-  # ipdb.set_trace()
-
-  ta = SimpleNamespace(i=i,losses=[],lr=config.lr,save_count=0,vali_scores=[],timings=[],heights=[])
-  # ta.__dict__.update(**{**defaults,**ta.__dict__})
-  
-  ## load train and vali data
+  ta = SimpleNamespace(i=1,losses=[],lr=config.lr,save_count=0,vali_scores=[],timings=[],heights=[])
   vd,td = config.load_train_and_vali_data(config)
-
   T  = SimpleNamespace(m=m,vd=vd,td=td,ta=ta,c=config)
 
   return T
@@ -163,7 +141,7 @@ def train(T):
   ta = T.ta
   config = T.c
   
-  for ta.i in range(ta.i,config.time_total):
+  for ta.i in range(ta.i,config.time_total+1):
     x,yt,w = config.sampler(ta,td,config)
     x  = torch.from_numpy(x).float().cuda()
     yt = torch.from_numpy(yt).float().cuda()
@@ -177,13 +155,15 @@ def train(T):
     if ta.i%config.time_agg==0:
       m.opt.step()
       m.opt.zero_grad()
-      ta.losses.append((loss/w.mean()).detach().cpu())
-      ta.heights.append(y.max().detach().cpu())
+
+    if ta.i%config.time_loss==0:
+      ta.losses.append(float((loss/w.mean()).detach().cpu()))
+      ta.heights.append(float(y.max().detach().cpu()))
 
     if ta.i%config.time_print==0:
       ta.timings.append(time())
       dt = 0 if len(ta.timings)==1 else ta.timings[-1]-ta.timings[-2]
-      l  = np.mean(ta.losses[-100:])
+      l  = np.mean(ta.losses[-10:])
       ymax,ystd = float(y.max()), float(y.std())
       ytmax,ytstd = float(yt.max()), float(yt.std())
       print(f"i={ta.i:04d}, shape={x.shape}, loss={l:4f}, dt={dt:4f}, y={ymax:4f},{ystd:4f} yt={ytmax:4f},{ytstd:4f}", flush=True)
@@ -192,27 +172,26 @@ def train(T):
       with warnings.catch_warnings():
         n = ta.i//config.time_savecrop
         save(ta , config.savedir/"ta/")
-        save(x[0,0].detach().cpu().numpy().astype(np.float16)  , config.savedir/f"epoch/x/a{n:03d}.npy")
-        save(y[0,0].detach().cpu().numpy().astype(np.float16)  , config.savedir/f"epoch/y/a{n:03d}.npy")
-        save(yt[0,0].detach().cpu().numpy().astype(np.float16) , config.savedir/f"epoch/yt/a{n:03d}.npy")
+        save(x[0,0].detach().cpu().numpy().astype(np.float16).max(0)  , config.savedir/f"epoch/x/a{n:03d}.npy")
+        save(y[0,0].detach().cpu().numpy().astype(np.float16).max(0)  , config.savedir/f"epoch/y/a{n:03d}.npy")
+        save(yt[0,0].detach().cpu().numpy().astype(np.float16).max(0) , config.savedir/f"epoch/yt/a{n:03d}.npy")
+        save(w[0,0].detach().cpu().numpy().astype(np.float16).max(0)  , config.savedir/f"epoch/w/a{n:03d}.npy")
 
     if ta.i%config.time_validate==0:
       n = ta.i//config.time_validate
-      torch.save(m.net.state_dict(), config.savedir / f'm/net{n:03d}.pt')
       validate(vd,T)
-
-
-## Task-Specific Stuff: Data Loading, Sampling, Weights, Validation, Etc
+      valilosses = [sum([x['loss'] for x in xx]) for xx in ta.vali_scores]
+      if np.min(valilosses)==valilosses[-1]:
+        torch.save(m.net.state_dict(), config.savedir / f'm/best_weights.pt')
+        # torch.save(m.net.state_dict(), config.savedir / f'm/net{n:03d}.pt')
 
 def validate(vd,T):
+  ## Task-Specific Stuff: Data Loading, Sampling, Weights, Validation, Etc
   m,ta,config = T.m, T.ta, T.c
   vs = []
   n = ta.i//config.time_validate
   for i in range(vd.input.shape[0]):
     res = torch_models.apply_net_tiled_3d(m.net,vd.input[i])
-
-    ## validation loss
-    # with torch.no_grad:
     valloss = (np.abs(res-vd.target[i])**2).mean()
 
     ## detection scores
@@ -223,8 +202,8 @@ def validate(vd,T):
     s10 = [score10.n_matched, score10.n_proposed, score10.n_gt]
     print(ta.i,i,s3,s10)
 
-    ## save it
-    vs.append({3:score3, 10:score3, 'loss':valloss})
+    ## save detections and loss, but only the basic info to save space
+    vs.append({3:s3, 10:s10, 'loss':valloss})
     save(res[0].max(0).astype(np.float16),config.savedir / f"ta/mx_z/e{n:03d}_i{i}.tif")
 
   ta.vali_scores.append(vs)
@@ -270,6 +249,7 @@ def content_sampler(ta,td,config):
 
   x  = td.input[[st],:,sz,sy,sx]
   yt = td.target[[st],:,sz,sy,sx]
+  # x,yt = augment(x,yt)
   w  = weights(yt,ta,config)
 
   return x,yt,w
@@ -281,11 +261,12 @@ def flat_sampler(ta,td,config):
   in_space = np.array(td.input.shape[2:])
   _pt = np.floor(np.random.rand(3)*(in_space - config.patch_space)).astype(int)
   sz,sy,sx = [slice(_pt[i],_pt[i] + config.patch_space[i]) for i in range(3)]
-  st = np.random.randint(td.input.shape[0])
+  st = np.random.randint(td.input.shape[0]) 
 
   x  = td.input[[st],:,sz,sy,sx]
   yt = td.target[[st],:,sz,sy,sx]
   # w  = np.ones(x.shape)
+  # x,yt = augment(x,yt)
   w  = weights(yt,ta,config)
 
   return x,yt,w
@@ -294,15 +275,14 @@ def weights(yt,ta,trainer):
   "weight pixels in the slice based on pred patch content"
   thresh = trainer.fg_bg_thresh
   w = np.ones(yt.shape)
-  m0 = yt<thresh
-  m1 = yt>thresh
+  m0 = yt<thresh # background
+  m1 = yt>thresh # foreground
   if 0 < m0.sum() < m0.size:
     ws = 1/np.array([m0.mean(), m1.mean()]).astype(np.float)
     ws[0] *= trainer.bg_weight_multiplier
     ws /= ws.mean()
     if np.isnan(ws).any(): ipdb.set_trace()
 
-    # bp_per_epoch = trainer.times[3]
     if trainer.weight_decay:
       t0 = trainer.time_weightdecay
       ## decayto1 :: linearly decay scalar x to value 1 after 3 epochs, then const
@@ -314,37 +294,50 @@ def weights(yt,ta,trainer):
 
   return w
 
-## Prediction and evaluation
+def augment(x,y):
+  noiselevel = 0.2
+  x += np.random.uniform(0,noiselevel,(1,)*3)*np.random.uniform(-1,1,x.shape)
 
-# def predict_raw(config,net,img):
-#   img = config.norm(img)
-#   res = torch_models.apply_net_tiled_3d(net,img[None])[0]
-#   return res
+  ## evenly sample all random flips and 90deg XY rotations (not XZ or YZ rotations)
+  ## TODO: double check the groups here.
+  for d in [2,3,4]:
+    if np.random.rand() < 0.5:
+      x  = np.flip(x,d)
+      y  = np.flip(y,d)
+  if np.random.rand() < 0.5:
+    x = x.swapaxes(3,4)
+    y = y.swapaxes(3,4)
 
-# def normalize_raw(raw,ta):
-#   """
-#   this way we
-#   """
-#   try:
-#     mu =ta.mu
-#     sig=ta.sig
-#   except:
-#     mu =np.mean(raw)
-#     sig=np.std(raw)
-#   return (raw-mu)/sig, (mu,sig)
+  return x,y
 
+# augment
+
+# martin's ../../devseg_code/detect/cl_datagen_mask.py
+# augment with all 8 rotations/flips in xy
+# X, Y, LossMask = map(
+      # lambda x: np.concatenate([_x for _x in augment_iter(x,axis = (-1,-2))], axis = 0),  (X,Y,LossMask))
+# # add some noise
+# noise = np.random.normal(0,1,X.shape)*np.random.uniform(0,.1,(len(X),1,1,1,1))
+# X = X+noise
+
+# fish torch
+# def augment(x,y1,y2,y3):
+#   noiselevel = 0.2
+#   x += np.random.uniform(0,noiselevel,(2,)+(1,)*3)*np.random.uniform(-1,1,x.shape)
+  
+#   for d in [1,2,3]:
+#     if np.random.rand() < 0.5:
+#       x,y1,y2,y3 = np.flip(x,d), np.flip(y1,d), np.flip(y2,d), np.flip(y3,d)
+  
+#   return x,y1,y2,y3
 
 def predict_raw(net,img,dims,**kwargs3d):
   """
   Apply independently over N.
+  When possible, try to make the output dimensions match the input dimensions by e.g. removing singleton dims.
   """
-
   assert dims in ["NCYX","NBCYX","CYX","ZYX","CZYX","NCZYX","NZYX",]
 
-  # if ta:
-  # img,(mu,sig) = normalize_raw(img,ta)
-
-  # ipdb.set_trace()
   with torch.no_grad():
     if dims=="NCYX":
       def f(i): return net(torch.from_numpy(img[[i]]).cuda().float()).cpu().numpy()
@@ -358,82 +351,19 @@ def predict_raw(net,img,dims,**kwargs3d):
       ## assume 1 channel. remove after prediction.
       res = torch_models.apply_net_tiled_3d(net,img[None],**kwargs3d)[0]
     if dims=="CZYX":
-      ## assume 1 batch. can ignore. remove after prediction.
       res = torch_models.apply_net_tiled_3d(net,img)
     if dims=="NCZYX":
-      ## apply independently over N
       def f(i): return torch_models.apply_net_tiled_3d(net,img[i],**kwargs3d)[0]
       res = np.array([f(i) for i in range(img.shape[0])])
     if dims=="NZYX":
-      ## apply independently over N
       def f(i): return torch_models.apply_net_tiled_3d(net,img[i,None],**kwargs3d)[0]
       res = np.array([f(i) for i in range(img.shape[0])])
 
-  # img = img*sig + mu ## un-normalize
-
   return res
 
-# def predict_pts(config,img):
-#   pts = peak_local_max(img,exclude_border=False,threshold_abs=config.threshold_abs,footprint=config.plm_footprint)
-#   return pts
-
-# def predict_matches(config, pts_gt, pts_pred):
-#   matches = match_unambiguous_nearestNeib(pts_gt,pts_pred,dub=config.dub,scale=config.rescale_for_matching)
-#   return matches
-
-# def test_load_net_predict_and_evaluate_single_img():
-#   _config = config(eg_img_meta())
-#   _config.savedir = Path("../ex7/celegans_isbi/train1/7.0_1.0/01/").resolve()
-#   _config.best_model = _config.savedir / 'm/net30.pt'
-#   left  = "/projects/project-broaddus/rawdata/"
-#   right = "MDA231/Fluo-C3DL-MDA231/01/t002.tif"
-#   gtpts = load("/projects/project-broaddus/rawdata/MDA231/traj/Fluo-C3DL-MDA231/01_traj.pkl")[2]
-#   load_net_predict_and_evaluate_single_img(_config,left,right,gtpts)
-#   return _config
-
-# def load_net_predict_and_evaluate_single_img(config, image_name_left, image_name_right, gtpts):
-#   assert config.best_model
-#   image_name_right = Path(image_name_right)
-#   image_name = Path(image_name_left) / image_name_right
-
-#   net = get_net(config)
-#   img = load(image_name)
-#   # assert img.ndim>2 and np.sum(np.array(img.shape)>100)>1 ## should kinda look like a 3D image
-#   img = config.norm(img)
-#   res = torch_models.apply_net_tiled_3d(net,img[None])[0]
-#   pts = peak_local_max(res,threshold_abs=0.1,exclude_border=False,footprint=config.plm_footprint)
-#   # gt_pts = isbi_tools.mantrack2pts(load(gt_name))
-#   unambiguous_matches = match_unambiguous_nearestNeib(gtpts,pts,dub=config.dub,scale=config.rescale_for_matching)
-#   print("new {:6f} {:6f} {:6f}".format(unambiguous_matches.f1,unambiguous_matches.precision,unambiguous_matches.recall))
-
-#   res = res.astype(np.float16)
-#   save(res,                 config.savedir / 'pred' /    image_name_right.parent / image_name_right.name)
-#   save(res.max(0),          config.savedir / 'mx_z' /    image_name_right.parent / image_name_right.name)
-#   save(pts,                 config.savedir / 'pts' /     image_name_right.parent / image_name_right.name)
-#   save(unambiguous_matches, config.savedir / 'matches' / image_name_right.parent / (image_name_right.stem + '.pkl'))
 
 
-# def total_matches(matchdir,name_total_scores,ptsdir,name_total_pts):
-#   o = evaluator.out
-#   match_list = [load(x) for x in matchdir.glob("t*.pkl")]
-#   match_scores = point_matcher.listOfMatches_to_Scores(match_list)
-#   save(match_scores, evaluator.name_total_scores)
-#   print("SCORES: ", match_scores)
-#   allpts = [load(x) for x in ptsdir.glob('t*.tif')]
-#   save(allpts, name_total_pts)
 
-
-def rasterize_detections(config, traj, imgshape, savedir, pts_transform = lambda x: x,):
-  for i in range(len(traj)):
-    pts = pts_transform(traj[i])
-    lab = pts2lab(pts,imgshape,config)
-    save(lab, savedir / f'mask{i:03d}.tif')
-
-def pts2lab(pts,shape,config):
-  kerns = [np.zeros(3*config.sigmas) + j + 1 for j in range(len(pts))]
-  lab   = conv_at_pts_multikern(pts,kerns,shape)
-  lab   = lab.astype(np.uint16)
-  return lab
 
 
 
@@ -519,8 +449,14 @@ Let's see if this method still makes sense...
 Trying to make `experiments2.job14_celegans()` work as a detector.
 
 TODO: 
-- Take predict_raw from denoiser.
-- 
+- [x] Take predict_raw from denoiser.
+
+Tue Sep 29 13:13:23 2020
+
+peak_local_max will overdetect if we have multiple neighbouring pixels with the exact same (max) value!
+This shouldn't happen often, but it does because we have a weird problem with our precicted images where all pixels have the same value...
+Is this a problem with the target? NO. Target is good!
+Is this a problem with my input normalization ? clipping ? 
 
 
 """
