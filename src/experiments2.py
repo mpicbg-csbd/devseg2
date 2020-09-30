@@ -76,7 +76,7 @@ def run_slurm():
 
   # e14_celegans
   cmd = 'sbatch -J e14_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 12:00:00 -c 1 --mem 128000 -o slurm/e14_pid{pid:02d}.out -e slurm/e14_pid{pid:02d}.err --wrap \'python3 -c \"import experiments2; experiments2.e14_celegans({pid})\"\' '
-  for pid in range(3*3*5): Popen(cmd.format(pid=pid),shell=True)
+  for pid in range(1,1*3*5): Popen(cmd.format(pid=pid),shell=True)
 
   # ## e15_celegans
   # cmd = 'sbatch -J e15_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 12:00:00 -c 1 --mem 128000 -o slurm/e15_pid{pid:02d}.out -e slurm/e15_pid{pid:02d}.err --wrap \'python3 -c \"import experiments2; experiments2.e15_celegans({pid})\"\' '
@@ -514,9 +514,10 @@ def e14_celegans(pid=0):
   see how predictions decay at other times.
   v2 changed the size of the target kernel container, because the big kernel had square boundaries.
   v3 added augmentation
+  v4 corrected 01/t006 annotations
   """
 
-  p0,p1,p2 = np.unravel_index(pid,[3,3,5]) ## train timepoint, kernel size, repeat n, 
+  p0,p1,p2 = np.unravel_index(pid,[1,3,5]) ## train timepoint, kernel size, repeat n, 
   print("params: ", p0, p1, p2)
 
   ## Train a detection model on a single timepoint
@@ -528,12 +529,23 @@ def e14_celegans(pid=0):
   img  = np.array([load(f"/projects/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/{trainset}/t{n:03d}.tif") for n in [train_time, train_time+1]])
   img  = img[:,None]
   img  = normalize3(img,2,99.4,clip=False)
-  pts  = np.array(load(f"/projects/project-broaddus/rawdata/celegans_isbi/traj/Fluo-N3DH-CE/{trainset}_traj.pkl"))[[train_time, train_time+1]]
+  pts  = np.array(load(f"/projects/project-broaddus/rawdata/celegans_isbi/traj/Fluo-N3DH-CE/{trainset}_traj.pkl"))
+
+  correction_6 = load("/projects/project-broaddus/devseg_2/raw/t006.npy")
+  correction_6 = correction_6[:,[1,2,3]].astype(np.int)
+  pts[6] = correction_6
+  correction_7 = load("/projects/project-broaddus/devseg_2/raw/t007.npy")
+  correction_7 = correction_7[:,[1,2,3]].astype(np.int)
+  pts[7] = correction_7
+
+  # return SimpleNamespace(**locals())
+  pts  = pts[[train_time, train_time+1]]
   cfig = _e14_celegans(img,pts,pid=pid)
   
-  T = detector.train_init(cfig)
-  # T = detector.train_continue(cfig)
-  detector.train(T)
+  if False:
+    T = detector.train_init(cfig)
+    # T = detector.train_continue(cfig)
+    detector.train(T)
 
   ## best model decided by vali score
   ## WARNING: only works with one vali image (index [0]) and takes the first index when scores are tied (this is good).
@@ -554,8 +566,12 @@ def e14_celegans(pid=0):
 
   ## Predict and Evaluate model result on all available data
   gtpts = load(f"/projects/project-broaddus/rawdata/celegans_isbi/traj/Fluo-N3DH-CE/{testset}_traj.pkl")
+  if testset=='01':
+    gtpts[6] = pts[0]
+    gtpts[7] = pts[1]
+
   scores = []
-  for i in [6,7,100,101,180,181]:
+  for i in np.r_[:190]: #[6,7,100,101,180,181]:
     print(f"pred on {i}")
     outfile = cfig.savedir / f'dscores{testset}/t{i:03d}.pkl'
     if outfile.exists(): continue
@@ -574,13 +590,13 @@ def e14_celegans(pid=0):
 
 def _e14_celegans(img,pts,pid):
   
-  p0,p1,p2 = np.unravel_index(pid,[3,3,5]) ## train timepoint, kernel size, repeat n, 
+  p0,p1,p2 = np.unravel_index(pid,[1,3,5]) ## train timepoint, kernel size, repeat n, 
 
   kernelshape = [(1,3,3),(1.5,7,7),(2,11,11)][p1]
 
   ## all config params
   cfig = SimpleNamespace()
-  cfig.savedir = savedir / f'e14_celegans/v03/pid{pid:02d}/'
+  cfig.savedir = savedir / f'e14_celegans/v04/pid{pid:02d}/'
   cfig.getnet = lambda : torch_models.Unet3(16, [[1],[1]], pool=(1,2,2), kernsize=(3,5,5), finallayer=torch_models.nn.Sequential)
   cfig.sigmas         = np.array(kernelshape)
   cfig.kernel_shape   = (cfig.sigmas*7).astype(np.int) ## 7sigma in each direction?
@@ -592,7 +608,7 @@ def _e14_celegans(img,pts,pid):
   cfig.patch_space  = np.array([16,128,128])
   cfig.batch_shape  = np.array([1,1,16,128,128])
   cfig.batch_axes   = "BCZYX"
-  time_total = 4_000
+  time_total = 12_000 # about 12k / hour? 200/min = 5mins/ 1k = 12k/hr
   cfig.time_weightdecay = 1600 # for pixelwise weights
   cfig.time_agg = 1 # aggregate gradients before backprop
   cfig.time_loss = 10
@@ -684,7 +700,7 @@ def _e15_celegans(img,pid=0):
 
 def e16_celegans(pid=0):
   """
-  train on a single timepoint with an appropriate kernel size.
+  train on multiple timepoints.
   see how predictions decay at other times.
   """
 

@@ -39,13 +39,12 @@ import collections
 import isbi_tools
 
 
-
 def setup_dirs(savedir):
   if savedir.exists(): shutil.rmtree(savedir)
   (savedir/'m').mkdir(exist_ok=True,parents=True)
   shutil.copy("/projects/project-broaddus/devseg_2/src/detector.py",savedir)
 
-def config_example():
+def _config_example():
   config = SimpleNamespace()
   
   config.savedir = Path("An/Example/Directory")
@@ -80,13 +79,13 @@ def config_example():
 
 def check_config(config):
   "trivial check that keys match"
-  d = config_example().__dict__
+  d = _config_example().__dict__
   e = config.__dict__
 
   missing = d.keys() - e.keys()
-  extra = e.keys() - d.keys()
   assert len(missing) is 0, str(missing)
-  # print("Extra Keys: ", extra)
+  # extra = e.keys() - d.keys()
+  # assert len(extra) is 0, str(extra)
 
   for k,v in d.items(): 
     # print(k,type(d[k]),type(e[k]))
@@ -97,16 +96,13 @@ def check_config(config):
 def train_continue(config):
   check_config(config)
   config.savedir = Path(config.savedir).resolve()
-
   m = SimpleNamespace()
   m.net = config.getnet().cuda()
   m.net.load_state_dict(torch.load(config.savedir / 'm/best_weights.pt'))
   m.opt = torch.optim.Adam(m.net.parameters(), lr = config.lr)
-
   ta = load(config.savedir / "ta/")
-  vd,td = config.load_train_and_vali_data(config)
+  td,vd = config.load_train_and_vali_data(config)
   T  = SimpleNamespace(m=m,vd=vd,td=td,ta=ta,c=config)
-
   return T
 
 
@@ -114,7 +110,6 @@ def train_init(config):
   check_config(config)
   config.savedir = Path(config.savedir).resolve()
   setup_dirs(config.savedir)
-
   ## load model, save receptive field, randomize weights...
   m = SimpleNamespace()
   m.net = config.getnet().cuda()
@@ -122,11 +117,9 @@ def train_init(config):
   save(torch_models.receptivefield(m.net,kern=(3,5,5)),config.savedir / 'receptive_field.tif')
   torch_models.init_weights(m.net)
   print("Weights randomized...")
-
   ta = SimpleNamespace(i=1,losses=[],lr=config.lr,save_count=0,vali_scores=[],timings=[],heights=[])
-  vd,td = config.load_train_and_vali_data(config)
+  td,vd = config.load_train_and_vali_data(config)
   T  = SimpleNamespace(m=m,vd=vd,td=td,ta=ta,c=config)
-
   return T
 
 def train(T):
@@ -204,7 +197,7 @@ def validate(vd,T):
 
     ## save detections and loss, but only the basic info to save space
     vs.append({3:s3, 10:s10, 'loss':valloss})
-    save(res[0].max(0).astype(np.float16),config.savedir / f"ta/mx_z/e{n:03d}_i{i}.tif")
+    save(res[0].max(0).astype(np.float16),config.savedir / f"mx_z/e{n:03d}_i{i}.tif")
 
   ta.vali_scores.append(vs)
 
@@ -249,7 +242,7 @@ def content_sampler(ta,td,config):
 
   x  = td.input[[st],:,sz,sy,sx]
   yt = td.target[[st],:,sz,sy,sx]
-  # x,yt = augment(x,yt)
+  x,yt = augment(x,yt)
   w  = weights(yt,ta,config)
 
   return x,yt,w
@@ -266,7 +259,7 @@ def flat_sampler(ta,td,config):
   x  = td.input[[st],:,sz,sy,sx]
   yt = td.target[[st],:,sz,sy,sx]
   # w  = np.ones(x.shape)
-  # x,yt = augment(x,yt)
+  x,yt = augment(x,yt)
   w  = weights(yt,ta,config)
 
   return x,yt,w
@@ -307,6 +300,9 @@ def augment(x,y):
   if np.random.rand() < 0.5:
     x = x.swapaxes(3,4)
     y = y.swapaxes(3,4)
+
+  x = x.copy()
+  y = y.copy()
 
   return x,y
 
