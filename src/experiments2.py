@@ -79,8 +79,8 @@ def run_slurm():
   # for pid in range(1,9): Popen(cmd.format(pid=pid),shell=True)
 
   # e14_celegans
-  cmd = 'sbatch -J e14_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 2:00:00 -c 1 --mem 128000 -o slurm/e14_pid{pid:02d}.out -e slurm/e14_pid{pid:02d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e14_celegans({pid})\"\' '
-  for pid in range(51,60): Popen(cmd.format(pid=pid),shell=True)
+  cmd = 'sbatch -J e14_{pid:03d} -p gpu --gres gpu:1 -n 1 -t 2:00:00 -c 1 --mem 128000 -o slurm/e14_pid{pid:03d}.out -e slurm/e14_pid{pid:03d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e14_celegans({pid})\"\' '
+  for pid in range(30*5): Popen(cmd.format(pid=pid),shell=True)
 
   # ## e15_celegans
   # cmd = 'sbatch -J e15_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 12:00:00 -c 1 --mem 128000 -o slurm/e15_pid{pid:02d}.out -e slurm/e15_pid{pid:02d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e15_celegans({pid})\"\' '
@@ -505,7 +505,7 @@ def _job13_mangal(data,pid):
 
   return cfig
 
-## train 7x1 c. elegans gaussian detector
+## train c. elegans gaussian detector
 
 def e14_celegans(pid=0):
   """
@@ -515,20 +515,32 @@ def e14_celegans(pid=0):
   v03 added augmentation
   v04 corrected 01/t006 annotations. [3,3,5].
   v05 refactor _ltvd to allow for mutliple timepoints (eliminating need for separate e16). [4,3,5]
-  v06 TODO continuously scale kernel size. plot performance vs size for each of 3 times.
+  v06 do stratified sampling over train time. five repeats, sampling from 1..31 stacks...
+  v07 TODO continuously scale kernel size. plot performance vs size for each of 3 times.
   """
 
   if type(pid) is list:
     p0,p1,p2 = pid
-    pid = np.ravel_multi_index(pid,[4,3,5])
+    pid = np.ravel_multi_index(pid,[30,1,5])
   else:
-    p0,p1,p2 = np.unravel_index(pid,[4,3,5]) ## train timepoint, kernel size, repeat n, 
+    p0,p1,p2 = np.unravel_index(pid,[30,1,5]) ## train timepoint, kernel size, repeat n, 
   print("params: ", p0, p1, p2)
 
+  # random.choice samples without replacement, so it works for train/vali 
+  def stratsampler(n):
+    res = np.array([np.random.choice(x,2,replace=False) for x in np.array_split(np.r_[:190],n)])
+    train = res[:,0]
+    vali = res[:,1]
+    return train,vali
+
+  train_times, vali_times = stratsampler(p0+1)
+  print(train_times,vali_times)
+
   ## convert p's to meaningful params
-  train_times  = [[6],[100],[180],[6,100,180]][p0]
-  vali_times   = [[7],[101],[181],[7,101,181]][p0]
-  kernel_shape = [(1,3,3),(1.5,7,7),(2,11,11)][p1]
+  # train_times  = [[6],[100],[180],[6,100,180]][p0]
+
+  # vali_times   = [[7],[101],[181],[7,101,181]][p0]
+  kernel_shape = [(1,3,3),(1.5,7,7),(2,11,11)][1]
   trainset = "01"
   testset  = "01"
   
@@ -562,10 +574,12 @@ def e14_celegans(pid=0):
 
   cfig = _e14_celegans()
   cfig.load_train_and_vali_data = _ltvd
-  cfig.savedir = savedir / f'e14_celegans/v05/pid{pid:02d}/'
+  cfig.savedir = savedir / f'e14_celegans/v06/pid{pid:03d}/'
 
   ## Train the net
   T = detector.train_init(cfig)
+  T.ta.train_times = train_times
+  T.ta.vali_times  = vali_times
   # T = detector.train_continue(cfig)
   # shutil.copy("/projects/project-broaddus/devseg_2/src/experiments2.py", cfig.savedir)
   detector.train(T)
@@ -623,13 +637,13 @@ def _e14_celegans():
   cfig.patch_space  = np.array([16,128,128])
   cfig.batch_shape  = np.array([1,1,16,128,128])
   cfig.batch_axes   = "BCZYX"
-  time_total = 8_000 # about 12k / hour? 200/min = 5mins/ 1k = 12k/hr
+  time_total = 10_000 # about 12k / hour? 200/min = 5mins/ 1k = 12k/hr
   cfig.time_weightdecay = 1600 # for pixelwise weights
   cfig.time_agg = 1 # aggregate gradients before backprop
   cfig.time_loss = 10
   cfig.time_print = 100
   cfig.time_savecrop = max(100,time_total//50)
-  cfig.time_validate = max(200,time_total//50)
+  cfig.time_validate = max(600,time_total//50)
   cfig.time_total = time_total
   cfig.lr = 4e-4
 
