@@ -51,8 +51,8 @@ def _config_example():
   ## Build the network
   config.getnet = lambda : torch_models.Unet3(16, [[1],[1]], pool=(1,2,2), kernsize=(3,5,5), finallayer=torch_models.nn.Sequential)
   ## detector target kernel shape
-  config.sigmas       = np.array([1,7,7])
-  config.kernel_shape = np.array([43,43,43]) ## 7 sigma in each direction?
+  # config.sigmas       = np.array([1,7,7])
+  # config.kernel_shape = np.array([43,43,43]) ## 7 sigma in each direction?
   config.rescale_for_matching = [2,1,1]
   ## fg/bg weights stuff for fluorescence images & class-imbalanced data
   config.fg_bg_thresh = np.exp(-16/2)
@@ -92,7 +92,6 @@ def check_config(config):
     assert type(d[k]) is type(e[k]), str(type(d[k]))
   print("Keys and Value Types Agree: Config Check Passed.")
 
-
 def train_continue(config):
   check_config(config)
   config.savedir = Path(config.savedir).resolve()
@@ -104,7 +103,6 @@ def train_continue(config):
   td,vd = config.load_train_and_vali_data(config)
   T  = SimpleNamespace(m=m,vd=vd,td=td,ta=ta,c=config)
   return T
-
 
 def train_init(config):
   check_config(config)
@@ -173,10 +171,17 @@ def train(T):
     if ta.i%config.time_validate==0:
       n = ta.i//config.time_validate
       validate(vd,T)
+
       valilosses = [sum([x['loss'] for x in xx]) for xx in ta.vali_scores]
       if np.min(valilosses)==valilosses[-1]:
-        torch.save(m.net.state_dict(), config.savedir / f'm/best_weights.pt')
-        # torch.save(m.net.state_dict(), config.savedir / f'm/net{n:03d}.pt')
+        print(f"New best mse weights at {n}")
+        torch.save(m.net.state_dict(), config.savedir / f'm/best_weights_mse.pt')
+
+      valilosses = [sum([x[10] for x in xx]) for xx in ta.vali_scores]
+      if np.max(valilosses)==valilosses[-1]:
+        print(f"New best f1 weights at {n}")
+        torch.save(m.net.state_dict(), config.savedir / f'm/best_weights_f1.pt')
+
 
 def validate(vd,T):
   ## Task-Specific Stuff: Data Loading, Sampling, Weights, Validation, Etc
@@ -191,20 +196,23 @@ def validate(vd,T):
     pts = peak_local_max(res[0],threshold_abs=.2,exclude_border=False,footprint=np.ones((3,8,8)))
     score3  = match_unambiguous_nearestNeib(vd.gt[i],pts,dub=3,scale=config.rescale_for_matching)
     score10 = match_unambiguous_nearestNeib(vd.gt[i],pts,dub=10,scale=config.rescale_for_matching)
-    s3  = [score3.n_matched,  score3.n_proposed,  score3.n_gt]
-    s10 = [score10.n_matched, score10.n_proposed, score10.n_gt]
-    print(ta.i,i,s3,s10)
+    s3  = [score3.f1, score3.n_matched,  score3.n_proposed,  score3.n_gt]
+    s10 = [score10.f1, score10.n_matched, score10.n_proposed, score10.n_gt]
+    st = f"{ta.i:5d} {i} {score10.f1:6.3f} {score10.n_matched:4d} {score10.n_proposed:4d} {score10.n_gt:4d}"
+    print(st)
+    # print(ta.i,i,s3,s10)
 
     ## save detections and loss, but only the basic info to save space
-    vs.append({3:s3, 10:s10, 'loss':valloss})
+    vs.append({3:score3.f1, 10:score10.f1, 'loss':valloss})
     save(res[0].max(0).astype(np.float16),config.savedir / f"mx_z/e{n:03d}_i{i}.tif")
 
   ta.vali_scores.append(vs)
 
-def _pts2target(list_of_pts,sh,config):
-
-  s  = config.sigmas # np.array([1,3,3])   ## sigma for gaussian
-  ks = config.kernel_shape # np.array([7,21,21]) ## kernel size. must be all odd
+def pts2target(list_of_pts,sh,sigmas):
+  s  = np.array(sigmas)
+  ks = (s*7).astype(np.int)
+  # s  = config.sigmas # np.array([1,3,3])   ## sigma for gaussian
+  # ks = config.kernel_shape # np.array([7,21,21]) ## kernel size. must be all odd
   
   def place_kern_at_pts(pts):
     def f(x):
@@ -217,6 +225,10 @@ def _pts2target(list_of_pts,sh,config):
 
   target = np.array([place_kern_at_pts(pts) for pts in list_of_pts])
   return target
+
+def pts2target_many(list_of_pts,sh,list_of_sigmas):
+  return np.array([pts2target([x],sh,sig)[0] for x,sig in zip(list_of_pts,list_of_sigmas)])
+
 
 def content_sampler(ta,td,config):
   """
@@ -242,6 +254,7 @@ def content_sampler(ta,td,config):
 
   x  = td.input[[st],:,sz,sy,sx]
   yt = td.target[[st],:,sz,sy,sx]
+
   x,yt = augment(x,yt)
   w  = weights(yt,ta,config)
 
