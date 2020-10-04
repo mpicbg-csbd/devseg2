@@ -204,7 +204,7 @@ def validate(vd,T):
 
     ## save detections and loss, but only the basic info to save space
     vs.append({3:score3.f1, 10:score10.f1, 'loss':valloss})
-    save(res[0].max(0).astype(np.float16),config.savedir / f"mx_z/e{n:03d}_i{i}.tif")
+    # save(res[0].max(0).astype(np.float16),config.savedir / f"mx_z/e{n:03d}_i{i}.tif")
 
   ta.vali_scores.append(vs)
 

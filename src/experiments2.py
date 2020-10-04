@@ -80,7 +80,7 @@ def run_slurm():
 
   # e14_celegans
   cmd = 'sbatch -J e14_{pid:03d} -p gpu --gres gpu:1 -n 1 -t 2:00:00 -c 1 --mem 128000 -o slurm/e14_pid{pid:03d}.out -e slurm/e14_pid{pid:03d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e14_celegans({pid})\"\' '
-  for pid in range(30*5): Popen(cmd.format(pid=pid),shell=True)
+  for pid in range(150): Popen(cmd.format(pid=pid),shell=True)
 
   # ## e15_celegans
   # cmd = 'sbatch -J e15_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 12:00:00 -c 1 --mem 128000 -o slurm/e15_pid{pid:02d}.out -e slurm/e15_pid{pid:02d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e15_celegans({pid})\"\' '
@@ -516,7 +516,7 @@ def e14_celegans(pid=0):
   v04 corrected 01/t006 annotations. [3,3,5].
   v05 refactor _ltvd to allow for mutliple timepoints (eliminating need for separate e16). [4,3,5]
   v06 do stratified sampling over train time. five repeats, sampling from 1..31 stacks...
-  v07 TODO continuously scale kernel size. plot performance vs size for each of 3 times.
+  v07 continuously scale kernel size on three timepoints.
   """
 
   if type(pid) is list:
@@ -528,19 +528,20 @@ def e14_celegans(pid=0):
 
   # random.choice samples without replacement, so it works for train/vali 
   def stratsampler(n):
-    res = np.array([np.random.choice(x,2,replace=False) for x in np.array_split(np.r_[:190],n)])
+    res   = np.array([np.random.choice(x,2,replace=False) for x in np.array_split(np.r_[:190],n)])
     train = res[:,0]
-    vali = res[:,1]
+    vali  = res[:,1]
     return train,vali
 
-  train_times, vali_times = stratsampler(p0+1)
+  train_times, vali_times = [6,100,180], [7,101,181]
+  # train_times, vali_times = stratsampler(p0+1)
   print(train_times,vali_times)
-
   ## convert p's to meaningful params
   # train_times  = [[6],[100],[180],[6,100,180]][p0]
-
   # vali_times   = [[7],[101],[181],[7,101,181]][p0]
-  kernel_shape = [(1,3,3),(1.5,7,7),(2,11,11)][1]
+  # kernel_shape = [(1,3,3),(1.5,7,7),(2,11,11)][1]
+  kernel_shape = np.array([1.5,7,7])*np.linspace(1/4,2,30)[p0]
+  print(kernel_shape)
   trainset = "01"
   testset  = "01"
   
@@ -574,7 +575,7 @@ def e14_celegans(pid=0):
 
   cfig = _e14_celegans()
   cfig.load_train_and_vali_data = _ltvd
-  cfig.savedir = savedir / f'e14_celegans/v06/pid{pid:03d}/'
+  cfig.savedir = savedir / f'e14_celegans/v07/pid{pid:03d}/'
 
   ## Train the net
   T = detector.train_init(cfig)
@@ -618,7 +619,7 @@ def e14_celegans(pid=0):
     stack.append(res.max(0))
 
   save(scores, cfig.savedir / f'scores{testset}.pkl')
-  save(np.array(stack).astype(np.float16), cfig.savedir / f"pred_{testset}.npy")
+  # save(np.array(stack).astype(np.float16), cfig.savedir / f"pred_{testset}.npy")
 
 def _e14_celegans():
   
