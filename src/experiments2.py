@@ -79,8 +79,8 @@ def run_slurm():
   # for pid in range(1,9): Popen(cmd.format(pid=pid),shell=True)
 
   # e14_celegans
-  cmd = 'sbatch -J e14_{pid:03d} -p gpu --gres gpu:1 -n 1 -t 2:00:00 -c 1 --mem 128000 -o slurm/e14_pid{pid:03d}.out -e slurm/e14_pid{pid:03d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e14_celegans({pid})\"\' '
-  for pid in range(150): Popen(cmd.format(pid=pid),shell=True)
+  cmd = 'sbatch -J e14_{pid:03d} -p gpu --gres gpu:1 -n 1 -t 4:00:00 -c 1 --mem 128000 -o slurm/e14_pid{pid:03d}.out -e slurm/e14_pid{pid:03d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e14_celegans({pid})\"\' '
+  for pid in range(10): Popen(cmd.format(pid=pid),shell=True)
 
   # ## e15_celegans
   # cmd = 'sbatch -J e15_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 12:00:00 -c 1 --mem 128000 -o slurm/e15_pid{pid:02d}.out -e slurm/e15_pid{pid:02d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e15_celegans({pid})\"\' '
@@ -517,14 +517,15 @@ def e14_celegans(pid=0):
   v05 refactor _ltvd to allow for mutliple timepoints (eliminating need for separate e16). [4,3,5]
   v06 do stratified sampling over train time. five repeats, sampling from 1..31 stacks...
   v07 continuously scale kernel size on three timepoints.
+  v08 pick specific train and vali times and set bg_weight multiplier. try to recreate old experiment results. 10 identical runs.
   """
 
-  if type(pid) is list:
-    p0,p1,p2 = pid
-    pid = np.ravel_multi_index(pid,[30,1,5])
-  else:
-    p0,p1,p2 = np.unravel_index(pid,[30,1,5]) ## train timepoint, kernel size, repeat n, 
-  print("params: ", p0, p1, p2)
+  # if type(pid) is list:
+  #   p0,p1,p2 = pid
+  #   pid = np.ravel_multi_index(pid,[30,1,5])
+  # else:
+  #   p0,p1,p2 = np.unravel_index(pid,[30,1,5]) ## train timepoint, kernel size, repeat n, 
+  # print("params: ", p0, p1, p2)
 
   # random.choice samples without replacement, so it works for train/vali 
   def stratsampler(n):
@@ -534,13 +535,19 @@ def e14_celegans(pid=0):
     return train,vali
 
   train_times, vali_times = [6,100,180], [7,101,181]
+
+  ## v08 only: try to match the old experiments we did
+  train_times = [0,5,33,100,189]
+  vali_times  = [0,1,180]
+
   # train_times, vali_times = stratsampler(p0+1)
   print(train_times,vali_times)
   ## convert p's to meaningful params
   # train_times  = [[6],[100],[180],[6,100,180]][p0]
   # vali_times   = [[7],[101],[181],[7,101,181]][p0]
   # kernel_shape = [(1,3,3),(1.5,7,7),(2,11,11)][1]
-  kernel_shape = np.array([1.5,7,7])*np.linspace(1/4,2,30)[p0]
+  # kernel_shape = np.array([1.5,7,7])*np.linspace(1/4,2,30)[p0]
+  kernel_shape = np.array([1.5,7,7])
   print(kernel_shape)
   trainset = "01"
   testset  = "01"
@@ -575,13 +582,13 @@ def e14_celegans(pid=0):
 
   cfig = _e14_celegans()
   cfig.load_train_and_vali_data = _ltvd
-  cfig.savedir = savedir / f'e14_celegans/v07/pid{pid:03d}/'
+  cfig.savedir = savedir / f'e14_celegans/v08/pid{pid:03d}/'
 
   ## Train the net
   T = detector.train_init(cfig)
+  # T = detector.train_continue(cfig,cfig.savedir / 'm/best_weights_f1.pt')
   T.ta.train_times = train_times
   T.ta.vali_times  = vali_times
-  # T = detector.train_continue(cfig)
   # shutil.copy("/projects/project-broaddus/devseg_2/src/experiments2.py", cfig.savedir)
   detector.train(T)
 
@@ -632,14 +639,14 @@ def _e14_celegans():
   # cfig.kernel_shape   = (cfig.sigmas*7).astype(np.int) ## 7sigma in each direction?
   cfig.rescale_for_matching = [2,1,1]
   cfig.fg_bg_thresh = np.exp(-16/2)
-  cfig.bg_weight_multiplier = 1.0
+  cfig.bg_weight_multiplier = 0.2 #1.0
   cfig.weight_decay = True
+  cfig.time_weightdecay = 1600 # for pixelwise weights
   cfig.sampler      = detector.content_sampler
   cfig.patch_space  = np.array([16,128,128])
   cfig.batch_shape  = np.array([1,1,16,128,128])
   cfig.batch_axes   = "BCZYX"
   time_total = 10_000 # about 12k / hour? 200/min = 5mins/ 1k = 12k/hr
-  cfig.time_weightdecay = 1600 # for pixelwise weights
   cfig.time_agg = 1 # aggregate gradients before backprop
   cfig.time_loss = 10
   cfig.time_print = 100
@@ -682,7 +689,7 @@ def e15_celegans(pid=0):
   save(res,cfig.savedir / 'pred.npy')
 
 def _e15_celegans(img,pid=0):
-  # cfig = denoiser.config_example()
+
   cfig = SimpleNamespace()
 
   t=5_000
@@ -810,6 +817,13 @@ def e16_ce_adapt(pid=0):
   save(scores, cfig.savedir / f'scores{testset}.pkl')
   save(np.array(stack).astype(np.float16), cfig.savedir / f"pred_{testset}.npy")
 
+def e17_ce_nuclei(pid=0):
+  """
+  Train and pred on individual nuclei.
+  Estimate size info from different nuclei.
+  Try to predict time?
+  """
+  pass
 
 
 if __name__ == '__main__':

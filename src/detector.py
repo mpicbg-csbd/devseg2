@@ -60,7 +60,7 @@ def _config_example():
   config.weight_decay = True
   config.time_weightdecay = 400 # for pixelwise weights
   ## image sampling
-  config.sampler      = flat_sampler ## sampler :: ta,td,config -> x,yt,w
+  config.sampler      = content_sampler ## sampler :: ta,td,config -> x,yt,w
   config.patch_space  = np.array([16,128,128])
   config.batch_shape  = np.array([1,1,16,128,128])
   config.batch_axes   = "BCZYX"
@@ -92,12 +92,12 @@ def check_config(config):
     assert type(d[k]) is type(e[k]), str(type(d[k]))
   print("Keys and Value Types Agree: Config Check Passed.")
 
-def train_continue(config):
+def train_continue(config,weights_file):
   check_config(config)
   config.savedir = Path(config.savedir).resolve()
   m = SimpleNamespace()
   m.net = config.getnet().cuda()
-  m.net.load_state_dict(torch.load(config.savedir / 'm/best_weights.pt'))
+  m.net.load_state_dict(torch.load(weights_file))
   m.opt = torch.optim.Adam(m.net.parameters(), lr = config.lr)
   ta = load(config.savedir / "ta/")
   td,vd = config.load_train_and_vali_data(config)

@@ -324,7 +324,7 @@ def isbi_train(wildcards):
   maxtime_train        = len(list(loader.input_dir.glob("*.tif")))
   _times = np.linspace(0,maxtime_train - 1,8).astype(np.int)
   loader.valitimes     = _times[[2,5]]
-  loader.traintimes    = _times[[0,1,3,4,6,7]]  
+  loader.traintimes    = _times[[0,1,3,4,6,7]]
 
   ## update variables in a data-dependent way
   loader,config = data_specific._specialize_train(wildcards,loader,config)

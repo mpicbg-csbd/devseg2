@@ -1,0 +1,15 @@
+[22;0t]0;IPython: devseg_2/srcThe autoreload extension is already loaded. To reload it, use:
+  %reload_ext autoreload
+Building DAG of jobs...
+Job counts:
+	count	jobs
+	1	special
+	1
+
+rule special:
+    jobid: 1
+
+Job counts:
+	count	jobs
+	1	special
+	1
