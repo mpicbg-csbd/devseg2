@@ -5,7 +5,7 @@ ipython
 
 import denoiser, detector
 from segtools.ns2dir import load,save,toarray
-import experiments2
+import experiments2, analysis2
 import numpy as np
 %load_ext line_profiler
 """
@@ -79,8 +79,8 @@ def run_slurm():
   # for pid in range(1,9): Popen(cmd.format(pid=pid),shell=True)
 
   # e14_celegans
-  cmd = 'sbatch -J e14_{pid:03d} -p gpu --gres gpu:1 -n 1 -t 4:00:00 -c 1 --mem 128000 -o slurm/e14_pid{pid:03d}.out -e slurm/e14_pid{pid:03d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e14_celegans({pid})\"\' '
-  for pid in range(10): Popen(cmd.format(pid=pid),shell=True)
+  # cmd = 'sbatch -J e14_{pid:03d} -p gpu --gres gpu:1 -n 1 -t 4:00:00 -c 1 --mem 128000 -o slurm/e14_pid{pid:03d}.out -e slurm/e14_pid{pid:03d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e14_celegans({pid})\"\' '
+  # for pid in range(10): Popen(cmd.format(pid=pid),shell=True)
 
   # ## e15_celegans
   # cmd = 'sbatch -J e15_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 12:00:00 -c 1 --mem 128000 -o slurm/e15_pid{pid:02d}.out -e slurm/e15_pid{pid:02d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e15_celegans({pid})\"\' '
@@ -89,6 +89,11 @@ def run_slurm():
   ## e16_ce_adapt
   # cmd = 'sbatch -J e16_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 2:00:00 -c 1 --mem 128000 -o slurm/e16_pid{pid:02d}.out -e slurm/e16_pid{pid:02d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e16_ce_adapt({pid})\"\' '
   # for pid in range(2*5): Popen(cmd.format(pid=pid),shell=True)
+
+  # e18_trib
+  cmd = 'sbatch -J e18_{pid:03d} -p gpu --gres gpu:1 -n 1 -t 3:00:00 -c 1 --mem 128000 -o slurm/e18_pid{pid:03d}.out -e slurm/e18_pid{pid:03d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e18_trib({pid})\"\' '
+  for pid in [0,1,2,3,4,5,6,7]: Popen(cmd.format(pid=pid),shell=True)
+
 
 ## Alex's retina 3D
 
@@ -583,10 +588,11 @@ def e14_celegans(pid=0):
   cfig = _e14_celegans()
   cfig.load_train_and_vali_data = _ltvd
   cfig.savedir = savedir / f'e14_celegans/v08/pid{pid:03d}/'
+  cfig.time_total = 20_000 ## special for e14-v08-pid009
 
   ## Train the net
-  T = detector.train_init(cfig)
-  # T = detector.train_continue(cfig,cfig.savedir / 'm/best_weights_f1.pt')
+  # T = detector.train_init(cfig)
+  T = detector.train_continue(cfig,cfig.savedir / 'm/best_weights_f1.pt')
   T.ta.train_times = train_times
   T.ta.vali_times  = vali_times
   # shutil.copy("/projects/project-broaddus/devseg_2/src/experiments2.py", cfig.savedir)
@@ -826,6 +832,178 @@ def e17_ce_nuclei(pid=0):
   pass
 
 
+## proof of principle for every dataset
+
+def e18_trib(pid=0):
+  """
+  v01 : For each 3D ISBI dataset: Train, Vali, Predict on times 000,001,002 respectively. pid selects dataset.
+  """
+
+  trainset, testset = "01", "01"
+  bg_weight_multiplier = 0.2
+
+
+  if pid==0:
+    # good
+    train_times, vali_times = [0], [1]
+    predtimes = train_times + vali_times + [3]
+    kernel_shape = np.array([2,3,3])
+    maxtime  = 64 #[64,209]
+    myname   = "trib_isbi_proj"
+    isbiname = "Fluo-N3DL-TRIC" ## isotropic voxels, but very thin image
+    batch_shape = [1,1,16,128,128]
+  if pid==1:
+    train_times, vali_times = [0], [1]
+    predtimes = [2] #train_times + vali_times + [3]
+    kernel_shape = np.array([2,3,3])
+    trainset, testset = "01", "01"
+    maxtime  = 2 #59 #[59,79] ## train/test
+    myname   = "trib_isbi"
+    isbiname = "Fluo-N3DL-TRIF" ## isotropic!
+
+    ## change batch shape ?
+    batch_shape = [1,1,16,128,128]
+    ## loading single example takes a long time...
+  if pid in [2,6,7]:
+    myname       = "celegans_isbi"
+    isbiname     = "Fluo-N3DH-CE"
+    maxtime      = 2 # [190,195]?? [250,250] images, but not with gt annotations
+    kernel_shape = np.array([1,7,7])
+    train_times  = [{2:0, 6:70, 7:150}[pid]]
+    vali_times   = [{2:1, 6:71, 7:151}[pid]]
+    predtimes    = train_times + vali_times + [{2:2, 6:72, 7:152}[pid]]
+    batch_shape  = [1,1,16,128,128] ## 11x1x1 aniso
+  if pid==3:
+    train_times, vali_times = [0], [1]
+    predtimes = train_times + vali_times + [3]
+    kernel_shape = np.array([2,3,3])
+    myname   = "fly_isbi"
+    isbiname = "Fluo-N3DL-DRO"
+    maxtime  = 2 # [49,49]
+    batch_shape = [1,1,16,128,128] ## 5x1x1 aniso? 
+    bg_weight_multiplier = 0.0
+  if pid==4:
+    train_times, vali_times = [0], [1]
+    predtimes = train_times + vali_times + [3]
+    kernel_shape = np.array([1,3,3]) ## very thin. highly aniso.
+    myname   = "MDA231" ## /MDA231/Fluo-C3DL-MDA231
+    isbiname = "Fluo-C3DL-MDA231"
+    maxtime  = 2 # [11,11]
+    batch_shape = [1,1,16,128,128] ## highly anisotropic 3D. sparse. cytoplasm label? full cells.
+  if pid==5:
+    train_times, vali_times = [0], [1]
+    predtimes = train_times + vali_times + [3]
+    kernel_shape = np.array([1,5,5]) ## cell about 100px across and 20px in z
+    myname   = "A549"
+    isbiname = "Fluo-C3DH-A549"
+    maxtime  = 2 # [29,29]
+    batch_shape = [1,1,16,128,128] ## about 5x1 anisotropic 3D. only one object! membrane label?
+
+
+  print(train_times,vali_times)
+  print(kernel_shape)
+
+  pts  = np.array(load(f"/projects/project-broaddus/rawdata/{myname}/traj/{isbiname}/{trainset}_traj.pkl"))
+  
+  def _ltvd(config):
+    td = SimpleNamespace()
+    td.input  = np.array([load(f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{trainset}/t{n:03d}.tif") for n in train_times])
+    td.input  = td.input[:,None]  ## add channels
+    td.input  = normalize3(td.input,2,99.4,clip=False)
+    td.target = detector.pts2target(pts[train_times],td.input[0,0].shape,kernel_shape)
+    td.target = td.target[:,None] ## add channels
+    td.gt = pts[train_times]
+
+    vd = SimpleNamespace()
+    vd.input  = np.array([load(f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{trainset}/t{n:03d}.tif") for n in vali_times])
+    vd.input  = vd.input[:,None] ## add channels
+    vd.input  = normalize3(vd.input,2,99.4,clip=False)
+    vd.target = detector.pts2target(pts[vali_times],vd.input[0,0].shape,kernel_shape)
+    vd.target = vd.target[:,None] ## add channels
+    vd.gt = pts[vali_times]
+    
+    return td,vd
+
+  def _config():
+
+    ## all config params
+    cfig = SimpleNamespace()
+    cfig.getnet = lambda : torch_models.Unet3(16, [[1],[1]], pool=(1,2,2), kernsize=(3,5,5), finallayer=torch_models.nn.Sequential)
+    cfig.rescale_for_matching = [1,1,1]
+    cfig.fg_bg_thresh = np.exp(-16/2)
+    cfig.bg_weight_multiplier = bg_weight_multiplier #0.2 #1.0
+    cfig.time_weightdecay = 1600 # for pixelwise weights
+    cfig.weight_decay = False
+    cfig.sampler      = detector.content_sampler
+    cfig.patch_space  = np.array(batch_shape[2:])
+    cfig.batch_shape  = np.array(batch_shape)
+    cfig.batch_axes   = "BCZYX"
+    time_total = 10_000 # about 12k / hour? 200/min = 5mins/ 1k = 12k/hr
+    cfig.time_agg = 1 # aggregate gradients before backprop
+    cfig.time_loss = 10
+    cfig.time_print = 100
+    cfig.time_savecrop = max(100,time_total//50)
+    cfig.time_validate = max(600,time_total//50)
+    cfig.time_total = time_total
+    cfig.lr = 4e-4
+
+    return cfig
+
+  cfig = _config()
+  cfig.load_train_and_vali_data = _ltvd
+  cfig.savedir = savedir / f'e18_trib/v01/pid{pid:03d}/'
+
+  ## Train the net
+  if False:
+    T = detector.train_init(cfig)
+    # T = detector.train_continue(cfig,cfig.savedir / 'm/best_weights_f1.pt')
+    T.ta.train_times = train_times
+    T.ta.vali_times  = vali_times
+    shutil.copy("/projects/project-broaddus/devseg_2/src/experiments2.py", cfig.savedir)
+    detector.train(T)
+
+  ## Reload best weights
+  net = cfig.getnet().cuda()
+  net.load_state_dict(torch.load(cfig.savedir / "m/best_weights_f1.pt"))
+
+  ## Show prediction on train & vali data
+  if False:
+    td,vd = _ltvd(0)
+    res = detector.predict_raw(net,td.input,dims="NCZYX").astype(np.float16)
+    save(res, cfig.savedir / 'pred_train.npy')
+    res = detector.predict_raw(net,vd.input,dims="NCZYX").astype(np.float16)
+    save(res, cfig.savedir / 'pred_vali.npy')
+
+  ## Predict and Evaluate model result on all available data
+  gtpts = load(f"/projects/project-broaddus/rawdata/{myname}/traj/{isbiname}/{testset}_traj.pkl")
+
+  # if myname == "celegans_isbi" and testset=='01':
+  #   gtpts[6] = pts[6]
+  #   gtpts[7] = pts[7]
+
+  scores = []
+  pred  = []
+  raw   = []
+  for i in predtimes:
+    # outfile = cfig.savedir / f'dscores{testset}/t{i:03d}.pkl'
+    # if outfile.exists(): continue
+    x = load(f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{testset}/t{i:03d}.tif")
+    x = normalize3(x,2,99.4,clip=False)
+    # res = detector.predict_raw(net,x,dims="ZYX").astype(np.float32)
+    # pts = peak_local_max(res,threshold_abs=.2,exclude_border=False,footprint=np.ones((3,8,8)))
+    # score3  = point_matcher.match_unambiguous_nearestNeib(gtpts[i],pts,dub=3,scale=[1,1,1])
+    # score10 = point_matcher.match_unambiguous_nearestNeib(gtpts[i],pts,dub=10,scale=[1,1,1])
+    # print("time", i, "gt", score10.n_gt, "match", score10.n_matched, "prop", score10.n_proposed)
+    # s = {3:score3,10:score10}
+    # scores.append(s)
+    # pred.append(res.max(0))
+    raw.append(x.max(0))
+
+  # save(scores, cfig.savedir / f'scores_{testset}.pkl')
+  # save(np.array(pred).astype(np.float16), cfig.savedir / f"pred_{testset}.npy")
+  save(np.array(raw).astype(np.float16),  cfig.savedir / f"raw_{testset}.npy")
+
+
 if __name__ == '__main__':
   "RUN ALL THE EXPERIMENTS!"
   run_slurm()
@@ -861,6 +1039,8 @@ Also, I can run all parameter versions of all jobs via SLURM with a single run_s
 # Sat Sep 26 23:19:00 2020
 
 Adding e16.
+
+
 
 
 """

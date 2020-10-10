@@ -112,3 +112,36 @@ def job09(deps):
   save(scores,'/lustre/projects/project-broaddus/devseg_2/ex7/celegans_isbi/train1/allscores.pkl')
   return scores
 
+def job10():
+  "tribolium max projections"
+  for i in range(60):
+    name = f"/projects/project-broaddus/rawdata/trib_isbi/Fluo-N3DL-TRIF/01/t{i:03d}.tif"
+    raw = load(name)
+    print(i, raw.shape) ## (991, 1871, 965)
+    raw = raw.max(0)
+    save(raw,name.replace("trib_isbi/","trib_isbi/mx_z/"))
+
+def job11():
+  "make 3D crops at full res of trib data"
+  from segtools.point_tools import trim_images_from_pts2
+  pts = load("/projects/project-broaddus/rawdata/trib_isbi/traj/Fluo-N3DL-TRIF/01_traj.pkl")
+  newpts = []
+  for i in range(60):
+    name = f"/projects/project-broaddus/rawdata/trib_isbi/Fluo-N3DL-TRIF/01/t{i:03d}.tif"
+    raw = load(name)
+    print(i, raw.shape) ## (991, 1871, 965)
+    pts2,ss = trim_images_from_pts2(pts[i],border=(5,10,10))
+    newpts.append(pts2)
+    save(raw[ss],name.replace("trib_isbi/","trib_isbi/crops/"))
+  save(newpts,"/projects/project-broaddus/rawdata/trib_isbi/traj/Fluo-N3DL-TRIF/01_traj_crops.pkl")
+
+def job12():
+  "max projections"
+  myname = "MDA231"
+  isbiname = "Fluo-C3DL-MDA231"
+  for i in range(60):
+    name = f"/projects/project-broaddus/rawdata/A549/Fluo-C3DH-A549/02/t{i:03d}.tif"
+    raw = load(name)
+    print(i, raw.shape) ## (991, 1871, 965)
+    raw = raw.max(0)
+    save(raw,name.replace("/A549/","/A549/mx_z/"))

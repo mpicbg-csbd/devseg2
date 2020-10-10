@@ -172,16 +172,6 @@ def train(T):
       n = ta.i//config.time_validate
       validate(vd,T)
 
-      valilosses = [sum([x['loss'] for x in xx]) for xx in ta.vali_scores]
-      if np.min(valilosses)==valilosses[-1]:
-        print(f"New best mse weights at {n}")
-        torch.save(m.net.state_dict(), config.savedir / f'm/best_weights_mse.pt')
-
-      valilosses = [sum([x[10] for x in xx]) for xx in ta.vali_scores]
-      if np.max(valilosses)==valilosses[-1]:
-        print(f"New best f1 weights at {n}")
-        torch.save(m.net.state_dict(), config.savedir / f'm/best_weights_f1.pt')
-
 
 def validate(vd,T):
   ## Task-Specific Stuff: Data Loading, Sampling, Weights, Validation, Etc
@@ -200,13 +190,25 @@ def validate(vd,T):
     s10 = [score10.f1, score10.n_matched, score10.n_proposed, score10.n_gt]
     st = f"{ta.i:5d} {i} {score10.f1:6.3f} {score10.n_matched:4d} {score10.n_proposed:4d} {score10.n_gt:4d}"
     print(st)
-    # print(ta.i,i,s3,s10)
 
     ## save detections and loss, but only the basic info to save space
-    vs.append({3:score3.f1, 10:score10.f1, 'loss':valloss})
+    vs.append({'3':score3.f1, '10':score10.f1, 'loss':valloss})
     # save(res[0].max(0).astype(np.float16),config.savedir / f"mx_z/e{n:03d}_i{i}.tif")
 
   ta.vali_scores.append(vs)
+
+  torch.save(m.net.state_dict(), config.savedir / f'm/best_weights_latest.pt')
+
+  valilosses = [sum([x['loss'] for x in xx]) for xx in ta.vali_scores]
+  if np.min(valilosses)==valilosses[-1]:
+    print(f"New best mse weights at {n}")
+    torch.save(m.net.state_dict(), config.savedir / f'm/best_weights_mse.pt')
+
+  valilosses = [sum([x['10'] for x in xx]) for xx in ta.vali_scores]
+  if np.max(valilosses)==valilosses[-1]:
+    print(f"New best f1 weights at {n}")
+    torch.save(m.net.state_dict(), config.savedir / f'm/best_weights_f1.pt')
+
 
 def pts2target(list_of_pts,sh,sigmas):
   s  = np.array(sigmas)
