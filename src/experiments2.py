@@ -5,7 +5,7 @@ ipython
 
 import denoiser, detector
 from segtools.ns2dir import load,save,toarray
-import experiments2, analysis2
+import experiments2, analysis2, ipy
 import numpy as np
 %load_ext line_profiler
 """
@@ -43,6 +43,7 @@ from segtools.numpy_utils import normalize3, perm2, collapse2, splt
 from segtools import point_matcher
 from subprocess import run, Popen
 import shutil
+from segtools.point_tools import trim_images_from_pts2
 
 savedir = Path('/projects/project-broaddus/devseg_2/expr/')
 
@@ -92,7 +93,7 @@ def run_slurm():
 
   # e18_trib
   cmd = 'sbatch -J e18_{pid:03d} -p gpu --gres gpu:1 -n 1 -t 3:00:00 -c 1 --mem 128000 -o slurm/e18_pid{pid:03d}.out -e slurm/e18_pid{pid:03d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e18_trib({pid})\"\' '
-  for pid in [0,1,2,3,4,5,6,7]: Popen(cmd.format(pid=pid),shell=True)
+  for pid in [1]: Popen(cmd.format(pid=pid),shell=True)
 
 
 ## Alex's retina 3D
@@ -898,6 +899,14 @@ def e18_trib(pid=0):
     isbiname = "Fluo-C3DH-A549"
     maxtime  = 2 # [29,29]
     batch_shape = [1,1,16,128,128] ## about 5x1 anisotropic 3D. only one object! membrane label?
+  if pid==8:
+    train_times, vali_times = [0,1,2,3,4,5,6], [7,8,9]
+    predtimes = train_times + vali_times + [10,11,12]
+    kernel_shape = np.array([1,5,5]) ## cell about 100px across and 20px in z
+    myname   = "hampster"
+    isbiname = "Fluo-N3DH-CHO"
+    maxtime  = 2 # [29,29]
+    batch_shape = [1,1,16,128,128] ## about 5x1 anisotropic 3D. only one object! membrane label?
 
 
   print(train_times,vali_times)
@@ -954,7 +963,7 @@ def e18_trib(pid=0):
   cfig.savedir = savedir / f'e18_trib/v01/pid{pid:03d}/'
 
   ## Train the net
-  if False:
+  if True:
     T = detector.train_init(cfig)
     # T = detector.train_continue(cfig,cfig.savedir / 'm/best_weights_f1.pt')
     T.ta.train_times = train_times
@@ -982,25 +991,23 @@ def e18_trib(pid=0):
   #   gtpts[7] = pts[7]
 
   scores = []
-  pred  = []
-  raw   = []
+  pred   = []
+  raw    = []
   for i in predtimes:
-    # outfile = cfig.savedir / f'dscores{testset}/t{i:03d}.pkl'
-    # if outfile.exists(): continue
     x = load(f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{testset}/t{i:03d}.tif")
     x = normalize3(x,2,99.4,clip=False)
-    # res = detector.predict_raw(net,x,dims="ZYX").astype(np.float32)
-    # pts = peak_local_max(res,threshold_abs=.2,exclude_border=False,footprint=np.ones((3,8,8)))
-    # score3  = point_matcher.match_unambiguous_nearestNeib(gtpts[i],pts,dub=3,scale=[1,1,1])
-    # score10 = point_matcher.match_unambiguous_nearestNeib(gtpts[i],pts,dub=10,scale=[1,1,1])
-    # print("time", i, "gt", score10.n_gt, "match", score10.n_matched, "prop", score10.n_proposed)
-    # s = {3:score3,10:score10}
-    # scores.append(s)
-    # pred.append(res.max(0))
+    res = detector.predict_raw(net,x,dims="ZYX").astype(np.float32)
+    pts = peak_local_max(res,threshold_abs=.2,exclude_border=False,footprint=np.ones((3,8,8)))
+    score3  = point_matcher.match_unambiguous_nearestNeib(gtpts[i],pts,dub=3,scale=[1,1,1])
+    score10 = point_matcher.match_unambiguous_nearestNeib(gtpts[i],pts,dub=10,scale=[1,1,1])
+    print("time", i, "gt", score10.n_gt, "match", score10.n_matched, "prop", score10.n_proposed)
+    s = {3:score3,10:score10}
+    scores.append(s)
+    pred.append(res.max(0))
     raw.append(x.max(0))
 
-  # save(scores, cfig.savedir / f'scores_{testset}.pkl')
-  # save(np.array(pred).astype(np.float16), cfig.savedir / f"pred_{testset}.npy")
+  save(scores, cfig.savedir / f'scores_{testset}.pkl')
+  save(np.array(pred).astype(np.float16), cfig.savedir / f"pred_{testset}.npy")
   save(np.array(raw).astype(np.float16),  cfig.savedir / f"raw_{testset}.npy")
 
 

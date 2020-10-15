@@ -145,3 +145,14 @@ def job12():
     print(i, raw.shape) ## (991, 1871, 965)
     raw = raw.max(0)
     save(raw,name.replace("/A549/","/A549/mx_z/"))
+
+def job13():
+  p = Path("../../rawdata/hampster/Fluo-N3DH-CHO/02_GT/TRA/")
+  allpts = []
+  for name in sorted(p.glob("*.tif")):
+    print(name)
+    lab = load(name)
+    pts = mantrack2pts(lab)
+    allpts.append(pts)
+  save(allpts, "/projects/project-broaddus/rawdata/hampster/traj/Fluo-N3DH-CHO/02_traj.pkl")
+  return allpts
