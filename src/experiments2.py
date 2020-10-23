@@ -22,7 +22,6 @@ The top level value `savedir` controls a single global output home for all exper
 Detection and denoising.
 """
 
-
 # import torch
 # from torch import nn
 # import torch_models
@@ -44,8 +43,20 @@ from segtools import point_matcher
 from subprocess import run, Popen
 import shutil
 from segtools.point_tools import trim_images_from_pts2
+from scipy.ndimage import zoom
+import json
 
 savedir = Path('/projects/project-broaddus/devseg_2/expr/')
+
+def _parse_pid(pid_or_params,dims):
+  if type(pid_or_params) is list:
+    params = pid_or_params
+    pid = np.ravel_multi_index(params,dims)
+  elif type(pid_or_params) is int:
+    pid = pid_or_params
+    params = np.unravel_index(pid,dims)
+  print("params: ",params, "pid: ", pid)
+  return params, pid
 
 def run_slurm():
   """
@@ -71,9 +82,10 @@ def run_slurm():
   # cmd = 'sbatch -J e11_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 12:00:00 -c 1 --mem 128000 -o slurm/e11_pid{pid:02d}.out -e slurm/e11_pid{pid:02d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.job11_synthetic_membranes({pid})\"\' '
   # for pid in [1,2,3]: Popen(cmd.format(pid=pid),shell=True)
 
-  # ## job12_horst
-  # cmd = 'sbatch -J e12_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 12:00:00 -c 1 --mem 128000 -o slurm/e12_pid{pid:02d}.out -e slurm/e12_pid{pid:02d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.job12_horst({pid})\"\' '
-  # for pid in range(1,9): Popen(cmd.format(pid=pid),shell=True)
+  ## e08_horst
+  # shutil.copy("/projects/project-broaddus/devseg_2/src/experiments2.py", "/projects/project-broaddus/devseg_2/src/ex2copy.py")
+  cmd = 'sbatch -J e12_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 24:00:00 -c 1 --mem 128000 -o slurm/e12_pid{pid:02d}.out -e slurm/e12_pid{pid:02d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e08_horst({pid})\"\' '
+  for pid in range(50): Popen(cmd.format(pid=pid),shell=True)
 
   # ## job13_mangal
   # cmd = 'sbatch -J e13_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 12:00:00 -c 1 --mem 128000 -o slurm/e13_pid{pid:02d}.out -e slurm/e13_pid{pid:02d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.job13_mangal({pid})\"\' '
@@ -92,8 +104,8 @@ def run_slurm():
   # for pid in range(2*5): Popen(cmd.format(pid=pid),shell=True)
 
   # e18_trib
-  cmd = 'sbatch -J e18_{pid:03d} -p gpu --gres gpu:1 -n 1 -t 3:00:00 -c 1 --mem 128000 -o slurm/e18_pid{pid:03d}.out -e slurm/e18_pid{pid:03d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e18_trib({pid})\"\' '
-  for pid in [1]: Popen(cmd.format(pid=pid),shell=True)
+  # cmd = 'sbatch -J e18_{pid:03d} -p gpu --gres gpu:1 -n 1 -t 3:00:00 -c 1 --mem 128000 -o slurm/e18_pid{pid:03d}.out -e slurm/e18_pid{pid:03d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e18_trib({pid})\"\' '
+  # for pid in range(19): Popen(cmd.format(pid=pid),shell=True)
 
 
 ## Alex's retina 3D
@@ -299,24 +311,27 @@ def j11_sm_analysis():
 
 ## horst's calcium images
 
-def job12_horst_predict():
+horst_data = [
+  '/projects/project-broaddus/rawdata/HorstObenhaus/60480-openfield_00001_00001.tif',
+  '/projects/project-broaddus/rawdata/HorstObenhaus/60480-openfield_00001_00002.tif',
+  '/projects/project-broaddus/rawdata/HorstObenhaus/60480-openfield_00001_00003.tif',
+  '/projects/project-broaddus/rawdata/HorstObenhaus/60480-openfield_00001_00004.tif',
+  '/projects/project-broaddus/rawdata/HorstObenhaus/60480-openfield_00001_00005.tif',
+  '/projects/project-broaddus/rawdata/HorstObenhaus/60480-openfield_00001_00006.tif',
+  '/projects/project-broaddus/rawdata/HorstObenhaus/88592-openfield_00001_00001.tif',
+  '/projects/project-broaddus/rawdata/HorstObenhaus/88592-openfield_00001_00002.tif',
+  '/projects/project-broaddus/rawdata/HorstObenhaus/88592-openfield_00001_00003.tif',
+  '/projects/project-broaddus/rawdata/HorstObenhaus/88592-openfield_00001_00004.tif',
+  '/projects/project-broaddus/rawdata/HorstObenhaus/img60480.npy',
+  '/projects/project-broaddus/rawdata/HorstObenhaus/img88592.npy',
+  ]
+
+def e08_horst_predict():
   """
   run predictions for Horst on his 2nd round of long timeseries.
-  2k timepoints 1 zslice
+  2k  timepoints 1 zslice
   # TODO: how to upload these?
   """
-  imglist = [
-    '/projects/project-broaddus/rawdata/HorstObenhaus/60480-openfield_00001_00001.tif',
-    '/projects/project-broaddus/rawdata/HorstObenhaus/60480-openfield_00001_00002.tif',
-    '/projects/project-broaddus/rawdata/HorstObenhaus/60480-openfield_00001_00003.tif',
-    '/projects/project-broaddus/rawdata/HorstObenhaus/60480-openfield_00001_00004.tif',
-    '/projects/project-broaddus/rawdata/HorstObenhaus/60480-openfield_00001_00005.tif',
-    '/projects/project-broaddus/rawdata/HorstObenhaus/60480-openfield_00001_00006.tif',
-    '/projects/project-broaddus/rawdata/HorstObenhaus/88592-openfield_00001_00001.tif',
-    '/projects/project-broaddus/rawdata/HorstObenhaus/88592-openfield_00001_00002.tif',
-    '/projects/project-broaddus/rawdata/HorstObenhaus/88592-openfield_00001_00003.tif',
-    '/projects/project-broaddus/rawdata/HorstObenhaus/88592-openfield_00001_00004.tif',
-  ]
 
   from segtools.numpy_utils import norm_to_percentile_and_dtype
 
@@ -341,107 +356,86 @@ def job12_horst_predict():
     save(res,resname)
     save(res[:20],resname.replace("test/pred","test/f20_pred"))
     save(img[:20],resname.replace("test/pred","test/f20_img"))
-    
-def job12_horst(pid=1):
 
-  p0,p1 = np.unravel_index(pid,[2,4])
-
-  names = [
-    '/projects/project-broaddus/rawdata/HorstObenhaus/img60480.npy',
-    '/projects/project-broaddus/rawdata/HorstObenhaus/img88592.npy',
-  ]
-  # if p0==0: img = load('/projects/project-broaddus/rawdata/HorstObenhaus/img60480.npy')
-  # elif p0==1: img = load('/projects/project-broaddus/rawdata/HorstObenhaus/img88592.npy')
-
-  img = load(names[p0])
-
-  # elif p0==2:
-  #   img = load(f'/projects/project-broaddus/rawdata/HorstObenhaus/60480-openfield_00001_0000{pid-8}.tif')
-  #   img = load(f'/projects/project-broaddus/rawdata/HorstObenhaus/60480-openfield_00001_0000{p1}.tif')
-  #   img = img[:2000:20] ## odd frames are blank (seperate channel). subsample for easy training.
-
-  # img = load('/projects/project-broaddus/rawdata/HorstObenhaus/img60480.npy')
-  # if pid==9:
-  #   img = load('/projects/project-broaddus/rawdata/HorstObenhaus/img88592.npy')
-  #   _job12_nlm_horst(img)
-  #   return
-
-  img  = img[:,None]
-  cfig = _job12_horst(img,pid=pid)
-
-  T   = denoiser.train_init(cfig)
-  denoiser.train(T)
-  net, ta = T.m.net, T.ta
-  # ta = None
-  # net = cfig.getnet().cuda()
-  # net.load_state_dict(torch.load(savedir / f'e08_horst/v2_t{pid-4:02d}' / 'm/net049.pt'))
-
-  res = denoiser.predict_raw(net,img.reshape([10,10,1,512,512]),dims="NBCYX",ta=ta)
-  save(res,cfig.savedir / 'pred.npy')
-
-def _job12_horst(data,pid=1):
+def e08_horst(pid_or_params=1):
   """
-  data.data is synthetic membranes with values in {0,1}
-  data.noisy_data is synthetic membranes with noisy values in [0,2]
+  Let's try a few variations on the Horst data...
+  - vary amount / window of training data sampling
+  - Unet2 / Unet3
+  - keep 60480/88592 separate
+  - we already know the optimal mask size = [1,1,1]
+  - odd frames of images are blank (seperate, noisy channel).
+  - visually optimize the linear combination of RAW and DENOISED so it doesn't look too smooth.
+  - Compare to previous denoising
+  - Predict on all stacks (about 10GB) and upload to Dropbox.
+
+  v01: explore many options
+  v02: train for a long time on all the data we can use, use the bigger chan 32 nets. repeat 5 times.
   """
-  
-  cfig = denoiser.config_example()
 
-  t=10_000
-  cfig.times = [10,100,t//50,t//50,t]
-  cfig.lr = 1e-4
-  cfig.batch_space  = np.array([512,512])
-  cfig.batch_shape  = np.array([1,1,512,512])
-  cfig.sampler      = denoiser.flat_sampler
-  cfig.getnet       = lambda : torch_models.Unet2(16, [[1],[1]], pool=(2,2), kernsize=(5,5), finallayer=torch_models.nn.Sequential)
 
-  if p1==0:
-    kern = np.array([[1,1,1,1,1]])
-    cfig.mask = kern
-    cfig.masker = denoise_utils.structN2V_masker
-  if p1==1:
+  # (p0_unet,p1_data,p2_repeat,p3_chan,p4_datasize), pid = _parse_pid(pid_or_params,[2,12,5,2,5])
+  (p0_unet,p1_data,p2_repeat,p3_chan,p4_datasize), pid = _parse_pid(pid_or_params,[1,10,5,1,1])
+
+  img  = load(horst_data[p1_data])
+  img  = img[::2,None] ## remove the pure-noise channel
+  unet = [torch_models.Unet2, torch_models.Unet3][p0_unet]
+  # chan = [16,32][p3_chan]
+  chan = 32
+
+  _mask = np.ones(img.shape[0]).astype(np.bool); _mask[[0,img.shape[0]//2,-1]]=0
+  img_vd = img[~_mask]
+  img_td = img[_mask]
+  np.random.seed(0)
+  np.random.shuffle(img_td)
+  # _n_patches = [1,10,50,100,500][p4_datasize]
+
+  img_td = img_td #[:_n_patches] # v02: TAKE THEM ALL
+
+  def _cfig():
+    cfig = SimpleNamespace()
+    t=100_000
+    cfig.times = [10,100,t//20,t//10,t]
+    # cfig.times = [1,10,10,50,1000]
+    cfig.lr = 1e-4
+    cfig.batch_space  = np.array([512,512])
+    cfig.batch_shape  = np.array([1,1,512,512])
+    cfig.sampler      = denoiser.flat_sampler
+    cfig.getnet       = lambda : unet(chan, [[1],[1]], pool=(2,2), kernsize=(5,5), finallayer=torch_models.nn.Sequential)
     kern = np.array([[1,1,1]])
     cfig.mask = kern
     cfig.masker = denoise_utils.structN2V_masker
-  if p1==2:
-    kern = np.array([[1]])
-    cfig.mask = kern
-    cfig.masker = denoise_utils.structN2V_masker
-  if p1==3:
-    cfig.masker = denoise_utils.nearest_neib_masker
-
-  cfig.savedir = savedir / f'e08_horst/pid{pid:02d}/'
-  # cfig.savedir = savedir / f'e08_horst/v2_t{pid+1:02d}/'
-  # cfig.best_model = savedir / f'e08_horst/v2_t{pid-4:02d}' / 'm/net049.pt'
+    # cfig.continue_training = False
+    return cfig
 
   def _ltvd(config):
     td = SimpleNamespace()
-    td.input  = data[:95]
-    td.target = data[:95]
+    td.input  = img_td
+    td.target = img_td
     denoiser.add_meta_to_td(td)
     vd = SimpleNamespace()
-    vd.input  = data[95:]
-    vd.target = data[95:]
+    vd.input  = img_vd
+    vd.target = img_vd
     denoiser.add_meta_to_td(vd)
     return td,vd
+
+  cfig = _cfig()
+  cfig.savedir = savedir / f'e08_horst/v02/pid{pid:03d}/'
   cfig.load_train_and_vali_data = _ltvd
 
-  return cfig
+  print(json.dumps(cfig.__dict__,sort_keys=True, indent=2, default=str))
 
-## Do NLM _locally/interactively in napari_
-  # def _job12_nlm_horst(img):
-  #   import gputools
-  #   # img = img[0]
-  #   # res = gputools.denoise.nlm2(img)
-  #   # res = np.array([gputools.denoise.nlm2(img[i],np.log10(-2 + i/25)) for i in range(100)]) # sig
-  #   # res = np.array([gputools.denoise.nlm2(img[i],-0.5 + i/33) for i in range(100)]) # sig2
-  #   # img = img[0]
-  #   img = normalize3(img,2,99)
-  #   res = np.array([gputools.denoise.nlm2(img[i],-0.5 + i/33,size_filter=i%10,size_search=i//10) for i in range(100)]) # sig2
-  #   res = res.reshape([10,10,512,512])
-  #   save(res,'../e08_horst/nlm2d/pred3.npy')
-  #   res = res.reshape([10,10,512,512])
-  #   save(res,'../e08_horst/nlm2d/pred3.npy')
+  T = denoiser.train_init(cfig)
+  save(img_vd, cfig.savedir / 'vali_raw.npy') ## WARNING: don't save anything in cfig.savedir _until_ train_init
+
+  denoiser.train(T)
+
+  # net, ta = T.m.net, T.ta
+  # return T
+  # ta = None
+  # net = cfig.getnet().cuda()
+  # net.load_state_dict(torch.load(savedir / f'e08_horst/v2_t{pid-4:02d}' / 'm/net049.pt'))
+  # res = denoiser.predict_raw(net,img[:100].reshape([10,10,1,512,512]),dims="NBCYX",ta=ta)
 
 ## mangal's nuclei
 
@@ -835,101 +829,100 @@ def e17_ce_nuclei(pid=0):
 
 ## proof of principle for every dataset
 
+
+_datasets = [
+  ("HSC",            "BF-C2DL-HSC"),
+  ("MuSC",           "BF-C2DL-MuSC"),
+  ("HeLa",           "DIC-C2DH-HeLa"),
+  ("MSC",            "Fluo-C2DL-MSC"),
+  ("A549",           "Fluo-C3DH-A549"),
+  ("A549-SIM",       "Fluo-C3DH-A549-SIM"),
+  ("H157",           "Fluo-C3DH-H157"),
+  ("MDA231",         "Fluo-C3DL-MDA231"),
+  ("GOWT1",          "Fluo-N2DH-GOWT1"),
+  ("SIM+",           "Fluo-N2DH-SIM+"),
+  ("HeLa",           "Fluo-N2DL-HeLa"),
+  ("celegans_isbi",  "Fluo-N3DH-CE"),
+  ("hampster",       "Fluo-N3DH-CHO"),
+  ("SIM+",           "Fluo-N3DH-SIM+"),
+  ("fly_isbi",       "Fluo-N3DL-DRO"),
+  ("trib_isbi_proj", "Fluo-N3DL-TRIC"),
+  ("trib_isbi",      "Fluo-N3DL-TRIF"),
+  ("U373",           "PhC-C2DH-U373"),
+  ("PSC",            "PhC-C2DL-PSC"),
+ ]
+
+
 def e18_trib(pid=0):
   """
   v01 : For each 3D ISBI dataset: Train, Vali, Predict on times 000,001,002 respectively. pid selects dataset.
   """
 
+  myname, isbiname  = _datasets[pid]
+
   trainset, testset = "01", "01"
-  bg_weight_multiplier = 0.2
+  bg_weight_multiplier = 1.0
+  train_times, vali_times, pred_times = np.r_[0:6], np.r_[7:10], np.r_[0:13]
+  tif_name = "t{n:04d}.tif" if myname in ["HSC", "MuSC",] else "t{n:03d}.tif"
+
+  if "2D" in isbiname:
+    ndim = 2
+    batch_shape = [1,1,512,512]
+    _getnet = lambda : torch_models.Unet3(16, [[1],[1]], pool=(2,2), kernsize=(5,5), finallayer=torch_models.nn.Sequential)
+    kernel_shape = [5,5]
+    print("2D",myname, isbiname)
+  elif "3D" in isbiname:
+    ndim = 3
+    batch_shape  = [1,1,16,128,128]
+    _getnet = lambda : torch_models.Unet3(16, [[1],[1]], pool=(1,2,2), kernsize=(3,5,5), finallayer=torch_models.nn.Sequential)
+    kernel_shape = [2,5,5]
+    print("3D",myname, isbiname)
 
 
-  if pid==0:
-    # good
-    train_times, vali_times = [0], [1]
-    predtimes = train_times + vali_times + [3]
-    kernel_shape = np.array([2,3,3])
-    maxtime  = 64 #[64,209]
-    myname   = "trib_isbi_proj"
-    isbiname = "Fluo-N3DL-TRIC" ## isotropic voxels, but very thin image
-    batch_shape = [1,1,16,128,128]
-  if pid==1:
-    train_times, vali_times = [0], [1]
-    predtimes = [2] #train_times + vali_times + [3]
-    kernel_shape = np.array([2,3,3])
-    trainset, testset = "01", "01"
-    maxtime  = 2 #59 #[59,79] ## train/test
-    myname   = "trib_isbi"
-    isbiname = "Fluo-N3DL-TRIF" ## isotropic!
+  if myname=="celegans_isbi":
+    kernel_shape = [1,7,7]
+    bg_weight_multiplier = 0.2
+  if myname=="trib_isbi":
+    kernel_shape = [3,3,3]
+    train_times, vali_times, pred_times = [0],[1],[0,1,2]
+  if myname=="fly_isbi":
+    bg_weight_multiplier=0.0
+    train_times, vali_times, pred_times = [0],[1],[0,1,2]
+  if myname=="MDA231":   kernel_shape = [1,3,3]
+  if myname=="A549":     kernel_shape = [1,5,5]
+  if myname=="hampster": kernel_shape = [1,5,5]
+  if myname=="psc":
+    train_times, vali_times, pred_times = np.r_[150:156], np.r_[157:160], np.r_[150:163]
 
-    ## change batch shape ?
-    batch_shape = [1,1,16,128,128]
-    ## loading single example takes a long time...
-  if pid in [2,6,7]:
-    myname       = "celegans_isbi"
-    isbiname     = "Fluo-N3DH-CE"
-    maxtime      = 2 # [190,195]?? [250,250] images, but not with gt annotations
-    kernel_shape = np.array([1,7,7])
-    train_times  = [{2:0, 6:70, 7:150}[pid]]
-    vali_times   = [{2:1, 6:71, 7:151}[pid]]
-    predtimes    = train_times + vali_times + [{2:2, 6:72, 7:152}[pid]]
-    batch_shape  = [1,1,16,128,128] ## 11x1x1 aniso
-  if pid==3:
-    train_times, vali_times = [0], [1]
-    predtimes = train_times + vali_times + [3]
-    kernel_shape = np.array([2,3,3])
-    myname   = "fly_isbi"
-    isbiname = "Fluo-N3DL-DRO"
-    maxtime  = 2 # [49,49]
-    batch_shape = [1,1,16,128,128] ## 5x1x1 aniso? 
-    bg_weight_multiplier = 0.0
-  if pid==4:
-    train_times, vali_times = [0], [1]
-    predtimes = train_times + vali_times + [3]
-    kernel_shape = np.array([1,3,3]) ## very thin. highly aniso.
-    myname   = "MDA231" ## /MDA231/Fluo-C3DL-MDA231
-    isbiname = "Fluo-C3DL-MDA231"
-    maxtime  = 2 # [11,11]
-    batch_shape = [1,1,16,128,128] ## highly anisotropic 3D. sparse. cytoplasm label? full cells.
-  if pid==5:
-    train_times, vali_times = [0], [1]
-    predtimes = train_times + vali_times + [3]
-    kernel_shape = np.array([1,5,5]) ## cell about 100px across and 20px in z
-    myname   = "A549"
-    isbiname = "Fluo-C3DH-A549"
-    maxtime  = 2 # [29,29]
-    batch_shape = [1,1,16,128,128] ## about 5x1 anisotropic 3D. only one object! membrane label?
-  if pid==8:
-    train_times, vali_times = [0,1,2,3,4,5,6], [7,8,9]
-    predtimes = train_times + vali_times + [10,11,12]
-    kernel_shape = np.array([1,5,5]) ## cell about 100px across and 20px in z
-    myname   = "hampster"
-    isbiname = "Fluo-N3DH-CHO"
-    maxtime  = 2 # [29,29]
-    batch_shape = [1,1,16,128,128] ## about 5x1 anisotropic 3D. only one object! membrane label?
+  kernel_shape = np.array(kernel_shape)
 
+  print("train_times,vali_times", train_times,vali_times)
+  print("kernel_shape", kernel_shape)
 
-  print(train_times,vali_times)
-  print(kernel_shape)
-
-  pts  = np.array(load(f"/projects/project-broaddus/rawdata/{myname}/traj/{isbiname}/{trainset}_traj.pkl"))
+  pts  = load(f"/projects/project-broaddus/rawdata/{myname}/traj/{isbiname}/{trainset}_traj.pkl")
+  if pid==9: pts = {k:(v*(1,0.5,0.5)).astype(np.int) for k,v in pts.items()}
   
+  def get_many(dict,list_of_keys):
+    return np.array([dict[k] for k in list_of_keys])
+
   def _ltvd(config):
     td = SimpleNamespace()
-    td.input  = np.array([load(f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{trainset}/t{n:03d}.tif") for n in train_times])
+    td.input  = np.array([load(f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{trainset}/" + tif_name.format(n=n)) for n in train_times])
+    if pid==9: td.input  = td.input[:,:,::2,::2]
     td.input  = td.input[:,None]  ## add channels
     td.input  = normalize3(td.input,2,99.4,clip=False)
-    td.target = detector.pts2target(pts[train_times],td.input[0,0].shape,kernel_shape)
+    td.target = detector.pts2target(get_many(pts,train_times),td.input[0,0].shape,kernel_shape)
     td.target = td.target[:,None] ## add channels
-    td.gt = pts[train_times]
+    td.gt = get_many(pts,train_times)
 
     vd = SimpleNamespace()
-    vd.input  = np.array([load(f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{trainset}/t{n:03d}.tif") for n in vali_times])
+    vd.input  = np.array([load(f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{trainset}/" + tif_name.format(n=n)) for n in vali_times])
+    if pid==9: vd.input  = vd.input[:,:,::2,::2]
     vd.input  = vd.input[:,None] ## add channels
     vd.input  = normalize3(vd.input,2,99.4,clip=False)
-    vd.target = detector.pts2target(pts[vali_times],vd.input[0,0].shape,kernel_shape)
+    vd.target = detector.pts2target(get_many(pts,vali_times),vd.input[0,0].shape,kernel_shape)
     vd.target = vd.target[:,None] ## add channels
-    vd.gt = pts[vali_times]
+    vd.gt = get_many(pts,vali_times)
     
     return td,vd
 
@@ -937,8 +930,8 @@ def e18_trib(pid=0):
 
     ## all config params
     cfig = SimpleNamespace()
-    cfig.getnet = lambda : torch_models.Unet3(16, [[1],[1]], pool=(1,2,2), kernsize=(3,5,5), finallayer=torch_models.nn.Sequential)
-    cfig.rescale_for_matching = [1,1,1]
+    cfig.getnet = _getnet
+    cfig.rescale_for_matching = [1,1,1] if len(kernel_shape)==3 else [1,1]
     cfig.fg_bg_thresh = np.exp(-16/2)
     cfig.bg_weight_multiplier = bg_weight_multiplier #0.2 #1.0
     cfig.time_weightdecay = 1600 # for pixelwise weights
@@ -990,21 +983,44 @@ def e18_trib(pid=0):
   #   gtpts[6] = pts[6]
   #   gtpts[7] = pts[7]
 
+
+  ndims = list(gtpts.values())[0].shape[1]
+  if ndims==3:
+    footy = np.ones((3,8,8))
+    dims = "ZYX"
+    scale = [1,1,1]
+  elif ndims==2:
+    footy = np.ones((8,8))
+    dims = "YX"
+    scale = [1,1]
+
+  def zmax(x):
+    if x.ndim==3: return x.max(0)
+    return x
+
   scores = []
   pred   = []
   raw    = []
   for i in predtimes:
-    x = load(f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{testset}/t{i:03d}.tif")
-    x = normalize3(x,2,99.4,clip=False)
-    res = detector.predict_raw(net,x,dims="ZYX").astype(np.float32)
-    pts = peak_local_max(res,threshold_abs=.2,exclude_border=False,footprint=np.ones((3,8,8)))
-    score3  = point_matcher.match_unambiguous_nearestNeib(gtpts[i],pts,dub=3,scale=[1,1,1])
-    score10 = point_matcher.match_unambiguous_nearestNeib(gtpts[i],pts,dub=10,scale=[1,1,1])
+    rawname = f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{testset}/t{i:03d}.tif"
+    print(rawname)
+    x = load(rawname)
+    x2 = x.copy()
+    if pid==9:
+      x2=x[:,::2,::2]
+    x2  = normalize3(x2,2,99.4,clip=False)
+    res = detector.predict_raw(net,x2,dims=dims).astype(np.float32)
+    pts = peak_local_max(res,threshold_abs=.2,exclude_border=False,footprint=footy)
+    if pid==9: 
+      pts = pts*(1,2,2)
+      res = zoom(res,(1,2,2))
+    score3  = point_matcher.match_unambiguous_nearestNeib(gtpts[i],pts,dub=3,scale=scale)
+    score10 = point_matcher.match_unambiguous_nearestNeib(gtpts[i],pts,dub=10,scale=scale)
     print("time", i, "gt", score10.n_gt, "match", score10.n_matched, "prop", score10.n_proposed)
     s = {3:score3,10:score10}
     scores.append(s)
-    pred.append(res.max(0))
-    raw.append(x.max(0))
+    pred.append(zmax(res))
+    raw.append(zmax(x))
 
   save(scores, cfig.savedir / f'scores_{testset}.pkl')
   save(np.array(pred).astype(np.float16), cfig.savedir / f"pred_{testset}.npy")

@@ -79,18 +79,21 @@ def _config_example():
 
 def check_config(config):
   "trivial check that keys match"
-  d = _config_example().__dict__
+  d = config_example().__dict__
   e = config.__dict__
 
   missing = d.keys() - e.keys()
+  print("missing: ", missing)
   assert len(missing) is 0, str(missing)
-  # extra = e.keys() - d.keys()
-  # assert len(extra) is 0, str(extra)
+
+  extra = e.keys() - d.keys()
+  print("extra: ", extra)
+  assert len(extra) is 0, str(extra)
 
   for k,v in d.items(): 
-    # print(k,type(d[k]),type(e[k]))
     assert type(d[k]) is type(e[k]), str(type(d[k]))
   print("Keys and Value Types Agree: Config Check Passed.")
+
 
 def train_continue(config,weights_file):
   check_config(config)
@@ -112,7 +115,7 @@ def train_init(config):
   m = SimpleNamespace()
   m.net = config.getnet().cuda()
   m.opt = torch.optim.Adam(m.net.parameters(), lr = config.lr)
-  save(torch_models.receptivefield(m.net,kern=(3,5,5)),config.savedir / 'receptive_field.tif')
+  # save(torch_models.receptivefield(m.net,kern=(3,5,5)),config.savedir / 'receptive_field.tif')
   torch_models.init_weights(m.net)
   print("Weights randomized...")
   ta = SimpleNamespace(i=1,losses=[],lr=config.lr,save_count=0,vali_scores=[],timings=[],heights=[])
@@ -159,14 +162,21 @@ def train(T):
       ytmax,ytstd = float(yt.max()), float(yt.std())
       print(f"i={ta.i:04d}, shape={x.shape}, loss={l:4f}, dt={dt:4f}, y={ymax:4f},{ystd:4f} yt={ytmax:4f},{ytstd:4f}", flush=True)
 
+    def _proj(x):
+      assert x.ndim in [2,3]
+      if x.ndim==2:
+        return x
+      else:
+        return x.max(0)
+
     if ta.i%config.time_savecrop==0:
       with warnings.catch_warnings():
         n = ta.i//config.time_savecrop
         save(ta , config.savedir/"ta/")
-        save(x[0,0].detach().cpu().numpy().astype(np.float16).max(0)  , config.savedir/f"epoch/x/a{n:03d}.npy")
-        save(y[0,0].detach().cpu().numpy().astype(np.float16).max(0)  , config.savedir/f"epoch/y/a{n:03d}.npy")
-        save(yt[0,0].detach().cpu().numpy().astype(np.float16).max(0) , config.savedir/f"epoch/yt/a{n:03d}.npy")
-        save(w[0,0].detach().cpu().numpy().astype(np.float16).max(0)  , config.savedir/f"epoch/w/a{n:03d}.npy")
+        _stack = _proj(x[0,0].detach().cpu().numpy().astype(np.float16)) ; save(_stack, config.savedir/f"epoch/x/a{n:03d}.npy")
+        _stack = _proj(y[0,0].detach().cpu().numpy().astype(np.float16)) ; save(_stack, config.savedir/f"epoch/y/a{n:03d}.npy")
+        _stack = _proj(yt[0,0].detach().cpu().numpy().astype(np.float16)); save(_stack, config.savedir/f"epoch/yt/a{n:03d}.npy")
+        _stack = _proj(w[0,0].detach().cpu().numpy().astype(np.float16)) ; save(_stack, config.savedir/f"epoch/w/a{n:03d}.npy")
 
     if ta.i%config.time_validate==0:
       n = ta.i//config.time_validate
@@ -179,16 +189,24 @@ def validate(vd,T):
   vs = []
   n = ta.i//config.time_validate
   for i in range(vd.input.shape[0]):
-    res = torch_models.apply_net_tiled_3d(m.net,vd.input[i])
+    # res = torch_models.apply_net_tiled_3d(m.net,vd.input[i])
+    if vd.input[0].ndim==4:
+      dims = "CZYX"
+      footy = np.ones((3,8,8))
+    else:
+      dims = "CYX"
+      footy = np.ones((8,8))
+    
+    res = predict_raw(m.net,vd.input[i],dims)
     valloss = (np.abs(res-vd.target[i])**2).mean()
 
     ## detection scores
-    pts = peak_local_max(res[0],threshold_abs=.2,exclude_border=False,footprint=np.ones((3,8,8)))
+    pts = peak_local_max(res[0],threshold_abs=.2,exclude_border=False,footprint=footy)
     score3  = match_unambiguous_nearestNeib(vd.gt[i],pts,dub=3,scale=config.rescale_for_matching)
     score10 = match_unambiguous_nearestNeib(vd.gt[i],pts,dub=10,scale=config.rescale_for_matching)
     s3  = [score3.f1, score3.n_matched,  score3.n_proposed,  score3.n_gt]
     s10 = [score10.f1, score10.n_matched, score10.n_proposed, score10.n_gt]
-    st = f"{ta.i:5d} {i} {score10.f1:6.3f} {score10.n_matched:4d} {score10.n_proposed:4d} {score10.n_gt:4d}"
+    st  = f"{ta.i:5d} {i} {score10.f1:6.3f} {score10.n_matched:4d} {score10.n_proposed:4d} {score10.n_gt:4d}"
     print(st)
 
     ## save detections and loss, but only the basic info to save space
@@ -198,15 +216,18 @@ def validate(vd,T):
   ta.vali_scores.append(vs)
 
   torch.save(m.net.state_dict(), config.savedir / f'm/best_weights_latest.pt')
+  ta.best_weights_latest = n
 
   valilosses = [sum([x['loss'] for x in xx]) for xx in ta.vali_scores]
   if np.min(valilosses)==valilosses[-1]:
     print(f"New best mse weights at {n}")
+    ta.best_weights_mse = n
     torch.save(m.net.state_dict(), config.savedir / f'm/best_weights_mse.pt')
 
   valilosses = [sum([x['10'] for x in xx]) for xx in ta.vali_scores]
   if np.max(valilosses)==valilosses[-1]:
     print(f"New best f1 weights at {n}")
+    ta.best_weights_f1 = n
     torch.save(m.net.state_dict(), config.savedir / f'm/best_weights_f1.pt')
 
 
@@ -238,25 +259,21 @@ def content_sampler(ta,td,config):
   requires td.gt points
   """
 
-  # w = np.array([x.shape[0] for x in td.gt])
-  # w = 1/w
-  # w = w/w.sum()
-  # st = np.random.choice(np.arange(ta.dims['T']), p=w)
   st = np.random.randint(td.input.shape[0])
 
-  ## sample a region near annotations
+  size_space = np.array(td.input.shape[2:])
+  ndim = len(size_space)
   _ipt = np.random.randint(0,len(td.gt[st]))
   _pt = td.gt[st][_ipt] ## sample one centerpoint from the chosen time
-  _pt = _pt + (2*np.random.rand(3)-1)*config.patch_space*0.1 ## jitter
+  _pt = _pt + (2*np.random.rand(ndim)-1)*config.patch_space*0.1 ## jitter
   _pt = _pt - config.patch_space//2 ## center
-  in_space = np.array(td.input.shape[2:])
-  _pt = _pt.clip(min=[0,0,0],max=[in_space - config.patch_space])[0]
+  _pt = _pt.clip(min=[0]*ndim,max=[size_space - config.patch_space])[0]
   _pt = _pt.astype(int)
-  sz,sy,sx = [slice(_pt[i],_pt[i] + config.patch_space[i]) for i in range(3)]
-
-  x  = td.input[[st],:,sz,sy,sx]
-  yt = td.target[[st],:,sz,sy,sx]
-
+  ss = tuple(slice(_pt[i],_pt[i] + config.patch_space[i]) for i in range(ndim))
+  ss = np.s_[[st],:] + ss
+  
+  x  = td.input[ss]
+  yt = td.target[ss]
   x,yt = augment(x,yt)
   w  = weights(yt,ta,config)
 
@@ -266,13 +283,15 @@ def flat_sampler(ta,td,config):
   "sample from everywhere independent of annotations"
 
   ## sample from anywhere
-  in_space = np.array(td.input.shape[2:])
-  _pt = np.floor(np.random.rand(3)*(in_space - config.patch_space)).astype(int)
-  sz,sy,sx = [slice(_pt[i],_pt[i] + config.patch_space[i]) for i in range(3)]
+  size_space = np.array(td.input.shape[2:])
+  ndim = len(size_space)
+  _pt = np.floor(np.random.rand(ndim)*(size_space - config.patch_space)).astype(int)
   st = np.random.randint(td.input.shape[0]) 
+  ss = tuple(slice(_pt[i],_pt[i] + config.patch_space[i]) for i in range(ndim))
+  ss = np.s_[[st],:] + ss
 
-  x  = td.input[[st],:,sz,sy,sx]
-  yt = td.target[[st],:,sz,sy,sx]
+  x  = td.input[ss]
+  yt = td.target[ss]
   # w  = np.ones(x.shape)
   x,yt = augment(x,yt)
   w  = weights(yt,ta,config)
@@ -304,50 +323,37 @@ def weights(yt,ta,trainer):
 
 def augment(x,y):
   noiselevel = 0.2
-  x += np.random.uniform(0,noiselevel,(1,)*3)*np.random.uniform(-1,1,x.shape)
+  ndim = x.ndim-2
+  ## TODO: this only works when number of channels==1. probably want indep noise for each channel.
+  x += np.random.uniform(0,noiselevel,(1,)*ndim)*np.random.uniform(-1,1,x.shape)
 
   ## evenly sample all random flips and 90deg XY rotations (not XZ or YZ rotations)
   ## TODO: double check the groups here.
-  for d in [2,3,4]:
+  ## TODO: maybe this could all be shorter with modular arithmetic. dim -2 is always Y, dim -1 is always X.
+  if ndim==3:
+    space_dims = {'Z':2,'Y':3,'X':4}
+  elif ndim==2:
+    space_dims = {'Y':2,'X':3}
+  
+  for d in space_dims.values():
     if np.random.rand() < 0.5:
       x  = np.flip(x,d)
       y  = np.flip(y,d)
   if np.random.rand() < 0.5:
-    x = x.swapaxes(3,4)
-    y = y.swapaxes(3,4)
+    x = x.swapaxes(space_dims['Y'],space_dims['X'])
+    y = y.swapaxes(space_dims['Y'],space_dims['X'])
 
   x = x.copy()
   y = y.copy()
 
   return x,y
 
-# augment
-
-# martin's ../../devseg_code/detect/cl_datagen_mask.py
-# augment with all 8 rotations/flips in xy
-# X, Y, LossMask = map(
-      # lambda x: np.concatenate([_x for _x in augment_iter(x,axis = (-1,-2))], axis = 0),  (X,Y,LossMask))
-# # add some noise
-# noise = np.random.normal(0,1,X.shape)*np.random.uniform(0,.1,(len(X),1,1,1,1))
-# X = X+noise
-
-# fish torch
-# def augment(x,y1,y2,y3):
-#   noiselevel = 0.2
-#   x += np.random.uniform(0,noiselevel,(2,)+(1,)*3)*np.random.uniform(-1,1,x.shape)
-  
-#   for d in [1,2,3]:
-#     if np.random.rand() < 0.5:
-#       x,y1,y2,y3 = np.flip(x,d), np.flip(y1,d), np.flip(y2,d), np.flip(y3,d)
-  
-#   return x,y1,y2,y3
-
 def predict_raw(net,img,dims,**kwargs3d):
   """
-  Apply independently over N.
+  each elem of N dimension sent to gpu separately.
   When possible, try to make the output dimensions match the input dimensions by e.g. removing singleton dims.
   """
-  assert dims in ["NCYX","NBCYX","CYX","ZYX","CZYX","NCZYX","NZYX",]
+  assert dims in ["NCYX","NBCYX","CYX","ZYX","CZYX","NCZYX","NZYX","YX"]
 
   with torch.no_grad():
     if dims=="NCYX":
@@ -357,7 +363,11 @@ def predict_raw(net,img,dims,**kwargs3d):
       def f(i): return net(torch.from_numpy(img[i]).cuda().float()).cpu().numpy()
       res = np.array([f(i) for i in range(img.shape[0])])
     if dims=="CYX":
-      res = net(torch.from_numpy(img[None]).cuda().float()).cpu().numpy()[0]
+      res = torch_models.apply_net_2d(net,img,)
+      # res = net(torch.from_numpy(img[None]).cuda().float()).cpu().numpy()[0]
+    if dims=="YX":
+      res = torch_models.apply_net_2d(net,img[None],)[0]
+      # res = net(torch.from_numpy(img[None,None]).cuda().float()).cpu().numpy()[0,0]
     if dims=="ZYX":
       ## assume 1 channel. remove after prediction.
       res = torch_models.apply_net_tiled_3d(net,img[None],**kwargs3d)[0]

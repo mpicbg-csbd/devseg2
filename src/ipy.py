@@ -1,4 +1,3 @@
-
 # %load ipy.py
 # import torch
 # from torch import nn
@@ -156,3 +155,69 @@ def job13():
     allpts.append(pts)
   save(allpts, "/projects/project-broaddus/rawdata/hampster/traj/Fluo-N3DH-CHO/02_traj.pkl")
   return allpts
+
+
+def job14():
+    myname = ["psc","u373","simplus","hela","gowt1",]
+    isbiname = ["PhC-C2DL-PSC","PhC-C2DH-U373","Fluo-N2DH-SIM+","Fluo-N2DL-HeLa","Fluo-N2DH-GOWT1",]
+    dataset = ["01","02"]
+    for i in range(10):
+      m,n = np.unravel_index(i,[5,2])
+      _myname = myname[m]
+      _isbiname = isbiname[m]
+      _dataset = dataset[n]
+      p = Path(f"/projects/project-broaddus/rawdata/{_myname}/{_isbiname}/{_dataset}_GT/TRA/")
+      allpts = dict()
+      for name in sorted(p.glob("*.tif")):
+        print(name)
+        lab = load(name)
+        pts = mantrack2pts(lab)
+        time = int(str(name)[-7:-4])
+        print(time)
+        allpts[time] = pts
+      save(allpts, f"/projects/project-broaddus/rawdata/{_myname}/traj/{_isbiname}/{_dataset}_traj.pkl")
+
+_datasets = [
+  ("HSC",            "BF-C2DL-HSC"),
+  ("MuSC",           "BF-C2DL-MuSC"),
+  ("HeLa",           "DIC-C2DH-HeLa"),
+  ("MSC",            "Fluo-C2DL-MSC"),
+  ("A549",           "Fluo-C3DH-A549"),
+  ("A549-SIM",       "Fluo-C3DH-A549-SIM"),
+  ("H157",           "Fluo-C3DH-H157"),
+  ("MDA231",         "Fluo-C3DL-MDA231"),
+  ("GOWT1",          "Fluo-N2DH-GOWT1"),
+  ("SIM+",           "Fluo-N2DH-SIM+"),
+  ("HeLa",           "Fluo-N2DL-HeLa"),
+  ("celegans_isbi",  "Fluo-N3DH-CE"),
+  ("hampster",       "Fluo-N3DH-CHO"),
+  ("SIM+",           "Fluo-N3DH-SIM+"),
+  ("fly_isbi",       "Fluo-N3DL-DRO"),
+  ("trib_isbi_proj", "Fluo-N3DL-TRIC"),
+  ("trib_isbi",      "Fluo-N3DL-TRIF"),
+  ("U373",           "PhC-C2DH-U373"),
+  ("PSC",            "PhC-C2DL-PSC"),
+ ]
+
+def job15():
+    import re
+    dataset = ["01","02"]
+    for i in range(19*2):
+      m,n = np.unravel_index(i,[19,2])
+      _myname, _isbiname = _datasets[m]
+      _dataset = dataset[n]
+      p = Path(f"/projects/project-broaddus/rawdata/{_myname}/{_isbiname}/{_dataset}_GT/TRA/")
+      allpts = dict()
+      print(sorted(p.glob("*.tif"))[0])
+      targetname = f"/projects/project-broaddus/rawdata/{_myname}/traj/{_isbiname}/{_dataset}_traj.pkl"
+      if Path(targetname).exists(): continue
+      for name in sorted(p.glob("*.tif")):
+        print(name)
+        lab = load(name)
+        pts = mantrack2pts(lab)
+        time = int(re.search(r"([0-9]{3,4})\.tif",str(name)).group(1))
+        print(time)
+        allpts[time] = pts
+      save(allpts, targetname)
+
+

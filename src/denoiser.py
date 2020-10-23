@@ -40,24 +40,23 @@ import collections
 from denoise_utils import structN2V_masker
 
 
-def setup_dirs(config):
-  savedir = config.savedir
-  if savedir.exists() and not config.continue_training: shutil.rmtree(savedir)
+def setup_dirs(savedir):
+  if savedir.exists(): shutil.rmtree(savedir)
   (savedir/'m').mkdir(exist_ok=True,parents=True)
   shutil.copy("/projects/project-broaddus/devseg_2/src/denoiser.py",savedir)
 
-def eg_img_meta():
-  img_meta = SimpleNamespace()
-  img_meta.voxel_size = np.array([0.09,0.09])
-  img_meta.time_step  = 1 ## 1.5 for second dataset?
-  return img_meta
+# def eg_img_meta():
+#   img_meta = SimpleNamespace()
+#   img_meta.voxel_size = np.array([0.09,0.09])
+#   img_meta.time_step  = 1 ## 1.5 for second dataset?
+#   return img_meta
 
 def config_example():
   config = SimpleNamespace()
   ## prediction / evaluation / training
   config.getnet = lambda : torch_models.Unet3(16, [[1],[1]], pool=(2,2), kernsize=(5,5), finallayer=torch_models.nn.Sequential)
   
-  config.savedir = Path("An/Example/Directory")
+  config.savedir = Path("Denoiser_Example_Directory/")
   config.load_train_and_vali_data = lambda config: ("td","vd") # config -> traindata, validata
   ## general img2img model ltraining
   config.sampler      = flat_sampler
@@ -65,7 +64,7 @@ def config_example():
   config.masker       = structN2V_masker
   config.batch_shape  = np.array([1,1,512,512])
   config.batch_space  = np.array([512,512])
-  config.continue_training = True
+  # config.continue_training = True
 
   ## accumulate gradients, print loss, save x,y,yt,model, save vali_pred, total time in Fwd/Bwd passes
   config.times = [10,100,500,4000,10**5]
@@ -117,8 +116,38 @@ def normalize_raw(raw,ta):
 
   return (raw-mu)/sig, (mu,sig)
 
+def train_continue(config,weights_file):
+  check_config(config)
+  config.savedir = Path(config.savedir).resolve()
+  m = SimpleNamespace()
+  m.net = config.getnet().cuda()
+  m.net.load_state_dict(torch.load(weights_file))
+  m.opt = torch.optim.Adam(m.net.parameters(), lr = config.lr)
+  ta = load(config.savedir / "ta/")
+  td,vd = config.load_train_and_vali_data(config)
+  normalize_td_vd(ta,td,vd) 
+  T  = SimpleNamespace(m=m,vd=vd,td=td,ta=ta,c=config)
+  return T
 
 def train_init(config):
+  check_config(config)
+  config.savedir = Path(config.savedir).resolve()
+  setup_dirs(config.savedir)
+  ## load model, save receptive field, randomize weights...
+  m = SimpleNamespace()
+  m.net = config.getnet().cuda()
+  m.opt = torch.optim.Adam(m.net.parameters(), lr = config.lr)
+  # save(torch_models.receptivefield(m.net,kern=(3,5,5)),config.savedir / 'receptive_field.tif')
+  torch_models.init_weights(m.net)
+  print("Weights randomized...")
+  ta = SimpleNamespace(i=1,losses=[],lr=config.lr,save_count=0,vali_scores=[],timings=[],heights=[])
+  td,vd = config.load_train_and_vali_data(config)
+  normalize_td_vd(ta,td,vd)
+  T  = SimpleNamespace(m=m,vd=vd,td=td,ta=ta,config=config)
+  return T
+
+@DeprecationWarning
+def train_init1(config):
   check_config(config)
   config.savedir = Path(config.savedir).resolve()
   setup_dirs(config)
@@ -130,7 +159,7 @@ def train_init(config):
   m = SimpleNamespace()
   m.net = config.getnet().cuda()
   m.opt = torch.optim.Adam(m.net.parameters(), lr = config.lr)
-  save(torch_models.receptivefield(m.net,kern=(3,5,5)),config.savedir / 'receptive_field.tif')
+  # save(torch_models.receptivefield(m.net,kern=(3,5,5)),config.savedir / 'receptive_field.tif')
   torch_models.init_weights(m.net)
   print("Weights randomized...")
 
@@ -148,7 +177,7 @@ def train_init(config):
   # ta.__dict__.update(**{**defaults,**ta.__dict__})
   
   ## load train and vali data
-  vd,td = config.load_train_and_vali_data(config)
+  td,vd = config.load_train_and_vali_data(config)
   normalize_td_vd(ta,td,vd)
 
   T  = SimpleNamespace(m=m,vd=vd,td=td,ta=ta,config=config)
@@ -177,7 +206,7 @@ def train_init(config):
 
 #   return T
 
-def train(T):
+def train1(T):
   """
   requires m.net, td.input, td.target
   provides ta.losses and ta.i
@@ -204,8 +233,8 @@ def train(T):
     if ta.i%config.times[0]==0:
       m.opt.step()
       m.opt.zero_grad()
-      ta.losses.append((loss/w.mean()).detach().cpu())
-      ta.heights.append(y.max().detach().cpu())
+      ta.losses.append(float(loss/w.mean()))
+      ta.heights.append(float(y.max()))
 
     if ta.i%config.times[1]==0:
       ta.timings.append(time())
@@ -222,12 +251,69 @@ def train(T):
         save(x[0,0].detach().cpu().numpy().astype(np.float16)  , config.savedir/f"epoch/x/a{n:03d}.npy")
         save(y[0,0].detach().cpu().numpy().astype(np.float16)  , config.savedir/f"epoch/y/a{n:03d}.npy")
         save(yt[0,0].detach().cpu().numpy().astype(np.float16) , config.savedir/f"epoch/yt/a{n:03d}.npy")
-        torch.save(m.net.state_dict(), config.savedir / f'm/net{n:03d}.pt')
 
-    # if ta.i%config.times[3]==0:
-    #   n = ta.i//config.times[3]
-    #   # validate(vd,T)
+    if ta.i%config.times[3]==0:
+      n = ta.i//config.times[3]
+      validate(vd,T)
+      torch.save(m.net.state_dict(), config.savedir / f'm/net{n:03d}.pt')
 
+def train(T):
+  """
+  requires m.net, td.input, td.target
+  provides ta.losses and ta.i
+  """
+
+  m  = T.m
+  vd = T.vd
+  td = T.td
+  ta = T.ta
+  config = T.config
+  
+  for ta.i in range(ta.i,config.times[4]+1):
+    x,yt,w = config.sampler(T,td)
+    x  = torch.from_numpy(x).float().cuda()
+    yt = torch.from_numpy(yt).float().cuda()
+    w  = torch.from_numpy(w).float().cuda()
+
+    ## put patches through the net, then backprop
+    y    = m.net(x)
+    loss = torch.abs((w*(y-yt)**2)).mean() #+ weight*torch.abs((y-global_avg)**2).mean()
+    loss.backward()
+
+    if ta.i%config.times[0]==0:
+      m.opt.step()
+      m.opt.zero_grad()
+
+    if ta.i%config.times[1]==0:
+      ta.timings.append(time())
+      dt = 0 if len(ta.timings)==1 else ta.timings[-1]-ta.timings[-2]
+      l  = float(loss)
+      ta.losses.append(l)
+      ymax,ystd = float(y.max()), float(y.std())
+      ytmax,ytstd = float(yt.max()), float(yt.std())
+      # ipdb.set_trace()
+      # print(f"i={ta.i:04d}, shape={x.shape}, loss={l:4f}, dt={dt:4f}, y={ymax:4f},{ystd:4f} yt={ytmax:4f},{ytstd:4f}", flush=True)
+      print(f"i={ta.i:04d}, loss={l:4f}, dt={dt:4f}, y={ymax:4f}±{ystd:4f} yt={ytmax:4f}±{ytstd:4f}", flush=True)
+
+    def _proj(x):
+      assert x.ndim in [2,3]
+      if x.ndim==2:
+        return x
+      else:
+        return x.max(0)
+
+    if ta.i%config.times[2]==0:
+      with warnings.catch_warnings():
+        n = ta.i//config.times[2]
+        save(ta , config.savedir/"ta/")
+        _stack = _proj(x[0,0].detach().cpu().numpy().astype(np.float16)) ; save(_stack, config.savedir/f"epoch/x/a{n:03d}.npy")
+        _stack = _proj(y[0,0].detach().cpu().numpy().astype(np.float16)) ; save(_stack, config.savedir/f"epoch/y/a{n:03d}.npy")
+        _stack = _proj(yt[0,0].detach().cpu().numpy().astype(np.float16)); save(_stack, config.savedir/f"epoch/yt/a{n:03d}.npy")
+        _stack = _proj(w[0,0].detach().cpu().numpy().astype(np.float16)) ; save(_stack, config.savedir/f"epoch/w/a{n:03d}.npy")
+
+    if ta.i%config.times[3]==0:
+      n = ta.i//config.times[3]
+      validate(vd,T)
 ## Data Loading, Sampling, Weights, Etc
 
 def add_meta_to_td(td):

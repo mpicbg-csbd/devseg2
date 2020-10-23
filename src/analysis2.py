@@ -2,6 +2,15 @@ from segtools.ns2dir import load,save,toarray
 import numpy as np
 import itertools
 
+def _parse_pid(pid_or_params,dims):
+  if type(pid_or_params) in [list,tuple]:
+    params = pid_or_params
+    pid = np.ravel_multi_index(params,dims)
+  elif type(pid_or_params) is int:
+    pid = pid_or_params
+    params = np.unravel_index(pid,dims)
+  return params, pid
+
 def iterdims(shape):
   return itertools.product(*[range(x) for x in shape])
 
@@ -62,8 +71,28 @@ def e14v08():
   # r = np.stack([x.mean(-1) for x in np.array_split(res,[20,60],-1)],axis=-1)
   save(res,"/projects/project-broaddus/devseg_2/expr/analysis/e14v08.npy")
 
-
-
-
-
-  
+def e08v01():
+  """
+  make stacks that let us toggle through the variables we want to compare
+  compare across: datasize within single img for a small number of 512 frames for a subset of epochs...
+  """
+  res  = []
+  raw  = []
+  loss = []
+  for params in iterdims([1,10,1,1,5]):
+    (p0_unet,p1_data,p2_repeat,p3_chan,p4_datasize), pid = _parse_pid(params,[1,10,1,1,5])
+    if p1_data not in [1,5]: continue
+    x = toarray(load(f"../expr/e08_horst/pid{pid:03d}/ta/vali_pred/")).reshape([-1,3,512,512])
+    res.append(x)
+    x = load(f"../expr/e08_horst/pid{pid:03d}/ta/losses.json")
+    loss.append(x)
+    if p4_datasize==0:
+      x = load(f"../expr/e08_horst/pid{pid:03d}/vali_raw.npy")
+      raw.append(x)
+  res = np.array(res).reshape([2,5,10,3,512,512]) # p1,p4,epoch,vali-patch,Y,X
+  raw = np.array(raw).reshape([2,1,1,3,512,512])
+  loss = np.array(loss).reshape([2,5,-1])
+  save(res,"../expr/e08_horst/res.npy")
+  save(raw,"../expr/e08_horst/raw.npy")
+  save(loss,"../expr/e08_horst/loss.npy")
+  return res,raw,loss
