@@ -357,7 +357,7 @@ def predict_raw(net,img,dims,**kwargs3d):
 
   with torch.no_grad():
     if dims=="NCYX":
-      def f(i): return net(torch.from_numpy(img[[i]]).cuda().float()).cpu().numpy()
+      def f(i): return net(torch.from_numpy(img[[i]]).cuda().float()).cpu().numpy()[0]
       res = np.array([f(i) for i in range(img.shape[0])])
     if dims=="NBCYX":
       def f(i): return net(torch.from_numpy(img[i]).cuda().float()).cpu().numpy()

@@ -91,9 +91,6 @@ def check_config(config):
 
 
 def normalize_td_vd(ta,td,vd):
-  """
-  this way we
-  """
   mu  = np.mean(td.input)
   sig = np.std(td.input)
   ta.mu  = mu
@@ -104,16 +101,12 @@ def normalize_td_vd(ta,td,vd):
   vd.target = (vd.target-mu)/sig
 
 def normalize_raw(raw,ta):
-  """
-  this way we
-  """
   try:
     mu =ta.mu
     sig=ta.sig
   except:
     mu =np.mean(raw)
     sig=np.std(raw)
-
   return (raw-mu)/sig, (mu,sig)
 
 def train_continue(config,weights_file):
@@ -336,6 +329,7 @@ def validate(vd, T):
   if vd.input.shape[0] > 10:
     vali_imgs = np.array(vali_imgs)
     save(vali_imgs.astype(np.float16),T.config.savedir / f"ta/vali_pred/e{n:03d}_all.tif")
+  torch.save(T.m.net.state_dict(), T.config.savedir / f'm/best_weights_latest.pt')
 
 def flat_sampler(T,td):
   "sample from everywhere independent of annotations"
@@ -373,13 +367,12 @@ def predict_raw(net,img,dims,ta=None,**kwargs3d):
 
   assert dims in ["NCYX","NBCYX","CYX","ZYX","CZYX","NCZYX","NZYX",]
 
-  # if ta:
   img,(mu,sig) = normalize_raw(img,ta)
 
   # ipdb.set_trace()
   with torch.no_grad():
     if dims=="NCYX":
-      def f(i): return net(torch.from_numpy(img[[i]]).cuda().float()).cpu().numpy()
+      def f(i): return net(torch.from_numpy(img[[i]]).cuda().float()).cpu().numpy()[0]
       res = np.array([f(i) for i in range(img.shape[0])])
     if dims=="NBCYX":
       def f(i): return net(torch.from_numpy(img[i]).cuda().float()).cpu().numpy()

@@ -49,14 +49,17 @@ import json
 savedir = Path('/projects/project-broaddus/devseg_2/expr/')
 
 def _parse_pid(pid_or_params,dims):
-  if type(pid_or_params) is list:
+  if type(pid_or_params) in [list,tuple]:
     params = pid_or_params
     pid = np.ravel_multi_index(params,dims)
   elif type(pid_or_params) is int:
     pid = pid_or_params
     params = np.unravel_index(pid,dims)
-  print("params: ",params, "pid: ", pid)
   return params, pid
+
+def iterdims(shape):
+  return itertools.product(*[range(x) for x in shape])
+
 
 def run_slurm():
   """
@@ -84,7 +87,7 @@ def run_slurm():
 
   ## e08_horst
   # shutil.copy("/projects/project-broaddus/devseg_2/src/experiments2.py", "/projects/project-broaddus/devseg_2/src/ex2copy.py")
-  cmd = 'sbatch -J e12_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 24:00:00 -c 1 --mem 128000 -o slurm/e12_pid{pid:02d}.out -e slurm/e12_pid{pid:02d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e08_horst({pid})\"\' '
+  cmd = 'sbatch -J e08_{pid:03d} -p gpu --gres gpu:1 -n 1 -t 1:00:00 -c 1 --mem 128000 -o slurm/e08_pid{pid:03d}.out -e slurm/e08_pid{pid:03d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e08_horst({pid})\"\' '
   for pid in range(50): Popen(cmd.format(pid=pid),shell=True)
 
   # ## job13_mangal
@@ -334,30 +337,25 @@ def e08_horst_predict():
   """
 
   from segtools.numpy_utils import norm_to_percentile_and_dtype
-
-  model = torch_models.Unet2(16, [[1],[1]], pool=(2,2), kernsize=(5,5), finallayer=torch_models.nn.Sequential).cuda()
+  model = torch_models.Unet2(32, [[1],[1]], pool=(2,2), kernsize=(5,5), finallayer=torch_models.nn.Sequential).cuda()
   print(torch_models.summary(model, (1,512,512)))
 
-  model.load_state_dict(torch.load(savedir / "e08_horst/v2_t02/m/net049.pt"))
-
-  for i in range(10):
-    if i<6: model.load_state_dict(torch.load(savedir / "e08_horst/v2_t06/m/net049.pt"))
-    else: model.load_state_dict(torch.load(savedir / "e08_horst/v2_t02/m/net049.pt"))
+  for params in iterdims([1,10,5,1,1]):
+    (p0_unet,p1_data,p2_repeat,p3_chan,p4_datasize), pid = _parse_pid(params,[1,10,5,1,1])
+    if p2_repeat != 0: continue
+    model.load_state_dict(torch.load(savedir / f"e08_horst/v02/pid{pid:03d}/m/best_weights_latest.pt"))
     
-    name = imglist[i]
-    resname = name.replace("HorstObenhaus/","HorstObenhaus/test/pred_")
+    name    = horst_data[p1_data]
+    resname = name.replace("HorstObenhaus/","HorstObenhaus/pred/v02/pred_")
+    x = load(name)[::2]
+    x = x[:,None]
 
-    # if Path(resname).exists(): continue
-    img = load(name)[::2]
-    img = img[:,None] # to conform to "NCYX"
-    print(name, Path(name).exists(), '\n')
-    res = denoiser.predict_raw(model,img,"NCYX")
-    res = norm_to_percentile_and_dtype(res,img,2,99.5)
-    save(res,resname)
-    save(res[:20],resname.replace("test/pred","test/f20_pred"))
-    save(img[:20],resname.replace("test/pred","test/f20_img"))
+    res = denoiser.predict_raw(model,x,"NCYX")
+    res = norm_to_percentile_and_dtype(res,x,2,99.5)
+    res = ((res + 0.28*x)/1.28).astype(np.int16)
+    save(res, resname)
 
-def e08_horst(pid_or_params=1):
+def e08_horst(pid=1):
   """
   Let's try a few variations on the Horst data...
   - vary amount / window of training data sampling
@@ -374,8 +372,8 @@ def e08_horst(pid_or_params=1):
   """
 
 
-  # (p0_unet,p1_data,p2_repeat,p3_chan,p4_datasize), pid = _parse_pid(pid_or_params,[2,12,5,2,5])
-  (p0_unet,p1_data,p2_repeat,p3_chan,p4_datasize), pid = _parse_pid(pid_or_params,[1,10,5,1,1])
+  # (p0_unet,p1_data,p2_repeat,p3_chan,p4_datasize), pid = _parse_pid(pid,[2,12,5,2,5])
+  (p0_unet,p1_data,p2_repeat,p3_chan,p4_datasize), pid = _parse_pid(pid,[1,10,5,1,1])
 
   img  = load(horst_data[p1_data])
   img  = img[::2,None] ## remove the pure-noise channel
@@ -394,7 +392,7 @@ def e08_horst(pid_or_params=1):
 
   def _cfig():
     cfig = SimpleNamespace()
-    t=100_000
+    t=10_000
     cfig.times = [10,100,t//20,t//10,t]
     # cfig.times = [1,10,10,50,1000]
     cfig.lr = 1e-4
