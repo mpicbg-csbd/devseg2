@@ -9,36 +9,35 @@ from segtools.ns2dir import load, save, flatten
 
 def mantrack2pts(mantrack): return np.array([r.centroid for r in regionprops(mantrack)],np.int)
 
-def load_isbi_train_and_vali(loader, config,):
-  print("Training Times : ", loader.traintimes)
-  print("Vali Times : ", loader.valitimes)
-  vd = _load_isbi_training_data(loader.valitimes, loader, config)
-  td = _load_isbi_training_data(loader.traintimes,loader, config)
-  return vd,td
+# def load_isbi_train_and_vali(loader, config,):
+#   print("Training Times : ", loader.traintimes)
+#   print("Vali Times : ", loader.valitimes)
+#   vd = _load_isbi_training_data(loader.valitimes, loader, config)
+#   td = _load_isbi_training_data(loader.traintimes,loader, config)
+#   return vd,td
 
-def _load_isbi_training_data(times,loader,config):
-  """
-  Conforms to the interface necessary for use in detector
-  attributes: input,target,gt,axes=='tczyx',dims,in_samples,in_chan,in_space
-  """
-  d = SimpleNamespace()
-  d.input  = np.array([load(loader.input_dir / f"t{n:03d}.tif") for n in times])
-  d.input  = config.norm(d.input)
-  try:
-    d.gt   = load(loader.traj_gt_train)
-  except:
-    d.gt   = [mantrack2pts(load(loader.TRAdir / f"man_track{n:03d}.tif")) for n in times]
-  d.gt     = np.array([config.pt_norm(x) for x in d.gt])
-  d.target = detector._pts2target(d.gt,d.input[0].shape,config)
-  d.target = d.target[:,None]
-  d.input  = d.input[:,None]
-  d.axes = "TCZYX"
-  d.dims = {k:v for k,v in zip(d.axes, d.input.shape)}
-  d.in_samples  = d.input.shape[0]
-  d.in_chan     = d.input.shape[1]
-  d.in_space    = np.array(d.input.shape[2:])
-
-  return d
+# def _load_isbi_training_data(times,loader,config):
+#   """
+#   Conforms to the interface necessary for use in detector
+#   attributes: input,target,gt,axes=='tczyx',dims,in_samples,in_chan,in_space
+#   """
+#   d = SimpleNamespace()
+#   d.input  = np.array([load(loader.input_dir / f"t{n:03d}.tif") for n in times])
+#   d.input  = config.norm(d.input)
+#   try:
+#     d.gt   = load(loader.traj_gt_train)
+#   except:
+#     d.gt   = [mantrack2pts(load(loader.TRAdir / f"man_track{n:03d}.tif")) for n in times]
+#   d.gt     = np.array([config.pt_norm(x) for x in d.gt])
+#   d.target = detector._pts2target(d.gt,d.input[0].shape,config)
+#   d.target = d.target[:,None]
+#   d.input  = d.input[:,None]
+#   d.axes = "TCZYX"
+#   d.dims = {k:v for k,v in zip(d.axes, d.input.shape)}
+#   d.in_samples  = d.input.shape[0]
+#   d.in_chan     = d.input.shape[1]
+#   d.in_space    = np.array(d.input.shape[2:])
+  # return d
 
 def evaluate_isbi_DET(base_dir,detname,pred='01',fullanno=True):
   "evalid is a unique ID that prevents us from overwriting DET_log files from different experiments predicting on the same data."

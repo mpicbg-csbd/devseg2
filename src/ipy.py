@@ -156,28 +156,27 @@ def job13():
   save(allpts, "/projects/project-broaddus/rawdata/hampster/traj/Fluo-N3DH-CHO/02_traj.pkl")
   return allpts
 
-
 def job14():
-    myname = ["psc","u373","simplus","hela","gowt1",]
-    isbiname = ["PhC-C2DL-PSC","PhC-C2DH-U373","Fluo-N2DH-SIM+","Fluo-N2DL-HeLa","Fluo-N2DH-GOWT1",]
-    dataset = ["01","02"]
-    for i in range(10):
-      m,n = np.unravel_index(i,[5,2])
-      _myname = myname[m]
-      _isbiname = isbiname[m]
-      _dataset = dataset[n]
-      p = Path(f"/projects/project-broaddus/rawdata/{_myname}/{_isbiname}/{_dataset}_GT/TRA/")
-      allpts = dict()
-      for name in sorted(p.glob("*.tif")):
-        print(name)
-        lab = load(name)
-        pts = mantrack2pts(lab)
-        time = int(str(name)[-7:-4])
-        print(time)
-        allpts[time] = pts
-      save(allpts, f"/projects/project-broaddus/rawdata/{_myname}/traj/{_isbiname}/{_dataset}_traj.pkl")
+  myname = ["psc","u373","simplus","hela","gowt1",]
+  isbiname = ["PhC-C2DL-PSC","PhC-C2DH-U373","Fluo-N2DH-SIM+","Fluo-N2DL-HeLa","Fluo-N2DH-GOWT1",]
+  dataset = ["01","02"]
+  for i in range(10):
+    m,n = np.unravel_index(i,[5,2])
+    _myname = myname[m]
+    _isbiname = isbiname[m]
+    _dataset = dataset[n]
+    p = Path(f"/projects/project-broaddus/rawdata/{_myname}/{_isbiname}/{_dataset}_GT/TRA/")
+    allpts = dict()
+    for name in sorted(p.glob("*.tif")):
+      print(name)
+      lab = load(name)
+      pts = mantrack2pts(lab)
+      time = int(str(name)[-7:-4])
+      print(time)
+      allpts[time] = pts
+    save(allpts, f"/projects/project-broaddus/rawdata/{_myname}/traj/{_isbiname}/{_dataset}_traj.pkl")
 
-_datasets = [
+isbi_datasets = [
   ("HSC",            "BF-C2DL-HSC"),
   ("MuSC",           "BF-C2DL-MuSC"),
   ("HeLa",           "DIC-C2DH-HeLa"),
@@ -200,24 +199,83 @@ _datasets = [
  ]
 
 def job15():
-    import re
-    dataset = ["01","02"]
-    for i in range(19*2):
-      m,n = np.unravel_index(i,[19,2])
-      _myname, _isbiname = _datasets[m]
-      _dataset = dataset[n]
-      p = Path(f"/projects/project-broaddus/rawdata/{_myname}/{_isbiname}/{_dataset}_GT/TRA/")
-      allpts = dict()
-      print(sorted(p.glob("*.tif"))[0])
-      targetname = f"/projects/project-broaddus/rawdata/{_myname}/traj/{_isbiname}/{_dataset}_traj.pkl"
-      if Path(targetname).exists(): continue
-      for name in sorted(p.glob("*.tif")):
-        print(name)
-        lab = load(name)
-        pts = mantrack2pts(lab)
-        time = int(re.search(r"([0-9]{3,4})\.tif",str(name)).group(1))
-        print(time)
-        allpts[time] = pts
-      save(allpts, targetname)
+  import re
+  dataset = ["01","02"]
+  for i in range(19*2):
+    m,n = np.unravel_index(i,[19,2])
+    _myname, _isbiname = isbi_datasets[m]
+    _dataset = dataset[n]
+    p = Path(f"/projects/project-broaddus/rawdata/{_myname}/{_isbiname}/{_dataset}_GT/TRA/")
+    allpts = dict()
+    print(sorted(p.glob("*.tif"))[0])
+    targetname = f"/projects/project-broaddus/rawdata/{_myname}/traj/{_isbiname}/{_dataset}_traj.pkl"
+    if Path(targetname).exists(): continue
+    for name in sorted(p.glob("*.tif")):
+      print(name)
+      lab = load(name)
+      pts = mantrack2pts(lab)
+      time = int(re.search(r"([0-9]{3,4})\.tif",str(name)).group(1))
+      print(time)
+      allpts[time] = pts
+    save(allpts, targetname)
 
+def job16_cropTrib(ds="01"):
+  from segtools.point_tools import trim_images_from_pts2
+  pts = load(f"/projects/project-broaddus/rawdata/trib_isbi/traj/Fluo-N3DL-TRIF/{ds}_traj.pkl")
+  _pts = np.concatenate(pts,axis=0)
+  pts2, ss = trim_images_from_pts2(_pts,border=(6,6,6))
+  _idxs = np.cumsum([0] + [len(x) for x in pts])
+  list_pts2 = [pts2[_idxs[i]:_idxs[i+1]] for i in range(len(_idxs)-1)]
+  print(pts2.shape, _idxs)
+
+  save(list_pts2, f"/projects/project-broaddus/rawdata/trib_isbi/crops/traj/Fluo-N3DL-TRIF/{ds}_traj.pkl")
+  save(ss, f"/projects/project-broaddus/rawdata/trib_isbi/crops/traj/Fluo-N3DL-TRIF/{ds}_slice.pkl")
+
+  return
+  print(ss)
+  a = np.prod([_s.stop-_s.start for _s in ss])
+  b = np.prod(load(f"/projects/project-broaddus/rawdata/trib_isbi/Fluo-N3DL-TRIF/{ds}/t000.tif").shape)
+  print(a,b,a/b)
+
+  def _f(name):
+    img = load(name)
+    print(img.shape) ## (991, 1871, 965)
+    save(img[ss],name.replace("trib_isbi/","trib_isbi/crops/"))
+
+  for i in range(60):
+    _f(f"/projects/project-broaddus/rawdata/trib_isbi/Fluo-N3DL-TRIF/{ds}/t{i:03d}.tif")
+    _f(f"/projects/project-broaddus/rawdata/trib_isbi/Fluo-N3DL-TRIF/{ds}_GT/TRA/man_track{i:03d}.tif")
+  import shutil
+  name = f"/projects/project-broaddus/rawdata/trib_isbi/Fluo-N3DL-TRIF/{ds}_GT/TRA/man_track.txt"
+  shutil.copy(name,name.replace("trib_isbi/","trib_isbi/crops/"))
+
+# def job16_downsampleTrib(ds="01"):
+#   from segtools.point_tools import trim_images_from_pts2
+  
+#   pts = load(f"/projects/project-broaddus/rawdata/trib_isbi/traj/Fluo-N3DL-TRIF/{ds}_traj.pkl")
+#   _pts = np.concatenate(pts,axis=0)
+#   pts2, ss = trim_images_from_pts2(_pts,border=(6,6,6))
+#   _idxs = np.cumsum([0] + [len(x) for x in pts])
+#   list_pts2 = [pts2[_idxs[i]:_idxs[i+1]] for i in range(len(_idxs)-1)]
+#   print(pts2.shape, _idxs)
+
+#   save(list_pts2, f"/projects/project-broaddus/rawdata/trib_isbi/crops/Fluo-N3DL-TRIF/{ds}_traj.pkl")
+#   save(ss, f"/projects/project-broaddus/rawdata/trib_isbi/crops/Fluo-N3DL-TRIF/{ds}_slice.pkl")
+
+#   print(ss)
+#   a = np.prod([_s.stop-_s.start for _s in ss])
+#   b = np.prod(load(f"/projects/project-broaddus/rawdata/trib_isbi/Fluo-N3DL-TRIF/{ds}/t000.tif").shape)
+#   print(a,b,a/b)
+
+#   def _f(name):
+#     img = load(name)
+#     print(img.shape) ## (991, 1871, 965)
+#     save(img[ss],name.replace("trib_isbi/","trib_isbi/crops/"))
+
+#   for i in range(60):
+#     _f(f"/projects/project-broaddus/rawdata/trib_isbi/Fluo-N3DL-TRIF/{ds}/t{i:03d}.tif")
+#     _f(f"/projects/project-broaddus/rawdata/trib_isbi/Fluo-N3DL-TRIF/{ds}_GT/TRA/man_track{i:03d}.tif")
+#   import shutil
+#   name = f"/projects/project-broaddus/rawdata/trib_isbi/Fluo-N3DL-TRIF/{ds}_GT/TRA/man_track.txt"
+#   shutil.copy(name,name.replace("trib_isbi/","trib_isbi/crops/"))
 

@@ -97,3 +97,20 @@ def e08_analyze():
   save(raw,"../expr/e08_horst/v02/raw.npy")
   save(loss,"../expr/e08_horst/v02/loss.npy")
   return res,raw,loss
+
+def e08_res():
+  res = []
+  import experiments2
+  for i in range(10):
+    name = experiments2.horst_data[i]
+    x = load(name)
+    print(x.shape)
+    res.append(x[0])
+    
+    resname = name.replace("HorstObenhaus/","HorstObenhaus/pred/v02/pred_")
+    x = load(resname)
+    print(x.shape)
+    res.append(x[0,0])
+  res = np.array(res).reshape([10,2,512,512])
+  save(res,"../expr/e08_horst/v02/final.npy")
+

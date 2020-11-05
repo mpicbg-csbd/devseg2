@@ -46,6 +46,12 @@ from segtools.point_tools import trim_images_from_pts2
 from scipy.ndimage import zoom
 import json
 
+import tracking
+from glob import glob
+import os
+import re
+
+
 savedir = Path('/projects/project-broaddus/devseg_2/expr/')
 
 def _parse_pid(pid_or_params,dims):
@@ -60,8 +66,7 @@ def _parse_pid(pid_or_params,dims):
 def iterdims(shape):
   return itertools.product(*[range(x) for x in shape])
 
-
-def run_slurm():
+def OLD_run_slurm():
   """
   Submit all experiments as independent jobs to the SLURM cluster job manager.
   Each job has specific SLURM params, and function params, identified with a certain pid (int).
@@ -87,8 +92,8 @@ def run_slurm():
 
   ## e08_horst
   # shutil.copy("/projects/project-broaddus/devseg_2/src/experiments2.py", "/projects/project-broaddus/devseg_2/src/ex2copy.py")
-  cmd = 'sbatch -J e08_{pid:03d} -p gpu --gres gpu:1 -n 1 -t 1:00:00 -c 1 --mem 128000 -o slurm/e08_pid{pid:03d}.out -e slurm/e08_pid{pid:03d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e08_horst({pid})\"\' '
-  for pid in range(50): Popen(cmd.format(pid=pid),shell=True)
+  # cmd = 'sbatch -J e08_{pid:03d} -p gpu --gres gpu:1 -n 1 -t 1:00:00 -c 1 --mem 128000 -o slurm/e08_pid{pid:03d}.out -e slurm/e08_pid{pid:03d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e08_horst({pid})\"\' '
+  # for pid in range(50): Popen(cmd.format(pid=pid),shell=True)
 
   # ## job13_mangal
   # cmd = 'sbatch -J e13_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 12:00:00 -c 1 --mem 128000 -o slurm/e13_pid{pid:02d}.out -e slurm/e13_pid{pid:02d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.job13_mangal({pid})\"\' '
@@ -110,6 +115,27 @@ def run_slurm():
   # cmd = 'sbatch -J e18_{pid:03d} -p gpu --gres gpu:1 -n 1 -t 3:00:00 -c 1 --mem 128000 -o slurm/e18_pid{pid:03d}.out -e slurm/e18_pid{pid:03d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e18_trib({pid})\"\' '
   # for pid in range(19): Popen(cmd.format(pid=pid),shell=True)
 
+  ## e19_tracking
+  # cmd = 'sbatch -J e19_{pid:03d} -n 1 -t 1:00:00 -c 4 --mem 128000 -o slurm/e19_pid{pid:03d}.out -e slurm/e19_pid{pid:03d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e19_tracking({pid})\"\' '
+  # for pid in range(3*19): Popen(cmd.format(pid=pid),shell=True)
+
+slurm = SimpleNamespace()
+slurm.e10_3D = 'sbatch -J e10-3D_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 12:00:00 -c 1 --mem 128000 -o slurm/e10-3D_pid{pid:02d}.out -e slurm/e10-3D_pid{pid:02d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.job10_alex_retina_3D({pid})\"\' '
+slurm.e10_2D = 'sbatch -J e10-2D_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 12:00:00 -c 1 --mem 128000 -o slurm/e10-2D_pid{pid:02d}.out -e slurm/e10-2D_pid{pid:02d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.job10_alex_retina_2D({pid})\"\' '
+slurm.e11 = 'sbatch -J e11_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 12:00:00 -c 1 --mem 128000 -o slurm/e11_pid{pid:02d}.out -e slurm/e11_pid{pid:02d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.job11_synthetic_membranes({pid})\"\' '
+slurm.e08 = 'sbatch -J e08_{pid:03d} -p gpu --gres gpu:1 -n 1 -t 1:00:00 -c 1 --mem 128000 -o slurm/e08_pid{pid:03d}.out -e slurm/e08_pid{pid:03d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e08_horst({pid})\"\' '
+slurm.e13 = 'sbatch -J e13_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 12:00:00 -c 1 --mem 128000 -o slurm/e13_pid{pid:02d}.out -e slurm/e13_pid{pid:02d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.job13_mangal({pid})\"\' '
+slurm.e14 = 'sbatch -J e14_{pid:03d} -p gpu --gres gpu:1 -n 1 -t 4:00:00 -c 1 --mem 128000 -o slurm/e14_pid{pid:03d}.out -e slurm/e14_pid{pid:03d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e14_celegans({pid})\"\' '
+slurm.e15 = 'sbatch -J e15_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 12:00:00 -c 1 --mem 128000 -o slurm/e15_pid{pid:02d}.out -e slurm/e15_pid{pid:02d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e15_celegans({pid})\"\' '
+slurm.e16 = 'sbatch -J e16_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 2:00:00 -c 1 --mem 128000 -o slurm/e16_pid{pid:02d}.out -e slurm/e16_pid{pid:02d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e16_ce_adapt({pid})\"\' '
+slurm.e18 = 'sbatch -J e18_{pid:03d} -p gpu --gres gpu:1 -n 1 -t 3:00:00 -c 1 --mem 128000 -o slurm/e18_pid{pid:03d}.out -e slurm/e18_pid{pid:03d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e18_trib({pid})\"\' '
+slurm.e19 = 'sbatch -J e19_{pid:03d} -n 1 -t 3:00:00 -c 4 --mem 128000 -o slurm/e19_pid{pid:03d}.out -e slurm/e19_pid{pid:03d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e19_tracking({pid})\"\' '
+
+def run_slurm(cmd,pids):
+  ## copy the experiments file to a safe name that you WONT EDIT. If you edit the code while jobs are waiting in the SLURM queue it could cause inconsistencies.
+  ## NOTE: here we only copy experiment.py file, but THE SAME IS TRUE FOR ALL DEPENDENCIES.
+  shutil.copy("/projects/project-broaddus/devseg_2/src/experiments2.py", "/projects/project-broaddus/devseg_2/src/ex2copy.py")
+  for pid in pids: Popen(cmd.format(pid=pid),shell=True)
 
 ## Alex's retina 3D
 
@@ -825,38 +851,59 @@ def e17_ce_nuclei(pid=0):
   pass
 
 
+
 ## proof of principle for every dataset
+isbi_datasets = [
+  ("HSC",             "BF-C2DL-HSC"),
+  ("MuSC",            "BF-C2DL-MuSC"),
+  ("HeLa",            "DIC-C2DH-HeLa"),
+  ("MSC",             "Fluo-C2DL-MSC"),
+  ("A549",            "Fluo-C3DH-A549"),
+  ("A549-SIM",        "Fluo-C3DH-A549-SIM"),
+  ("H157",            "Fluo-C3DH-H157"),
+  ("MDA231",          "Fluo-C3DL-MDA231"),
+  ("GOWT1",           "Fluo-N2DH-GOWT1"),
+  ("SIM+",            "Fluo-N2DH-SIM+"),
+  ("HeLa",            "Fluo-N2DL-HeLa"),
+  ("celegans_isbi",   "Fluo-N3DH-CE"),
+  ("hampster",        "Fluo-N3DH-CHO"),
+  ("SIM+",            "Fluo-N3DH-SIM+"),
+  ("fly_isbi",        "Fluo-N3DL-DRO"),
+  ("trib_isbi_proj",  "Fluo-N3DL-TRIC"),
+  ("U373",            "PhC-C2DH-U373"),
+  ("PSC",             "PhC-C2DL-PSC"),
+  ("trib_isbi/crops", "Fluo-N3DL-TRIF"),
+  ]
 
-
-_datasets = [
-  ("HSC",            "BF-C2DL-HSC"),
-  ("MuSC",           "BF-C2DL-MuSC"),
-  ("HeLa",           "DIC-C2DH-HeLa"),
-  ("MSC",            "Fluo-C2DL-MSC"),
-  ("A549",           "Fluo-C3DH-A549"),
-  ("A549-SIM",       "Fluo-C3DH-A549-SIM"),
-  ("H157",           "Fluo-C3DH-H157"),
-  ("MDA231",         "Fluo-C3DL-MDA231"),
-  ("GOWT1",          "Fluo-N2DH-GOWT1"),
-  ("SIM+",           "Fluo-N2DH-SIM+"),
-  ("HeLa",           "Fluo-N2DL-HeLa"),
-  ("celegans_isbi",  "Fluo-N3DH-CE"),
-  ("hampster",       "Fluo-N3DH-CHO"),
-  ("SIM+",           "Fluo-N3DH-SIM+"),
-  ("fly_isbi",       "Fluo-N3DL-DRO"),
-  ("trib_isbi_proj", "Fluo-N3DL-TRIC"),
-  ("trib_isbi",      "Fluo-N3DL-TRIF"),
-  ("U373",           "PhC-C2DH-U373"),
-  ("PSC",            "PhC-C2DL-PSC"),
- ]
-
+## WARNING: IN XYZ ORDER!!!
+scales = {
+  "Fluo-C3DH-A549":      (0.126, 0.126, 1.0),
+  "Fluo-C3DH-H157":      (0.126, 0.126, 0.5),
+  "Fluo-C3DL-MDA231":    (1.242, 1.242, 6.0),
+  "Fluo-N3DH-CE":        (0.09 , 0.09, 1.0),
+  "Fluo-N3DH-CHO":       (0.202, 0.202, 1.0),
+  "Fluo-N3DL-DRO":       (0.406, 0.406, 2.03),
+  "Fluo-N3DL-TRIC":      (1.,1.,1.), # NA dueto cartographic projections
+  "Fluo-N3DL-TRIF":      (0.38 , 0.38, 0.38),
+  "Fluo-C3DH-A549-SIM":  (0.126, 0.126, 1.0),
+  "Fluo-N3DH-SIM+":      (0.125, 0.125, 0.200),
+  "BF-C2DL-HSC" :        (0.645 ,0.645),
+  "BF-C2DL-MuSC" :       (0.645 ,0.645),
+  "DIC-C2DH-HeLa" :      (0.19 ,0.19),
+  "Fluo-C2DL-MSC" :      (0.3 ,0.3), # (0.3977 x 0.3977) for dataset 2?,
+  "Fluo-N2DH-GOWT1" :    (0.240 ,0.240),
+  "Fluo-N2DL-HeLa" :     (0.645 ,0.645),
+  "PhC-C2DH-U373" :      (0.65 ,0.65),
+  "PhC-C2DL-PSC" :       (1.6 ,1.6),
+  "Fluo-N2DH-SIM+" :     (0.125 ,0.125),
+  }
 
 def e18_trib(pid=0):
   """
   v01 : For each 3D ISBI dataset: Train, Vali, Predict on times 000,001,002 respectively. pid selects dataset.
   """
 
-  myname, isbiname  = _datasets[pid]
+  myname, isbiname  = isbi_datasets[pid]
 
   trainset, testset = "01", "01"
   bg_weight_multiplier = 1.0
@@ -1023,6 +1070,70 @@ def e18_trib(pid=0):
   save(scores, cfig.savedir / f'scores_{testset}.pkl')
   save(np.array(pred).astype(np.float16), cfig.savedir / f"pred_{testset}.npy")
   save(np.array(raw).astype(np.float16),  cfig.savedir / f"raw_{testset}.npy")
+
+def e19_tracking(pid=0):
+
+  (p0,p1,p2),pid = _parse_pid(pid,[3,19,2])
+
+  myname, isbiname = isbi_datasets[p1]
+  isbi_dir = f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/"
+  for dataset in ['01','02']:
+    trackfiles  = sorted(glob(os.path.join(isbi_dir,dataset+"_GT","TRA","man_track*.tif")))
+    _timebounds = [re.search(r'man_track(\d+)\.tif',x).group(1) for x in trackfiles]
+    _ndigits    = len(_timebounds[0])
+    _shape = load(trackfiles[0]).shape
+    start,stop  = int(_timebounds[0]), int(_timebounds[-1])+1    
+    scale = np.array(scales[isbiname])[::-1]
+    scale = scale / scale[-1]
+    ignore_FP = '' if isbiname not in ["Fluo-N3DL-DRO", "Fluo-N3DL-TRIC", "Fluo-N3DL-TRIF"] else '1'
+    print(myname,isbiname,dataset,_ndigits,start,stop,scale,sep='\t')
+
+    outdir = savedir/f"e19_tracking/v01/pid{pid:03d}/"
+
+    _tracking = [lambda lpts: tracking.nn_tracking_on_ltps(lpts,scale=scale),
+                 lambda lpts: tracking.random_tracking_on_ltps(lpts)
+                ][p2]
+    if p2>0 and p0==1: return
+
+
+    if p0==0:
+      nap  = tracking.load_isbi2nap(isbi_dir,dataset,[start,stop])
+      ltps = tracking.nap2ltps(nap)
+      tb = _tracking(lpts)
+      tracking._tb_add_orig_labels(tb,nap)
+      lbep = tracking.save_permute_existing(tb,isbi_dir,dataset,[start,stop],savedir=outdir)
+    if p0==1:
+      nap  = tracking.load_isbi2nap(isbi_dir,dataset,[start,stop])
+      kern = nap.avg_kern
+      tracking.save_isbi(nap,shape=_shape,_kern=kern,savedir=outdir)
+    if p0==2:
+      lpts = load(f"/projects/project-broaddus/rawdata/{myname}/traj/{isbiname}/{dataset}_traj.pkl")
+      if type(lpts) is dict:
+        lpts = [lpts[k] for k in sorted(lpts.keys())]
+      kern = np.ones([3,5,5]) if '3D' in isbiname else np.ones([5,5])
+      tb = _tracking(lpts)
+      nap = tracking.tb2nap(tb,lpts)
+      nap.tracklets[:,1] += start
+      tracking.save_isbi(nap,shape=_shape,_kern=kern,savedir=outdir)
+
+    # lsd1 = tracking.lbep2lsd(tracking.load_lbep("naptest_pid18/res_track.txt"))
+    # lsd2 = tracking.TRAdir2lsd("naptest_pid18")
+    # tracking.compare_lsds(lsd1,lsd2)
+
+    bashcmd = f"""
+    isbidir={isbi_dir}
+    localtra=/projects/project-broaddus/comparison_methods/EvaluationSoftware/Linux/TRAMeasure
+    mkdir -p "$isbidir"{dataset}_RES/
+    rm "$isbidir"{dataset}_RES/*
+    cp -r {outdir}/* "$isbidir"{dataset}_RES/
+    time $localtra $isbidir {dataset} {_ndigits} > {outdir}/{dataset}_TRA.txt
+    cat {outdir}/{dataset}_TRA.txt
+    rm "$isbidir"{dataset}_RES/*.tif
+    rm {outdir}/*.tif
+    """
+    run(bashcmd,shell=True)
+
+
 
 
 if __name__ == '__main__':
