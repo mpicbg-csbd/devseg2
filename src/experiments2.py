@@ -3,9 +3,12 @@
 export CUDA_LAUNCH_BLOCKING=1
 ipython
 
-import denoiser, detector
+import denoiser, detector, tracking
 from segtools.ns2dir import load,save,toarray
-import experiments2, analysis2, ipy
+import experiments2 as ex
+import networkx as nx
+import numpy_indexed as ndi
+import analysis2, ipy
 import numpy as np
 %load_ext line_profiler
 """
@@ -66,58 +69,6 @@ def _parse_pid(pid_or_params,dims):
 def iterdims(shape):
   return itertools.product(*[range(x) for x in shape])
 
-def OLD_run_slurm():
-  """
-  Submit all experiments as independent jobs to the SLURM cluster job manager.
-  Each job has specific SLURM params, and function params, identified with a certain pid (int).
-
-  cmd = "sbatch -J {rule} -p {cluster.p} --gres {cluster.gres} -n {cluster.n} -t {cluster.t} -c {cluster.c} --mem {cluster.mem} -o slurm/slurm-%j.out -e slurm/slurm-%j.err "
-
-  """
-
-  shutil.copy("/projects/project-broaddus/devseg_2/src/experiments2.py", "/projects/project-broaddus/devseg_2/src/ex2copy.py")
-  # shutil.copy("/projects/project-broaddus/devseg_2/src/experiments2.py", cfig.savedir)
-
-  # ## job10_alex_retina_3D
-  # cmd = 'sbatch -J e10-3D_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 12:00:00 -c 1 --mem 128000 -o slurm/e10-3D_pid{pid:02d}.out -e slurm/e10-3D_pid{pid:02d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.job10_alex_retina_3D({pid})\"\' '
-  # for pid in [1,2,3]: Popen(cmd.format(pid=pid),shell=True)
-
-  # ## job10_alex_retina_2D
-  # cmd = 'sbatch -J e10-2D_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 12:00:00 -c 1 --mem 128000 -o slurm/e10-2D_pid{pid:02d}.out -e slurm/e10-2D_pid{pid:02d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.job10_alex_retina_2D({pid})\"\' '
-  # for pid in [1]: Popen(cmd.format(pid=pid),shell=True)
-
-  # ## job11_synthetic_membranes
-  # cmd = 'sbatch -J e11_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 12:00:00 -c 1 --mem 128000 -o slurm/e11_pid{pid:02d}.out -e slurm/e11_pid{pid:02d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.job11_synthetic_membranes({pid})\"\' '
-  # for pid in [1,2,3]: Popen(cmd.format(pid=pid),shell=True)
-
-  ## e08_horst
-  # shutil.copy("/projects/project-broaddus/devseg_2/src/experiments2.py", "/projects/project-broaddus/devseg_2/src/ex2copy.py")
-  # cmd = 'sbatch -J e08_{pid:03d} -p gpu --gres gpu:1 -n 1 -t 1:00:00 -c 1 --mem 128000 -o slurm/e08_pid{pid:03d}.out -e slurm/e08_pid{pid:03d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e08_horst({pid})\"\' '
-  # for pid in range(50): Popen(cmd.format(pid=pid),shell=True)
-
-  # ## job13_mangal
-  # cmd = 'sbatch -J e13_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 12:00:00 -c 1 --mem 128000 -o slurm/e13_pid{pid:02d}.out -e slurm/e13_pid{pid:02d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.job13_mangal({pid})\"\' '
-  # for pid in range(1,9): Popen(cmd.format(pid=pid),shell=True)
-
-  # e14_celegans
-  # cmd = 'sbatch -J e14_{pid:03d} -p gpu --gres gpu:1 -n 1 -t 4:00:00 -c 1 --mem 128000 -o slurm/e14_pid{pid:03d}.out -e slurm/e14_pid{pid:03d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e14_celegans({pid})\"\' '
-  # for pid in range(10): Popen(cmd.format(pid=pid),shell=True)
-
-  # ## e15_celegans
-  # cmd = 'sbatch -J e15_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 12:00:00 -c 1 --mem 128000 -o slurm/e15_pid{pid:02d}.out -e slurm/e15_pid{pid:02d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e15_celegans({pid})\"\' '
-  # for pid in range(3): Popen(cmd.format(pid=pid),shell=True)
-
-  ## e16_ce_adapt
-  # cmd = 'sbatch -J e16_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 2:00:00 -c 1 --mem 128000 -o slurm/e16_pid{pid:02d}.out -e slurm/e16_pid{pid:02d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e16_ce_adapt({pid})\"\' '
-  # for pid in range(2*5): Popen(cmd.format(pid=pid),shell=True)
-
-  # e18_trib
-  # cmd = 'sbatch -J e18_{pid:03d} -p gpu --gres gpu:1 -n 1 -t 3:00:00 -c 1 --mem 128000 -o slurm/e18_pid{pid:03d}.out -e slurm/e18_pid{pid:03d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e18_trib({pid})\"\' '
-  # for pid in range(19): Popen(cmd.format(pid=pid),shell=True)
-
-  ## e19_tracking
-  # cmd = 'sbatch -J e19_{pid:03d} -n 1 -t 1:00:00 -c 4 --mem 128000 -o slurm/e19_pid{pid:03d}.out -e slurm/e19_pid{pid:03d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e19_tracking({pid})\"\' '
-  # for pid in range(3*19): Popen(cmd.format(pid=pid),shell=True)
 
 slurm = SimpleNamespace()
 slurm.e10_3D = 'sbatch -J e10-3D_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 12:00:00 -c 1 --mem 128000 -o slurm/e10-3D_pid{pid:02d}.out -e slurm/e10-3D_pid{pid:02d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.job10_alex_retina_3D({pid})\"\' '
@@ -129,7 +80,7 @@ slurm.e14 = 'sbatch -J e14_{pid:03d} -p gpu --gres gpu:1 -n 1 -t 4:00:00 -c 1 --
 slurm.e15 = 'sbatch -J e15_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 12:00:00 -c 1 --mem 128000 -o slurm/e15_pid{pid:02d}.out -e slurm/e15_pid{pid:02d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e15_celegans({pid})\"\' '
 slurm.e16 = 'sbatch -J e16_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 2:00:00 -c 1 --mem 128000 -o slurm/e16_pid{pid:02d}.out -e slurm/e16_pid{pid:02d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e16_ce_adapt({pid})\"\' '
 slurm.e18 = 'sbatch -J e18_{pid:03d} -p gpu --gres gpu:1 -n 1 -t 3:00:00 -c 1 --mem 128000 -o slurm/e18_pid{pid:03d}.out -e slurm/e18_pid{pid:03d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e18_trib({pid})\"\' '
-slurm.e19 = 'sbatch -J e19_{pid:03d} -n 1 -t 3:00:00 -c 4 --mem 128000 -o slurm/e19_pid{pid:03d}.out -e slurm/e19_pid{pid:03d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e19_tracking({pid})\"\' '
+slurm.e19 = 'sbatch -J e19_{pid:03d} -n 1 -t 1:00:00 -c 4 --mem 128000 -o slurm/e19_pid{pid:03d}.out -e slurm/e19_pid{pid:03d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e19_tracking({pid})\"\' '
 
 def run_slurm(cmd,pids):
   ## copy the experiments file to a safe name that you WONT EDIT. If you edit the code while jobs are waiting in the SLURM queue it could cause inconsistencies.
@@ -1099,7 +1050,7 @@ def e19_tracking(pid=0):
     if p0==0:
       nap  = tracking.load_isbi2nap(isbi_dir,dataset,[start,stop])
       ltps = tracking.nap2ltps(nap)
-      tb = _tracking(lpts)
+      tb = _tracking(ltps)
       tracking._tb_add_orig_labels(tb,nap)
       lbep = tracking.save_permute_existing(tb,isbi_dir,dataset,[start,stop],savedir=outdir)
     if p0==1:
@@ -1125,13 +1076,14 @@ def e19_tracking(pid=0):
     localtra=/projects/project-broaddus/comparison_methods/EvaluationSoftware/Linux/TRAMeasure
     mkdir -p "$isbidir"{dataset}_RES/
     rm "$isbidir"{dataset}_RES/*
-    cp -r {outdir}/* "$isbidir"{dataset}_RES/
+    cp -r {outdir}/*.tif {outdir}/res_track.txt "$isbidir"{dataset}_RES/
     time $localtra $isbidir {dataset} {_ndigits} > {outdir}/{dataset}_TRA.txt
     cat {outdir}/{dataset}_TRA.txt
     rm "$isbidir"{dataset}_RES/*.tif
     rm {outdir}/*.tif
     """
     run(bashcmd,shell=True)
+    print(f"{outdir}/{dataset}_TRA.txt Exists?", Path(f"{outdir}/{dataset}_TRA.txt").exists())
 
 
 

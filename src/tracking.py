@@ -310,7 +310,7 @@ def save_isbi(nap, _kern=None, shape=(35, 512, 708), savedir="napri2isbi_test/")
 
   savedir = Path(savedir)
   savedir.mkdir(parents=True,exist_ok=True)
-  for x in savedir.glob('*'): x.unlink()
+  for x in savedir.glob('mask*.tif'): x.unlink()
 
   lbep = nap2lbep(nap)
   np.savetxt(savedir / "res_track.txt",lbep,fmt='%d')
