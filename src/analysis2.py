@@ -2,11 +2,11 @@ from segtools.ns2dir import load,save,toarray
 import numpy as np
 import itertools
 
-def _parse_pid(pid_or_params,dims):
-  if type(pid_or_params) in [list,tuple]:
+def _parse_pid(pid_or_params,dims):  
+  if hasattr(pid_or_params,'__len__') and len(pid_or_params)==len(dims):
     params = pid_or_params
     pid = np.ravel_multi_index(params,dims)
-  elif type(pid_or_params) is int:
+  elif 'int' in str(type(pid_or_params)):
     pid = pid_or_params
     params = np.unravel_index(pid,dims)
   return params, pid
@@ -114,3 +114,40 @@ def e08_res():
   res = np.array(res).reshape([10,2,512,512])
   save(res,"../expr/e08_horst/v02/final.npy")
 
+from glob import glob
+import re
+from subprocess import run
+from pathlib import Path
+from collections import defaultdict
+
+def e19_tracking():
+
+  res = np.full([3,19,2,2],-1.0)
+
+  for name in glob("../expr/e19_tracking/v01/pid*/*TRA.txt"):
+    print(name)
+    pid,ds = re.search(r'pid(\d+)/(0[12])_TRA\.txt',name).groups()
+    pid = int(pid)
+    (p0,p1,p2),pid = _parse_pid(pid,[3,19,2])
+    p3 = {'01':0,'02':1}[ds]
+    m = re.search(r'TRA measure: (\d\.\d+)', open(name,'r').read())
+    if m:
+      res[p0,p1,p2,p3] = float(m.group(1))
+
+  redo = np.array(np.where((res==[-1,-1]).sum(-1)!=0))
+  res  = res.transpose([0,2,1,3]).reshape([3*2,19,2])[[0,1,2,4,5]]
+  save(res,"../expr/e19_tracking/v01/res.npy")
+
+  return res,redo
+
+def e19(pids):
+  for pid in pids:
+    (p0,p1,p2), pid = _parse_pid(pid,[3,19,2])
+    # name = f"slurm/e19_pid{pid:03d}.out"
+    name = f"../expr/e19_tracking/v01/pid{pid:03d}/02_TRA.txt"
+    print('\n\n',pid, name,'\n')
+    run(f"cat {name}",shell=1)
+
+
+
+# { 5, 6, 7, 12, 13, 16,}

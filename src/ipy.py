@@ -18,6 +18,8 @@ from pathlib import Path
 # from segtools.render import get_fnz_idx2d
 from segtools.ns2dir import load,save,flatten_sn,toarray
 from types import SimpleNamespace
+from segtools.point_tools import trim_images_from_pts2
+import shutil
 
 
 ## one-time-tasks
@@ -220,62 +222,61 @@ def job15():
     save(allpts, targetname)
 
 def job16_cropTrib(ds="01"):
-  from segtools.point_tools import trim_images_from_pts2
-  pts = load(f"/projects/project-broaddus/rawdata/trib_isbi/traj/Fluo-N3DL-TRIF/{ds}_traj.pkl")
+
+  old_dir = Path(f"/projects/project-broaddus/rawdata/trib_isbi/")
+  new_dir = Path(f"/projects/project-broaddus/rawdata/trib_isbi/crops")
+  
+  ## find slice and resave ltps / ss
+  pts  = load(old_dir / f"traj/Fluo-N3DL-TRIF/{ds}_traj.pkl")
   _pts = np.concatenate(pts,axis=0)
   pts2, ss = trim_images_from_pts2(_pts,border=(6,6,6))
   _idxs = np.cumsum([0] + [len(x) for x in pts])
   list_pts2 = [pts2[_idxs[i]:_idxs[i+1]] for i in range(len(_idxs)-1)]
-  print(pts2.shape, _idxs)
+  # save(list_pts2, new_dir / f"traj/Fluo-N3DL-TRIF/{ds}_traj.pkl")
+  # save(ss, new_dir / f"traj/Fluo-N3DL-TRIF/{ds}_slice.pkl")
 
-  save(list_pts2, f"/projects/project-broaddus/rawdata/trib_isbi/crops/traj/Fluo-N3DL-TRIF/{ds}_traj.pkl")
-  save(ss, f"/projects/project-broaddus/rawdata/trib_isbi/crops/traj/Fluo-N3DL-TRIF/{ds}_slice.pkl")
-
-  return
+  ## how much space do we save by cropping?
   print(ss)
   a = np.prod([_s.stop-_s.start for _s in ss])
-  b = np.prod(load(f"/projects/project-broaddus/rawdata/trib_isbi/Fluo-N3DL-TRIF/{ds}/t000.tif").shape)
+  b = np.prod(load(old_dir / f"Fluo-N3DL-TRIF/{ds}/t000.tif").shape)
   print(a,b,a/b)
 
+  ## crop and resave images,
   def _f(name):
-    img = load(name)
+    img = load(old_dir / name)
     print(img.shape) ## (991, 1871, 965)
-    save(img[ss],name.replace("trib_isbi/","trib_isbi/crops/"))
+    save(img[ss],new_dir / name)
+  for i in range(60,len(pts)):
+    _f(f"Fluo-N3DL-TRIF/{ds}/t{i:03d}.tif")
+    _f(f"Fluo-N3DL-TRIF/{ds}_GT/TRA/man_track{i:03d}.tif")
 
-  for i in range(60):
-    _f(f"/projects/project-broaddus/rawdata/trib_isbi/Fluo-N3DL-TRIF/{ds}/t{i:03d}.tif")
-    _f(f"/projects/project-broaddus/rawdata/trib_isbi/Fluo-N3DL-TRIF/{ds}_GT/TRA/man_track{i:03d}.tif")
-  import shutil
-  name = f"/projects/project-broaddus/rawdata/trib_isbi/Fluo-N3DL-TRIF/{ds}_GT/TRA/man_track.txt"
-  shutil.copy(name,name.replace("trib_isbi/","trib_isbi/crops/"))
+  ## direct copy man_track.txt
+  # name = f"Fluo-N3DL-TRIF/{ds}_GT/TRA/man_track.txt"
+  # shutil.copy(old_dir / name, new_dir / name)
 
-# def job16_downsampleTrib(ds="01"):
-#   from segtools.point_tools import trim_images_from_pts2
+def job16_downscaleTrib(ds="01"):
+
+  old_dir = Path(f"/projects/project-broaddus/rawdata/trib_isbi/crops") #traj/Fluo-N3DL-TRIF/{ds}_traj.pkl")
+  new_dir = Path(f"/projects/project-broaddus/rawdata/trib_isbi/crops_2xDown")
   
-#   pts = load(f"/projects/project-broaddus/rawdata/trib_isbi/traj/Fluo-N3DL-TRIF/{ds}_traj.pkl")
-#   _pts = np.concatenate(pts,axis=0)
-#   pts2, ss = trim_images_from_pts2(_pts,border=(6,6,6))
-#   _idxs = np.cumsum([0] + [len(x) for x in pts])
-#   list_pts2 = [pts2[_idxs[i]:_idxs[i+1]] for i in range(len(_idxs)-1)]
-#   print(pts2.shape, _idxs)
+  ## find slice and resave ltps / ss
+  pts  = load(old_dir / f"traj/Fluo-N3DL-TRIF/{ds}_traj.pkl")
+  pts = [x//2 for x in pts]
+  save(pts, new_dir / f"traj/Fluo-N3DL-TRIF/{ds}_traj.pkl")
 
-#   save(list_pts2, f"/projects/project-broaddus/rawdata/trib_isbi/crops/Fluo-N3DL-TRIF/{ds}_traj.pkl")
-#   save(ss, f"/projects/project-broaddus/rawdata/trib_isbi/crops/Fluo-N3DL-TRIF/{ds}_slice.pkl")
+  ## downscale resave images,
+  def _f(name):
+    img = load(old_dir / name)
+    print(name, img.shape) ## (991, 1871, 965)
+    save(img[::2,::2,::2],new_dir / name)
+  for i in range(60,len(pts)):
+    _f(f"Fluo-N3DL-TRIF/{ds}/t{i:03d}.tif")
+    _f(f"Fluo-N3DL-TRIF/{ds}_GT/TRA/man_track{i:03d}.tif")
 
-#   print(ss)
-#   a = np.prod([_s.stop-_s.start for _s in ss])
-#   b = np.prod(load(f"/projects/project-broaddus/rawdata/trib_isbi/Fluo-N3DL-TRIF/{ds}/t000.tif").shape)
-#   print(a,b,a/b)
+  ## direct copy man_track.txt
+  name = f"Fluo-N3DL-TRIF/{ds}_GT/TRA/man_track.txt"
+  shutil.copy(old_dir / name, new_dir / name)
 
-#   def _f(name):
-#     img = load(name)
-#     print(img.shape) ## (991, 1871, 965)
-#     save(img[ss],name.replace("trib_isbi/","trib_isbi/crops/"))
 
-#   for i in range(60):
-#     _f(f"/projects/project-broaddus/rawdata/trib_isbi/Fluo-N3DL-TRIF/{ds}/t{i:03d}.tif")
-#     _f(f"/projects/project-broaddus/rawdata/trib_isbi/Fluo-N3DL-TRIF/{ds}_GT/TRA/man_track{i:03d}.tif")
-#   import shutil
-#   name = f"/projects/project-broaddus/rawdata/trib_isbi/Fluo-N3DL-TRIF/{ds}_GT/TRA/man_track.txt"
-#   shutil.copy(name,name.replace("trib_isbi/","trib_isbi/crops/"))
+
 

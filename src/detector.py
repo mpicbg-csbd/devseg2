@@ -67,7 +67,9 @@ def _config_example():
   # generic
   # config.times = [10,100,500,4000,100_000]
   # config.times = [10,100,200,400,1_000]
+
   config.time_agg = 10 # aggregate gradients before backprop
+  config.time_loss = 10
   config.time_print = 100
   config.time_savecrop = 200
   config.time_validate = 400
@@ -79,7 +81,7 @@ def _config_example():
 
 def check_config(config):
   "trivial check that keys match"
-  d = config_example().__dict__
+  d = _config_example().__dict__
   e = config.__dict__
 
   missing = d.keys() - e.keys()
@@ -252,7 +254,6 @@ def pts2target(list_of_pts,sh,sigmas):
 def pts2target_many(list_of_pts,sh,list_of_sigmas):
   return np.array([pts2target([x],sh,sig)[0] for x,sig in zip(list_of_pts,list_of_sigmas)])
 
-
 def content_sampler(ta,td,config):
   """
   sample near ground truth annotations (but flat over time)
@@ -265,13 +266,15 @@ def content_sampler(ta,td,config):
   ndim = len(size_space)
   _ipt = np.random.randint(0,len(td.gt[st]))
   _pt = td.gt[st][_ipt] ## sample one centerpoint from the chosen time
-  _pt = _pt + (2*np.random.rand(ndim)-1)*config.patch_space*0.1 ## jitter
+  _pt = _pt + (2*np.random.rand(ndim)-1)*config.patch_space*0.1 ## jitter by 10%
   _pt = _pt - config.patch_space//2 ## center
-  _pt = _pt.clip(min=[0]*ndim,max=[size_space - config.patch_space])[0]
+  _max = np.clip([size_space - config.patch_space],a_min=[0]*ndim,a_max=None)
+  _pt = _pt.clip(min=[0]*ndim,max=_max)[0]
   _pt = _pt.astype(int)
   ss = tuple(slice(_pt[i],_pt[i] + config.patch_space[i]) for i in range(ndim))
   ss = np.s_[[st],:] + ss
   
+  # ipdb.set_trace()
   x  = td.input[ss]
   yt = td.target[ss]
   x,yt = augment(x,yt)
@@ -314,10 +317,11 @@ def weights(yt,ta,trainer):
       t0 = trainer.time_weightdecay
       ## decayto1 :: linearly decay scalar x to value 1 after 3 epochs, then const
       decayto1 = lambda x: x*(1-ta.i/(t0*3)) + ta.i/(t0*3) if ta.i<=(t0*3) else 1
-    else:
-      decayto1 = lambda x: x
-    w[yt<thresh]  = decayto1(ws[0])
-    w[yt>=thresh] = decayto1(ws[1])
+      ws[0] = decayto1(ws[0])
+      ws[1] = decayto1(ws[1])
+      
+    w[yt<thresh]  = ws[0]
+    w[yt>=thresh] = ws[1]
 
   return w
 

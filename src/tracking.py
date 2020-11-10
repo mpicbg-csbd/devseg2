@@ -66,18 +66,6 @@ def evaluate_isbi(base_dir,detname,pred='01',fullanno=True):
   """
   run([DET_command],shell=True)
 
-def test_simple_tracking():
-  res = []
-  x = np.random.rand(100,2) * 100
-  for i in range(20):
-    x += np.random.rand(100,2)*2
-    res.append(x.copy())
-  return res
-
-def test_cele_simple_tracking(tracklets):
-  ltps = list(ndi.group_by(tracklets[:,1]).split(tracklets[:,2:]))
-  dists, parents = nn_tracking(ltps)
-
 def draw(tb):
   pos  = nx.multipartite_layout(tb,subset_key='time')
   cmap = matplotlib.colors.ListedColormap(np.random.rand(256,3))
@@ -89,6 +77,18 @@ def draw(tb):
   nx.draw(tb,pos=pos,node_size=30,node_color=cmap(colors))
 
 
+def gen_ltps1():
+  res = []
+  N,T = 1,10
+  x = np.random.rand(N,2)*10
+  for i in range(T):
+    x += np.random.rand(N,2)*2
+    res.append(x.copy())
+  return res
+
+# def test_cele_simple_tracking(tracklets):
+#   ltps = list(ndi.group_by(tracklets[:,1]).split(tracklets[:,2:]))
+#   dists, parents = nn_tracking(ltps)
 
 
 
@@ -104,12 +104,42 @@ def nn_tracking_on_ltps(ltps=None, scale=(1,1,1), dub=None):
   dists, parents = [],[]
 
   for i in range(len(x)-1):
+    if len(x[i])==0:
+      dists.append(np.full(len(x[i+1]), -1))
+      parents.append(np.full(len(x[i+1]), -1))
+      continue
+    if len(x[i+1])==0:
+      dists.append([])
+      parents.append([])
+      continue
+      
     kdt = pyKDTree(x[i]*scale)
     _dis, _ind = kdt.query(x[i+1]*scale, k=1, distance_upper_bound=dub)
     dists.append(_dis)
     parents.append(_ind)
   tb = _parents2tb(parents,ltps)
   return tb
+
+def _parents2tb(parents,ltps):
+  """
+  parents == -1 when no parent exists
+  layer == -2 when no point exists
+  """
+  list_of_edges = []
+  for time,layer in enumerate(parents):
+    if layer is []: continue
+    # if np.in1d(layer,[-1]).all(): continue
+    list_of_edges.extend([((time+1,n),(time,parent_id)) for n,parent_id in enumerate(layer) if parent_id!=-1])
+  tb = nx.from_edgelist(list_of_edges, nx.DiGraph())
+  tb = tb.reverse()
+
+  all_nodes = [(_time,idx) for _time in np.r_[:len(ltps)] for idx in np.r_[:len(ltps[_time])]]
+  tb.add_nodes_from(all_nodes)
+  
+  for v in tb.nodes: tb.nodes[v]['time'] = v[0]
+  _tb_add_track_labels(tb)
+  return tb
+
 
 def random_tracking_on_ltps(ltps,):
   """
@@ -123,7 +153,6 @@ def random_tracking_on_ltps(ltps,):
     parents.append(np.resize(l,len(labels[_time+1])))
   tb = _parents2tb(parents,ltps)
   return tb
-
 
 
 
@@ -142,7 +171,7 @@ def nap2lbep(nap):
     lbep[i,2] = track_group[:,1].max() # max time for given track
     x = full_graph[track_id]; #print(x)
     lbep[i,3] = x if 'int' in str(type(x)) else x[0]
-  lbep = lbep.astype(np.uint16)
+  lbep = lbep.astype(np.uint)
   return lbep
 
 def _tb_add_orig_labels(tb,nap):
@@ -166,24 +195,11 @@ def _tb_add_track_labels(tb):
       if tb.out_degree[v] != 1: track_id+=1
     # tb.nodes[s]['root']  = 0
 
-def _parents2tb(parents,ltps):
-  list_of_edges = []
-  for time,layer in enumerate(parents):
-    list_of_edges.extend([((time+1,n),(time,parent_id)) for n,parent_id in enumerate(layer)])
-  tb = nx.from_edgelist(list_of_edges, nx.DiGraph())
-  tb = tb.reverse()
-
-  all_nodes = [(_time,idx) for _time in np.r_[:len(ltps)] for idx in np.r_[:len(ltps[_time])]]
-  tb.add_nodes_from(all_nodes)
-  
-  for v in tb.nodes: tb.nodes[v]['time'] = v[0]
-  _tb_add_track_labels(tb)
-  return tb
-
 def tb2nap(tb,ltps):
-  _ltps     = np.concatenate(ltps,axis=0)
+  _ltps   = np.concatenate(ltps,axis=0)
   trackid = np.array([n + (tb.nodes[n]['track'],) for n in tb.nodes])
-  nodes,trackid = trackid[:,:2],trackid[:,[2]]
+  ipdb.set_trace()
+  nodes, trackid = trackid[:,:2],trackid[:,[2]]
   idx     = np.lexsort(nodes.T[[1,0]])
   nodes,trackid = nodes[idx],trackid[idx]
   tracklets = np.concatenate([trackid, nodes[:,[0]], _ltps],axis=1).astype(np.uint)
@@ -242,11 +258,11 @@ def tb2lbep(tb):
 
 
 def _load_mantrack(path,dset,idx):
-
+  path = Path(path)
   try:
-    stak = load(path + dset + f"_GT/TRA/man_track{idx:03d}.tif")
+    stak = load(path/(dset+f"_GT/TRA/man_track{idx:03d}.tif"))
   except:
-    stak = load(path + dset + f"_GT/TRA/man_track{idx:04d}.tif")
+    stak = load(path/(dset+f"_GT/TRA/man_track{idx:04d}.tif"))
 
   props = regionprops_table(stak, properties=('label', 'bbox', 'image', 'area'))
   
@@ -265,7 +281,8 @@ def _load_mantrack(path,dset,idx):
   return props
 
 def load_isbi2nap(path,dset,ntimes,):
-
+  # path = str(path) + '/'
+  path = Path(path)
   data_df_raw = pd.concat([_load_mantrack(path,dset,idx) for idx in range(ntimes[0],ntimes[1])]).reset_index(drop=True)
   data_df = data_df_raw.sort_values(['label', 'frame'], ignore_index=True)
   
@@ -275,10 +292,10 @@ def load_isbi2nap(path,dset,ntimes,):
   avg_kern = kern.mean(0) > 0.5
 
   cols = COLUMNS
-  if '2D' in path[-20:]: cols = cols[:-1]
+  if '2D' in path.name: cols = cols[:-1]
   tracklets = data_df.loc[:,cols].to_numpy().astype(np.uint)
 
-  lbep = np.loadtxt(os.path.join(path, dset+'_GT/TRA', 'man_track.txt'), dtype=np.uint)
+  lbep = np.loadtxt(path/(dset+'_GT/TRA/man_track.txt'), dtype=np.uint)
   if lbep.ndim==1: lbep=lbep.reshape([1,4])
   full_graph = dict(lbep[:, [0, 3]])
   graph = {k: v for k, v in full_graph.items() if v != 0} ## weird. graph keys != set of all labels (missing root nodes). can only get root nodes from properties... i would prefer to work with tracklets + full_graph?
@@ -337,13 +354,15 @@ def save_permute_existing(tb, path, dset, ntimes, savedir="napri2isbi_test"):
   path    = Path(path)
 
   time_offset = None
-  for _time, name in enumerate(sorted((path/(dset+"_GT/TRA/")).glob("*.tif"))):
+  # for _time, name in enumerate(sorted((path/(dset+"_GT/TRA/")).glob("*.tif"))):
+  for _time in np.r_[ntimes[0]:ntimes[1]]:
+    name = path/(dset+f"_GT/TRA/man_track{_time:03d}.tif")
     ## WARNING: _time is pseudotime, which doesn't correspond with actual timestring for PSC PhC-C2DL-PSC datasets!!
-    name = str(name)
     lab = load(name)
     mapping = {tb.nodes[n]['orig_trackid']:tb.nodes[n]['track'] for n in tb.nodes if n[0]==_time}
-    lab2 = relabel_from_mapping(lab,mapping).astype(np.uint16)
+    lab2 = relabel_from_mapping(lab,mapping).astype(np.uint)
 
+    name = str(name)
     timestring = re.search(r"(\d{3,4})\.tif",name).group(1)
     if time_offset is None: time_offset=int(timestring)
     save(lab2, savedir / f"mask{timestring}.tif")
@@ -362,7 +381,7 @@ def compare_all_labelsets(nap=None,lbep=None,tradir=None,tb=None):
 
   resdir = Path(resdir)
   if tradir:
-    lbep2 = np.loadtxt(resdir / 'res_track.txt').astype(np.uint16)
+    lbep2 = np.loadtxt(resdir / 'res_track.txt').astype(np.uint)
 
   lbep_lsd = lbep2lsd(lbep)
   tradir_lsd = TRAdir2lsd(resdir)
@@ -388,7 +407,7 @@ def TRAdir2lsd(tradir,):
   return lsd
 
 def load_lbep(name):
-  lbep = np.loadtxt(name).astype(np.uint8)
+  lbep = np.loadtxt(name).astype(np.uint)
   if lbep.ndim == 1: lbep = lbep.reshape([1,4])
   return lbep
 
@@ -407,6 +426,35 @@ def lbep2lsd(lbep):
 
   return lsd
 
+
+def load_and_compare(Fluodir,ds='01'):
+  Fluodir  = Path(Fluodir)
+  d = SimpleNamespace()
+  d.lsd_orig_1 = lbep2lsd(load_lbep(Fluodir / f'{ds}_GT/TRA/man_track.txt'))
+  d.lsd_orig_2 = TRAdir2lsd(Fluodir / f'{ds}_GT/TRA/')
+  d.lsd_new_1  = lbep2lsd(load_lbep(Fluodir / f'{ds}_RES/res_track.txt'))
+  d.lsd_new_2  = TRAdir2lsd(Fluodir / f'{ds}_RES/')
+
+  from itertools import combinations
+  for x,y in combinations([d.lsd_orig_1,d.lsd_orig_2,d.lsd_new_1,d.lsd_new_2,],2):
+    compare_lsds(x,y)
+
+  return d
+
+# def lsd2lbep(lsd):
+#   res = defaultdict(list)
+#   for time,lset in lsd.items():
+#     for l in lset:
+#       res[l].append(time)
+
+
+
+if __name__=='__main__':
+  x = gen_ltps1()
+  x[3] = np.array([]).reshape([0,2])
+  print(x)
+  tb = nn_tracking_on_ltps(x,scale=(1,1))
+  print(tb.edges)
 
 
 

@@ -48,8 +48,11 @@ import shutil
 from segtools.point_tools import trim_images_from_pts2
 from scipy.ndimage import zoom
 import json
+from scipy.ndimage.morphology import binary_dilation
 
 import tracking
+
+from isbi_tools import get_isbi_info, isbi_datasets, isbi_scales
 from glob import glob
 import os
 import re
@@ -57,11 +60,11 @@ import re
 
 savedir = Path('/projects/project-broaddus/devseg_2/expr/')
 
-def _parse_pid(pid_or_params,dims):
-  if type(pid_or_params) in [list,tuple]:
+def _parse_pid(pid_or_params,dims):  
+  if hasattr(pid_or_params,'__len__') and len(pid_or_params)==len(dims):
     params = pid_or_params
     pid = np.ravel_multi_index(params,dims)
-  elif type(pid_or_params) is int:
+  elif 'int' in str(type(pid_or_params)):
     pid = pid_or_params
     params = np.unravel_index(pid,dims)
   return params, pid
@@ -801,64 +804,20 @@ def e17_ce_nuclei(pid=0):
   """
   pass
 
-
-
-## proof of principle for every dataset
-isbi_datasets = [
-  ("HSC",             "BF-C2DL-HSC"),
-  ("MuSC",            "BF-C2DL-MuSC"),
-  ("HeLa",            "DIC-C2DH-HeLa"),
-  ("MSC",             "Fluo-C2DL-MSC"),
-  ("A549",            "Fluo-C3DH-A549"),
-  ("A549-SIM",        "Fluo-C3DH-A549-SIM"),
-  ("H157",            "Fluo-C3DH-H157"),
-  ("MDA231",          "Fluo-C3DL-MDA231"),
-  ("GOWT1",           "Fluo-N2DH-GOWT1"),
-  ("SIM+",            "Fluo-N2DH-SIM+"),
-  ("HeLa",            "Fluo-N2DL-HeLa"),
-  ("celegans_isbi",   "Fluo-N3DH-CE"),
-  ("hampster",        "Fluo-N3DH-CHO"),
-  ("SIM+",            "Fluo-N3DH-SIM+"),
-  ("fly_isbi",        "Fluo-N3DL-DRO"),
-  ("trib_isbi_proj",  "Fluo-N3DL-TRIC"),
-  ("U373",            "PhC-C2DH-U373"),
-  ("PSC",             "PhC-C2DL-PSC"),
-  ("trib_isbi/crops", "Fluo-N3DL-TRIF"),
-  ]
-
-## WARNING: IN XYZ ORDER!!!
-scales = {
-  "Fluo-C3DH-A549":      (0.126, 0.126, 1.0),
-  "Fluo-C3DH-H157":      (0.126, 0.126, 0.5),
-  "Fluo-C3DL-MDA231":    (1.242, 1.242, 6.0),
-  "Fluo-N3DH-CE":        (0.09 , 0.09, 1.0),
-  "Fluo-N3DH-CHO":       (0.202, 0.202, 1.0),
-  "Fluo-N3DL-DRO":       (0.406, 0.406, 2.03),
-  "Fluo-N3DL-TRIC":      (1.,1.,1.), # NA dueto cartographic projections
-  "Fluo-N3DL-TRIF":      (0.38 , 0.38, 0.38),
-  "Fluo-C3DH-A549-SIM":  (0.126, 0.126, 1.0),
-  "Fluo-N3DH-SIM+":      (0.125, 0.125, 0.200),
-  "BF-C2DL-HSC" :        (0.645 ,0.645),
-  "BF-C2DL-MuSC" :       (0.645 ,0.645),
-  "DIC-C2DH-HeLa" :      (0.19 ,0.19),
-  "Fluo-C2DL-MSC" :      (0.3 ,0.3), # (0.3977 x 0.3977) for dataset 2?,
-  "Fluo-N2DH-GOWT1" :    (0.240 ,0.240),
-  "Fluo-N2DL-HeLa" :     (0.645 ,0.645),
-  "PhC-C2DH-U373" :      (0.65 ,0.65),
-  "PhC-C2DL-PSC" :       (1.6 ,1.6),
-  "Fluo-N2DH-SIM+" :     (0.125 ,0.125),
-  }
-
-def e18_trib(pid=0):
+def e18_isbidet(pid=0):
   """
   v01 : For each 3D ISBI dataset: Train, Vali, Predict on times 000,001,002 respectively. pid selects dataset.
+  v02 : change name to `e18_isbidet`. Train powerful models and predict across all times.
   """
 
   myname, isbiname  = isbi_datasets[pid]
 
   trainset, testset = "01", "01"
   bg_weight_multiplier = 1.0
-  train_times, vali_times, pred_times = np.r_[0:6], np.r_[7:10], np.r_[0:13]
+  info = get_isbi_info(myname,isbiname,testset)
+  kern = binary_dilation(tracking.load_isbi2nap(info.isbi_dir,trainset,[info.start,info.start+1]).avg_kern)
+  # return kern
+  train_times, vali_times, pred_times = np.r_[0:6], np.r_[7:10], np.r_[info.start:info.stop]
   tif_name = "t{n:04d}.tif" if myname in ["HSC", "MuSC",] else "t{n:03d}.tif"
 
   if "2D" in isbiname:
@@ -886,8 +845,8 @@ def e18_trib(pid=0):
     train_times, vali_times, pred_times = [0],[1],[0,1,2]
   if myname=="MDA231":   kernel_shape = [1,3,3]
   if myname=="A549":     kernel_shape = [1,5,5]
-  if myname=="hampster": kernel_shape = [1,5,5]
-  if myname=="psc":
+  if myname=="hampster": kernel_shape = [1,7,7]
+  if myname=="PSC":
     train_times, vali_times, pred_times = np.r_[150:156], np.r_[157:160], np.r_[150:163]
 
   kernel_shape = np.array(kernel_shape)
@@ -898,8 +857,8 @@ def e18_trib(pid=0):
   pts  = load(f"/projects/project-broaddus/rawdata/{myname}/traj/{isbiname}/{trainset}_traj.pkl")
   if pid==9: pts = {k:(v*(1,0.5,0.5)).astype(np.int) for k,v in pts.items()}
   
-  def get_many(dict,list_of_keys):
-    return np.array([dict[k] for k in list_of_keys])
+  def get_many(_dict,list_of_keys):
+    return [_dict[k] for k in list_of_keys]
 
   def _ltvd(config):
     td = SimpleNamespace()
@@ -907,18 +866,18 @@ def e18_trib(pid=0):
     if pid==9: td.input  = td.input[:,:,::2,::2]
     td.input  = td.input[:,None]  ## add channels
     td.input  = normalize3(td.input,2,99.4,clip=False)
-    td.target = detector.pts2target(get_many(pts,train_times),td.input[0,0].shape,kernel_shape)
+    td.target = detector.pts2target([pts[k] for k in train_times],td.input[0,0].shape,kernel_shape)
     td.target = td.target[:,None] ## add channels
-    td.gt = get_many(pts,train_times)
+    td.gt = [pts[k] for k in train_times]
 
     vd = SimpleNamespace()
     vd.input  = np.array([load(f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{trainset}/" + tif_name.format(n=n)) for n in vali_times])
     if pid==9: vd.input  = vd.input[:,:,::2,::2]
     vd.input  = vd.input[:,None] ## add channels
     vd.input  = normalize3(vd.input,2,99.4,clip=False)
-    vd.target = detector.pts2target(get_many(pts,vali_times),vd.input[0,0].shape,kernel_shape)
+    vd.target = detector.pts2target([pts[k] for k in vali_times],vd.input[0,0].shape,kernel_shape)
     vd.target = vd.target[:,None] ## add channels
-    vd.gt = get_many(pts,vali_times)
+    vd.gt = [pts[k] for k in vali_times]
     
     return td,vd
 
@@ -936,12 +895,12 @@ def e18_trib(pid=0):
     cfig.patch_space  = np.array(batch_shape[2:])
     cfig.batch_shape  = np.array(batch_shape)
     cfig.batch_axes   = "BCZYX"
-    time_total = 10_000 # about 12k / hour? 200/min = 5mins/ 1k = 12k/hr
+    time_total = 4_000 # about 12k / hour? 200/min = 5mins/ 1k = 12k/hr
     cfig.time_agg = 1 # aggregate gradients before backprop
     cfig.time_loss = 10
     cfig.time_print = 100
     cfig.time_savecrop = max(100,time_total//50)
-    cfig.time_validate = max(600,time_total//50)
+    cfig.time_validate = max(500,time_total//50)
     cfig.time_total = time_total
     cfig.lr = 4e-4
 
@@ -949,15 +908,16 @@ def e18_trib(pid=0):
 
   cfig = _config()
   cfig.load_train_and_vali_data = _ltvd
-  cfig.savedir = savedir / f'e18_trib/v01/pid{pid:03d}/'
+  cfig.savedir = savedir / f'e18_isbidet/v02/pid{pid:03d}/'
 
   ## Train the net
   if True:
-    T = detector.train_init(cfig)
-    # T = detector.train_continue(cfig,cfig.savedir / 'm/best_weights_f1.pt')
+    # T = detector.train_init(cfig)
+    T = detector.train_continue(cfig,cfig.savedir / 'm/best_weights_f1.pt')
     T.ta.train_times = train_times
     T.ta.vali_times  = vali_times
     shutil.copy("/projects/project-broaddus/devseg_2/src/experiments2.py", cfig.savedir)
+    # return T
     detector.train(T)
 
   ## Reload best weights
@@ -979,25 +939,26 @@ def e18_trib(pid=0):
   #   gtpts[6] = pts[6]
   #   gtpts[7] = pts[7]
 
-
-  ndims = list(gtpts.values())[0].shape[1]
-  if ndims==3:
+  if '3D' in isbiname:
     footy = np.ones((3,8,8))
     dims = "ZYX"
     scale = [1,1,1]
-  elif ndims==2:
+  elif '2D' in isbiname:
     footy = np.ones((8,8))
     dims = "YX"
     scale = [1,1]
 
   def zmax(x):
-    if x.ndim==3: return x.max(0)
+    if x.ndim==3: 
+      # return np.argmax(x,axis=0)
+      return x.max(0)
     return x
 
   scores = []
   pred   = []
   raw    = []
-  for i in predtimes:
+  ltps   = dict()
+  for i in pred_times:
     rawname = f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{testset}/t{i:03d}.tif"
     print(rawname)
     x = load(rawname)
@@ -1012,85 +973,96 @@ def e18_trib(pid=0):
       res = zoom(res,(1,2,2))
     score3  = point_matcher.match_unambiguous_nearestNeib(gtpts[i],pts,dub=3,scale=scale)
     score10 = point_matcher.match_unambiguous_nearestNeib(gtpts[i],pts,dub=10,scale=scale)
+    
     print("time", i, "gt", score10.n_gt, "match", score10.n_matched, "prop", score10.n_proposed)
-    s = {3:score3,10:score10}
-    scores.append(s)
-    pred.append(zmax(res))
-    raw.append(zmax(x))
+    ltps[i] = pts
+    # s = {3:score3,10:score10}
+    # scores.append(s)
+    # pred.append(zmax(res))
+    # raw.append(zmax(x))
 
-  save(scores, cfig.savedir / f'scores_{testset}.pkl')
-  save(np.array(pred).astype(np.float16), cfig.savedir / f"pred_{testset}.npy")
-  save(np.array(raw).astype(np.float16),  cfig.savedir / f"raw_{testset}.npy")
+  save(ltps, cfig.savedir / f'ltps_{testset}.pkl')
+  # save(scores, cfig.savedir / f'scores_{testset}.pkl')
+  # save(np.array(pred).astype(np.float16), cfig.savedir / f"pred_{testset}.npy")
+  # save(np.array(raw).astype(np.float16),  cfig.savedir / f"raw_{testset}.npy")
 
 def e19_tracking(pid=0):
+  """
+  v02: add CP-net tracking to p0.
+  """
 
-  (p0,p1,p2),pid = _parse_pid(pid,[3,19,2])
+  (p0,p1,p2),pid = _parse_pid(pid,[4,19,2])
+  if p2>0 and p0==1: return
 
   myname, isbiname = isbi_datasets[p1]
   isbi_dir = f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/"
-  for dataset in ['01','02']:
-    trackfiles  = sorted(glob(os.path.join(isbi_dir,dataset+"_GT","TRA","man_track*.tif")))
-    _timebounds = [re.search(r'man_track(\d+)\.tif',x).group(1) for x in trackfiles]
-    _ndigits    = len(_timebounds[0])
-    _shape = load(trackfiles[0]).shape
-    start,stop  = int(_timebounds[0]), int(_timebounds[-1])+1    
-    scale = np.array(scales[isbiname])[::-1]
-    scale = scale / scale[-1]
-    ignore_FP = '' if isbiname not in ["Fluo-N3DL-DRO", "Fluo-N3DL-TRIC", "Fluo-N3DL-TRIF"] else '1'
-    print(myname,isbiname,dataset,_ndigits,start,stop,scale,sep='\t')
+  for dataset in ['01']:
+    info = get_isbi_info(myname,isbiname,dataset)
+    print(json.dumps({k:info.__dict__[k] for k in ['myname','isbiname','dataset','start','stop','scale','ndigits']},sort_keys=True, indent=2, default=str))
 
-    outdir = savedir/f"e19_tracking/v01/pid{pid:03d}/"
+    outdir = savedir/f"e19_tracking/v02/pid{pid:03d}/"
 
-    _tracking = [lambda lpts: tracking.nn_tracking_on_ltps(lpts,scale=scale),
-                 lambda lpts: tracking.random_tracking_on_ltps(lpts)
+    _tracking = [lambda ltps: tracking.nn_tracking_on_ltps(ltps,scale=info.scale),
+                 lambda ltps: tracking.random_tracking_on_ltps(ltps)
                 ][p2]
-    if p2>0 and p0==1: return
 
-
-    if p0==0:
+    start,stop = info.start,info.stop
+    if p0==0: ## permute existing labels via tracking
       nap  = tracking.load_isbi2nap(isbi_dir,dataset,[start,stop])
       ltps = tracking.nap2ltps(nap)
-      tb = _tracking(ltps)
+      tb   = _tracking(ltps)
       tracking._tb_add_orig_labels(tb,nap)
       lbep = tracking.save_permute_existing(tb,isbi_dir,dataset,[start,stop],savedir=outdir)
-    if p0==1:
+    if p0==1: ## make consistent label shape, but don't change label id's.
       nap  = tracking.load_isbi2nap(isbi_dir,dataset,[start,stop])
       kern = nap.avg_kern
-      tracking.save_isbi(nap,shape=_shape,_kern=kern,savedir=outdir)
-    if p0==2:
-      lpts = load(f"/projects/project-broaddus/rawdata/{myname}/traj/{isbiname}/{dataset}_traj.pkl")
-      if type(lpts) is dict:
-        lpts = [lpts[k] for k in sorted(lpts.keys())]
-      kern = np.ones([3,5,5]) if '3D' in isbiname else np.ones([5,5])
-      tb = _tracking(lpts)
-      nap = tracking.tb2nap(tb,lpts)
+      kern = binary_dilation(kern.astype(np.uint8))
+      tracking.save_isbi(nap,shape=info.shape,_kern=kern,savedir=outdir)
+    if p0==2: ## make consistent label shape AND track
+      ltps = load(f"/projects/project-broaddus/rawdata/{myname}/traj/{isbiname}/{dataset}_traj.pkl")
+      if type(ltps) is dict:
+        ltps = [ltps[k] for k in sorted(ltps.keys())]
+      tb   = _tracking(ltps)
+      nap  = tracking.tb2nap(tb,ltps)
       nap.tracklets[:,1] += start
-      tracking.save_isbi(nap,shape=_shape,_kern=kern,savedir=outdir)
+      kern  = np.ones([3,5,5]) if '3D' in isbiname else np.ones([5,5])
+      # kern  = binary_dilation(tracking.load_isbi2nap(isbi_dir,dataset,[start,stop]).avg_kern)
+      tracking.save_isbi(nap,shape=info.shape,_kern=kern,savedir=outdir)
+    if p0==3: ## track using CP-net detections
+      oldpid = list.index([x[1] for x in isbi_datasets], isbiname)
+      ltps   = load(f"/projects/project-broaddus/devseg_2/expr/e18_isbidet/v02/pid{oldpid:03d}/ltps_{dataset}.pkl")
+      if type(ltps) is dict:
+        _ltps = [ltps[k] for k in sorted(ltps.keys())]
+      tb   = _tracking(_ltps)
+      nap  = tracking.tb2nap(tb,_ltps)
+      nap.tracklets[:,1] += start
+      kern = np.ones([3,5,5]) if '3D' in isbiname else np.ones([5,5])
+      kern = tracking.load_isbi2nap(isbi_dir,dataset,[start,start+1]).avg_kern
+      kern = binary_dilation(np.pad(kern,[(8,8)]*info.ndim), iterations=5)
+      # return kern
+      tracking.save_isbi(nap,shape=info.shape,_kern=kern,savedir=outdir)
 
     # lsd1 = tracking.lbep2lsd(tracking.load_lbep("naptest_pid18/res_track.txt"))
     # lsd2 = tracking.TRAdir2lsd("naptest_pid18")
     # tracking.compare_lsds(lsd1,lsd2)
 
+    resdir  = Path(isbi_dir)/(dataset+"_RES")
     bashcmd = f"""
-    isbidir={isbi_dir}
-    localtra=/projects/project-broaddus/comparison_methods/EvaluationSoftware/Linux/TRAMeasure
-    mkdir -p "$isbidir"{dataset}_RES/
-    rm "$isbidir"{dataset}_RES/*
-    cp -r {outdir}/*.tif {outdir}/res_track.txt "$isbidir"{dataset}_RES/
-    time $localtra $isbidir {dataset} {_ndigits} > {outdir}/{dataset}_TRA.txt
+    localtra=/projects/project-broaddus/comparison_methods/EvaluationSoftware2/Linux/TRAMeasure
+    localdet=/projects/project-broaddus/comparison_methods/EvaluationSoftware2/Linux/DETMeasure
+    mkdir -p {resdir}
+    rm {resdir}/*
+    cp -r {outdir}/*.tif {outdir}/res_track.txt {resdir}/
+    time $localdet {isbi_dir} {dataset} {info.ndigits} {info.ignore_FP} > {outdir}/{dataset}_DET.txt
+    cat {outdir}/{dataset}_DET.txt
+    time $localtra {isbi_dir} {dataset} {info.ndigits} > {outdir}/{dataset}_TRA.txt
     cat {outdir}/{dataset}_TRA.txt
-    rm "$isbidir"{dataset}_RES/*.tif
-    rm {outdir}/*.tif
+    # rm {resdir}/*.tif
+    # rm {outdir}/*.tif
     """
     run(bashcmd,shell=True)
-    print(f"{outdir}/{dataset}_TRA.txt Exists?", Path(f"{outdir}/{dataset}_TRA.txt").exists())
 
 
-
-
-if __name__ == '__main__':
-  "RUN ALL THE EXPERIMENTS!"
-  run_slurm()
 
 
 history = """
@@ -1124,7 +1096,9 @@ Also, I can run all parameter versions of all jobs via SLURM with a single run_s
 
 Adding e16.
 
+# Tue Nov 10 13:22:48 2020
 
+#TODO: replace `binary_dilation()` with scikit-image=0.18 expand_labels().
 
 
 """
