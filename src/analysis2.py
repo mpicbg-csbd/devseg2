@@ -2,6 +2,13 @@ from segtools.ns2dir import load,save,toarray
 import numpy as np
 import itertools
 
+from glob import glob
+import re
+from subprocess import run
+from pathlib import Path
+from collections import defaultdict
+
+
 def _parse_pid(pid_or_params,dims):  
   if hasattr(pid_or_params,'__len__') and len(pid_or_params)==len(dims):
     params = pid_or_params
@@ -113,12 +120,6 @@ def e08_res():
     res.append(x[0,0])
   res = np.array(res).reshape([10,2,512,512])
   save(res,"../expr/e08_horst/v02/final.npy")
-
-from glob import glob
-import re
-from subprocess import run
-from pathlib import Path
-from collections import defaultdict
 
 def e19_tracking():
 

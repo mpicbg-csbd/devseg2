@@ -198,7 +198,7 @@ def _tb_add_track_labels(tb):
 def tb2nap(tb,ltps):
   _ltps   = np.concatenate(ltps,axis=0)
   trackid = np.array([n + (tb.nodes[n]['track'],) for n in tb.nodes])
-  ipdb.set_trace()
+  # ipdb.set_trace()
   nodes, trackid = trackid[:,:2],trackid[:,[2]]
   idx     = np.lexsort(nodes.T[[1,0]])
   nodes,trackid = nodes[idx],trackid[idx]
@@ -319,7 +319,7 @@ def load_isbi2nap(path,dset,ntimes,):
 def save_isbi(nap, _kern=None, shape=(35, 512, 708), savedir="napri2isbi_test/"):
   """
   the inverse of `isbifiles_to_napari`
-  sort the tracklets by time
+  sort the tracklets by time (TrackID,Time,Z,Y,X)
   for each time rasterize detections using the correct labels
   write the man_tracks.txt from properties alone.
   """
@@ -335,7 +335,13 @@ def save_isbi(nap, _kern=None, shape=(35, 512, 708), savedir="napri2isbi_test/")
   ndigits = 4 if tracklets[:,1].max() > 1000 else 3
   labelset = []
   stackset = []
-  for sub_tracklets in ndi.group_by(tracklets[:,1]).split(tracklets):
+
+  time_start = tracklets[:,1].min()
+  time_stop  = tracklets[:,1].max()
+  # for sub_tracklets in ndi.group_by(tracklets[:,1]).split(tracklets):
+  for i in range(time_start,time_stop+1):
+    m = tracklets[:,1]==i
+    sub_tracklets = tracklets[m]
     time   = sub_tracklets[0,1]
     labels = sub_tracklets[:,0]
     labelset.append(labels)
@@ -372,7 +378,6 @@ def save_permute_existing(tb, path, dset, ntimes, savedir="napri2isbi_test"):
   lbep[:,[1,2]] = lbep[:,[1,2]]+time_offset
   np.savetxt(savedir / "res_track.txt",lbep,fmt='%d')
   return lbep
-
 
 
 def compare_all_labelsets(nap=None,lbep=None,tradir=None,tb=None):
