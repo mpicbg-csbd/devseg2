@@ -332,27 +332,31 @@ def save_isbi(nap, _kern=None, shape=(35, 512, 708), savedir="napri2isbi_test/")
   lbep = nap2lbep(nap)
   np.savetxt(savedir / "res_track.txt",lbep,fmt='%d')
 
-  ndigits = 4 if tracklets[:,1].max() > 1000 else 3
+  ndigits  = 4 if tracklets[:,1].max() > 1000 else 3
+  tifname = "mask{time:03d}.tif" if ndigits==3 else "mask{time:04d}.tif"
+
   labelset = []
   stackset = []
 
-  time_start = tracklets[:,1].min()
-  time_stop  = tracklets[:,1].max()
+  time_start = int(tracklets[:,1].min())
+  time_stop  = int(tracklets[:,1].max())
   # for sub_tracklets in ndi.group_by(tracklets[:,1]).split(tracklets):
   for i in range(time_start,time_stop+1):
     m = tracklets[:,1]==i
+    if m.sum()==0: 
+      save(np.zeros(shape,dtype=np.uint16), savedir / tifname.format(time=i))
+      continue
     sub_tracklets = tracklets[m]
     time   = sub_tracklets[0,1]
+    assert time==i
     labels = sub_tracklets[:,0]
     labelset.append(labels)
     pts    = sub_tracklets[:,2:].astype(np.int)
     kerns  = [_kern * _id for _id in labels]
     stack  = conv_at_pts_multikern(pts,kerns,shape).astype(np.uint16)
     stackset.append(set(np.unique(stack)))
-    if ndigits==3: 
-      save(stack, savedir / f"mask{time:03d}.tif")
-    elif ndigits==4:
-      save(stack, savedir / f"mask{time:04d}.tif")
+    save(stack, savedir / tifname.format(time=time))
+
   return lbep, labelset, stackset
 
 def save_permute_existing(tb, path, dset, ntimes, savedir="napri2isbi_test"):

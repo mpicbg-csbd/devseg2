@@ -806,7 +806,7 @@ def e17_ce_nuclei(pid=0):
 
 def e18_isbidet(pid=0):
   """
-  v01 : For each 3D ISBI dataset: Train, Vali, Predict on times 000,001,002 respectively. pid selects dataset.
+  v01 : For each 3D ISBI dataset: Train, Vali, Predict on times 000,001,002 respectively. pid selects dataset. pid in range(19).
   v02 : change name to `e18_isbidet`. Train powerful models and predict across all times.
   """
 
