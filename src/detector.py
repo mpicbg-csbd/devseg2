@@ -54,6 +54,7 @@ def _config_example():
   # config.sigmas       = np.array([1,7,7])
   # config.kernel_shape = np.array([43,43,43]) ## 7 sigma in each direction?
   config.rescale_for_matching = [2,1,1]
+  config.nms_footprint = [3,8,8]
   ## fg/bg weights stuff for fluorescence images & class-imbalanced data
   config.fg_bg_thresh = np.exp(-16/2)
   config.bg_weight_multiplier = 0.0
@@ -62,8 +63,8 @@ def _config_example():
   ## image sampling
   config.sampler      = content_sampler ## sampler :: ta,td,config -> x,yt,w
   config.patch_space  = np.array([16,128,128])
-  config.batch_shape  = np.array([1,1,16,128,128])
-  config.batch_axes   = "BCZYX"
+  # config.batch_shape  = np.array([1,1,16,128,128])
+  # config.batch_axes   = "BCZYX"
   # generic
   # config.times = [10,100,500,4000,100_000]
   # config.times = [10,100,200,400,1_000]
@@ -75,8 +76,16 @@ def _config_example():
   config.time_validate = 400
   config.time_total = 1_000
   config.lr = 2e-4
+  def _ltvd(config):
+    td = SimpleNamespace()
+    td.input  = np.random.rand(10,1,20,200,200)
+    td.target = np.random.rand(10,1,20,200,200)
+    vd = SimpleNamespace()
+    vd.input  = np.random.rand(10,1,20,200,200)
+    vd.target = np.random.rand(10,1,20,200,200)
+    return td,vd
+  config.load_train_and_vali_data = _ltvd
 
-  config.load_train_and_vali_data = lambda config: ("td","vd") # config -> traindata, validata
   return config
 
 def check_config(config):
@@ -186,24 +195,17 @@ def train(T):
 
 
 def validate(vd,T):
-  ## Task-Specific Stuff: Data Loading, Sampling, Weights, Validation, Etc
   m,ta,config = T.m, T.ta, T.c
-  vs = []
+  _vs = []
   n = ta.i//config.time_validate
   for i in range(vd.input.shape[0]):
-    # res = torch_models.apply_net_tiled_3d(m.net,vd.input[i])
-    if vd.input[0].ndim==4:
-      dims = "CZYX"
-      footy = np.ones((3,8,8))
-    else:
-      dims = "CYX"
-      footy = np.ones((8,8))
-    
+  
+    dims = "CZYX" if vd.input[0].ndim==4 else "CYX"
     res = predict_raw(m.net,vd.input[i],dims)
     valloss = (np.abs(res-vd.target[i])**2).mean()
 
     ## detection scores
-    pts = peak_local_max(res[0],threshold_abs=.2,exclude_border=False,footprint=footy)
+    pts = peak_local_max(res[0],threshold_abs=.2,exclude_border=False,footprint=np.ones(config.nms_footprint))
     score3  = match_unambiguous_nearestNeib(vd.gt[i],pts,dub=3,scale=config.rescale_for_matching)
     score10 = match_unambiguous_nearestNeib(vd.gt[i],pts,dub=10,scale=config.rescale_for_matching)
     s3  = [score3.f1, score3.n_matched,  score3.n_proposed,  score3.n_gt]
@@ -212,10 +214,10 @@ def validate(vd,T):
     print(st)
 
     ## save detections and loss, but only the basic info to save space
-    vs.append({'3':score3.f1, '10':score10.f1, 'loss':valloss})
+    _vs.append({'3':score3.f1, '10':score10.f1, 'loss':valloss})
     # save(res[0].max(0).astype(np.float16),config.savedir / f"mx_z/e{n:03d}_i{i}.tif")
 
-  ta.vali_scores.append(vs)
+  ta.vali_scores.append(_vs)
 
   torch.save(m.net.state_dict(), config.savedir / f'm/best_weights_latest.pt')
   ta.best_weights_latest = n
@@ -233,7 +235,7 @@ def validate(vd,T):
     torch.save(m.net.state_dict(), config.savedir / f'm/best_weights_f1.pt')
 
 
-def pts2target(list_of_pts,sh,sigmas):
+def pts2target_gaussian(list_of_pts,sh,sigmas):
   s  = np.array(sigmas)
   ks = (s*7).astype(np.int)
   # s  = config.sigmas # np.array([1,3,3])   ## sigma for gaussian
@@ -251,8 +253,8 @@ def pts2target(list_of_pts,sh,sigmas):
   target = np.array([place_kern_at_pts(pts) for pts in list_of_pts])
   return target
 
-def pts2target_many(list_of_pts,sh,list_of_sigmas):
-  return np.array([pts2target([x],sh,sig)[0] for x,sig in zip(list_of_pts,list_of_sigmas)])
+def pts2target_gaussian_sigmalist(list_of_pts,sh,list_of_sigmas):
+  return np.array([pts2target_gaussian([x],sh,sig)[0] for x,sig in zip(list_of_pts,list_of_sigmas)])
 
 def content_sampler(ta,td,config):
   """

@@ -28,6 +28,7 @@ Detection and denoising.
 # import torch
 # from torch import nn
 # import torch_models
+import ipdb
 import itertools
 # from math import floor,ceil
 import numpy as np
@@ -82,7 +83,7 @@ slurm.e13 = 'sbatch -J e13_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 12:00:00 -c 1 -
 slurm.e14 = 'sbatch -J e14_{pid:03d} -p gpu --gres gpu:1 -n 1 -t 4:00:00 -c 1 --mem 128000 -o slurm/e14_pid{pid:03d}.out -e slurm/e14_pid{pid:03d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e14_celegans({pid})\"\' '
 slurm.e15 = 'sbatch -J e15_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 12:00:00 -c 1 --mem 128000 -o slurm/e15_pid{pid:02d}.out -e slurm/e15_pid{pid:02d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e15_celegans({pid})\"\' '
 slurm.e16 = 'sbatch -J e16_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 2:00:00 -c 1 --mem 128000 -o slurm/e16_pid{pid:02d}.out -e slurm/e16_pid{pid:02d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e16_ce_adapt({pid})\"\' '
-slurm.e18 = 'sbatch -J e18_{pid:03d} -p gpu --gres gpu:1 -n 1 -t 3:00:00 -c 1 --mem 128000 -o slurm/e18_pid{pid:03d}.out -e slurm/e18_pid{pid:03d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e18_trib({pid})\"\' '
+slurm.e18 = 'sbatch -J e18_{pid:03d} -p gpu --gres gpu:1 -n 1 -t 3:00:00 -c 1 --mem 128000 -o slurm/e18_pid{pid:03d}.out -e slurm/e18_pid{pid:03d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e18_isbidet({pid})\"\' '
 slurm.e19 = 'sbatch -J e19_{pid:03d} -n 1 -t 1:00:00 -c 4 --mem 128000 -o slurm/e19_pid{pid:03d}.out -e slurm/e19_pid{pid:03d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e19_tracking({pid})\"\' '
 
 def run_slurm(cmd,pids):
@@ -544,7 +545,7 @@ def e14_celegans(pid=0):
     td.input  = np.array([load(f"/projects/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/{trainset}/t{n:03d}.tif") for n in train_times])
     td.input  = td.input[:,None]  ## add channels
     td.input  = normalize3(td.input,2,99.4,clip=False)
-    td.target = detector.pts2target(pts[train_times],td.input[0,0].shape,kernel_shape)
+    td.target = detector.pts2target_gaussian(pts[train_times],td.input[0,0].shape,kernel_shape)
     td.target = td.target[:,None] ## add channels
     td.gt = pts[train_times]
 
@@ -552,7 +553,7 @@ def e14_celegans(pid=0):
     vd.input  = np.array([load(f"/projects/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/{trainset}/t{n:03d}.tif") for n in vali_times])
     vd.input  = vd.input[:,None] ## add channels
     vd.input  = normalize3(vd.input,2,99.4,clip=False)
-    vd.target = detector.pts2target(pts[vali_times],vd.input[0,0].shape,kernel_shape)
+    vd.target = detector.pts2target_gaussian(pts[vali_times],vd.input[0,0].shape,kernel_shape)
     vd.target = vd.target[:,None] ## add channels
     vd.gt = pts[vali_times]
     
@@ -736,7 +737,7 @@ def e16_ce_adapt(pid=0):
     td.input  = np.array([load(f"/projects/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/{trainset}/t{n:03d}.tif") for n in train_times])
     td.input  = td.input[:,None]  ## add channels
     td.input  = normalize3(td.input,2,99.4,clip=False)
-    td.target = detector.pts2target_many(pts[train_times],td.input[0,0].shape,kernel_shapes)
+    td.target = detector.pts2target_gaussian_many(pts[train_times],td.input[0,0].shape,kernel_shapes)
     td.target = td.target[:,None] ## add channels
     td.gt = pts[train_times]
 
@@ -744,7 +745,7 @@ def e16_ce_adapt(pid=0):
     vd.input  = np.array([load(f"/projects/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/{trainset}/t{n:03d}.tif") for n in vali_times])
     vd.input  = vd.input[:,None] ## add channels
     vd.input  = normalize3(vd.input,2,99.4,clip=False)
-    vd.target = detector.pts2target_many(pts[vali_times],vd.input[0,0].shape,kernel_shapes)
+    vd.target = detector.pts2target_gaussian_many(pts[vali_times],vd.input[0,0].shape,kernel_shapes)
     vd.target = vd.target[:,None] ## add channels
     vd.gt = pts[vali_times]
     
@@ -807,95 +808,106 @@ def e17_ce_nuclei(pid=0):
 def e18_isbidet(pid=0):
   """
   v01 : For each 3D ISBI dataset: Train, Vali, Predict on times 000,001,002 respectively. pid selects dataset. pid in range(19).
-  v02 : change name to `e18_isbidet`. Train powerful models and predict across all times.
+  v02 : change name to `e18_isbidet`. Train powerful models and predict across all times. pid in iterdims([2,19]).
   """
 
-  myname, isbiname  = isbi_datasets[pid]
+  (p0,p1),pid = _parse_pid(pid,[2,19])
 
-  trainset, testset = "01", "01"
+  myname, isbiname  = isbi_datasets[p1]
+  trainset = ["01","02"][p0]
+  testset  = trainset
   bg_weight_multiplier = 1.0
   info = get_isbi_info(myname,isbiname,testset)
-  kern = binary_dilation(tracking.load_isbi2nap(info.isbi_dir,trainset,[info.start,info.start+1]).avg_kern)
-  # return kern
-  train_times, vali_times, pred_times = np.r_[0:6], np.r_[7:10], np.r_[info.start:info.stop]
-  tif_name = "t{n:04d}.tif" if myname in ["HSC", "MuSC",] else "t{n:03d}.tif"
 
-  if "2D" in isbiname:
-    ndim = 2
+  def _times():
+    """
+    how many frames to train on? should be roughly sqrt N total frames. validate should be same.
+    """
+    t0,t1 = info.start, info.stop
+    N = t1-t0
+    Nsamples = int(N**0.5) 
+    gap = N//Nsamples
+    dt = gap//2
+    train_times = np.r_[t0:t1:gap]
+    vali_times  = np.r_[t0+dt:t1:gap]
+    pred_times  = np.r_[t0:t1]
+    assert np.in1d(train_times,vali_times).sum()==0
+    return train_times, vali_times, pred_times
+  train_times, vali_times, pred_times = _times()
+  print(train_times,vali_times,pred_times)
+  tif_name = "t{n:04d}.tif" if info.ndigits==4 else "t{n:03d}.tif"
+
+  if info.ndim==2:
     batch_shape = [1,1,512,512]
     _getnet = lambda : torch_models.Unet3(16, [[1],[1]], pool=(2,2), kernsize=(5,5), finallayer=torch_models.nn.Sequential)
-    kernel_shape = [5,5]
-    print("2D",myname, isbiname)
-  elif "3D" in isbiname:
-    ndim = 3
+    kernel_sigmas = [5,5]
+  else:
     batch_shape  = [1,1,16,128,128]
     _getnet = lambda : torch_models.Unet3(16, [[1],[1]], pool=(1,2,2), kernsize=(3,5,5), finallayer=torch_models.nn.Sequential)
-    kernel_shape = [2,5,5]
-    print("3D",myname, isbiname)
+    kernel_sigmas = [2,5,5]
 
+  # kern = binary_dilation(tracking.load_isbi2nap(info.isbi_dir,trainset,[info.start,info.start+1]).avg_kern, iterations=2)
+
+  _zoom = None
+  nms_footprint = [3,9,9] if info.ndim==3 else [9,9]
 
   if myname=="celegans_isbi":
-    kernel_shape = [1,7,7]
-    bg_weight_multiplier = 0.2
-  if myname=="trib_isbi":
-    kernel_shape = [3,3,3]
-    train_times, vali_times, pred_times = [0],[1],[0,1,2]
+    # kernel_sigmas = [1,7,7]
+    # bg_weight_multiplier = 0.2
+    _zoom = (1,0.5,0.5)
+  if myname=="trib_isbi":  kernel_sigmas = [3,3,3]
   if myname=="fly_isbi":
     bg_weight_multiplier=0.0
-    train_times, vali_times, pred_times = [0],[1],[0,1,2]
-  if myname=="MDA231":   kernel_shape = [1,3,3]
-  if myname=="A549":     kernel_shape = [1,5,5]
-  if myname=="hampster": kernel_shape = [1,7,7]
-  if myname=="PSC":
-    train_times, vali_times, pred_times = np.r_[150:156], np.r_[157:160], np.r_[150:163]
+  # if myname=="MDA231":     kernel_sigmas = [1,3,3]
+  # if myname=="A549":       kernel_sigmas = [1,5,5]
+  if myname=="hampster":
+    # kernel_sigmas = [1,7,7]
+    _zoom = (1,0.5,0.5)
 
-  kernel_shape = np.array(kernel_shape)
+  kernel_sigmas = np.array(kernel_sigmas)
+  print("kernel_sigmas", kernel_sigmas)
+  print(json.dumps(info.__dict__,sort_keys=True, indent=2, default=str))
 
-  print("train_times,vali_times", train_times,vali_times)
-  print("kernel_shape", kernel_shape)
-
-  pts  = load(f"/projects/project-broaddus/rawdata/{myname}/traj/{isbiname}/{trainset}_traj.pkl")
-  if pid==9: pts = {k:(v*(1,0.5,0.5)).astype(np.int) for k,v in pts.items()}
+  ltps = load(f"/projects/project-broaddus/rawdata/{myname}/traj/{isbiname}/{trainset}_traj.pkl")
   
-  def get_many(_dict,list_of_keys):
-    return [_dict[k] for k in list_of_keys]
-
   def _ltvd(config):
     td = SimpleNamespace()
     td.input  = np.array([load(f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{trainset}/" + tif_name.format(n=n)) for n in train_times])
-    if pid==9: td.input  = td.input[:,:,::2,::2]
+    td.gt     = [ltps[k] for k in train_times]
+    if _zoom:
+      td.input = zoom(td.input, (1,)+_zoom)
+      td.gt = [(v*_zoom).astype(np.int) for v in td.gt]
+    # ipdb.set_trace()
+    td.target = detector.pts2target_gaussian(td.gt,td.input[0].shape,kernel_sigmas)
     td.input  = td.input[:,None]  ## add channels
+    td.target = td.target[:,None]
     td.input  = normalize3(td.input,2,99.4,clip=False)
-    td.target = detector.pts2target([pts[k] for k in train_times],td.input[0,0].shape,kernel_shape)
-    td.target = td.target[:,None] ## add channels
-    td.gt = [pts[k] for k in train_times]
 
     vd = SimpleNamespace()
     vd.input  = np.array([load(f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{trainset}/" + tif_name.format(n=n)) for n in vali_times])
-    if pid==9: vd.input  = vd.input[:,:,::2,::2]
-    vd.input  = vd.input[:,None] ## add channels
+    vd.gt     = [ltps[k] for k in vali_times]
+    if _zoom: 
+      vd.input = zoom(vd.input, (1,)+_zoom)
+      vd.gt = [(v*_zoom).astype(np.int) for v in vd.gt]
+    vd.target = detector.pts2target_gaussian(vd.gt,vd.input[0].shape,kernel_sigmas)
+    vd.input  = vd.input[:,None]
+    vd.target = vd.target[:,None]
     vd.input  = normalize3(vd.input,2,99.4,clip=False)
-    vd.target = detector.pts2target([pts[k] for k in vali_times],vd.input[0,0].shape,kernel_shape)
-    vd.target = vd.target[:,None] ## add channels
-    vd.gt = [pts[k] for k in vali_times]
     
     return td,vd
 
   def _config():
-
-    ## all config params
     cfig = SimpleNamespace()
     cfig.getnet = _getnet
-    cfig.rescale_for_matching = [1,1,1] if len(kernel_shape)==3 else [1,1]
+    cfig.nms_footprint = nms_footprint
+    cfig.rescale_for_matching = list(info.scale)
     cfig.fg_bg_thresh = np.exp(-16/2)
     cfig.bg_weight_multiplier = bg_weight_multiplier #0.2 #1.0
     cfig.time_weightdecay = 1600 # for pixelwise weights
     cfig.weight_decay = False
     cfig.sampler      = detector.content_sampler
     cfig.patch_space  = np.array(batch_shape[2:])
-    cfig.batch_shape  = np.array(batch_shape)
-    cfig.batch_axes   = "BCZYX"
-    time_total = 4_000 # about 12k / hour? 200/min = 5mins/ 1k = 12k/hr
+    time_total = 10_000 # about 12k / hour? 200/min = 5mins/ 1k = 12k/hr
     cfig.time_agg = 1 # aggregate gradients before backprop
     cfig.time_loss = 10
     cfig.time_print = 100
@@ -912,8 +924,8 @@ def e18_isbidet(pid=0):
 
   ## Train the net
   if True:
-    # T = detector.train_init(cfig)
-    T = detector.train_continue(cfig,cfig.savedir / 'm/best_weights_f1.pt')
+    T = detector.train_init(cfig)
+    # T = detector.train_continue(cfig,cfig.savedir / 'm/best_weights_f1.pt')
     T.ta.train_times = train_times
     T.ta.vali_times  = vali_times
     shutil.copy("/projects/project-broaddus/devseg_2/src/experiments2.py", cfig.savedir)
@@ -933,20 +945,11 @@ def e18_isbidet(pid=0):
     save(res, cfig.savedir / 'pred_vali.npy')
 
   ## Predict and Evaluate model result on all available data
+
   gtpts = load(f"/projects/project-broaddus/rawdata/{myname}/traj/{isbiname}/{testset}_traj.pkl")
-
   # if myname == "celegans_isbi" and testset=='01':
-  #   gtpts[6] = pts[6]
-  #   gtpts[7] = pts[7]
-
-  if '3D' in isbiname:
-    footy = np.ones((3,8,8))
-    dims = "ZYX"
-    scale = [1,1,1]
-  elif '2D' in isbiname:
-    footy = np.ones((8,8))
-    dims = "YX"
-    scale = [1,1]
+  #   gtpts[6] = ltps[6]
+  #   gtpts[7] = ltps[7]
 
   def zmax(x):
     if x.ndim==3: 
@@ -957,38 +960,41 @@ def e18_isbidet(pid=0):
   scores = []
   pred   = []
   raw    = []
-  ltps   = dict()
+  ltps_pred = dict()
   for i in pred_times:
     rawname = f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{testset}/t{i:03d}.tif"
     print(rawname)
     x = load(rawname)
-    x2 = x.copy()
-    if pid==9:
-      x2=x[:,::2,::2]
-    x2  = normalize3(x2,2,99.4,clip=False)
-    res = detector.predict_raw(net,x2,dims=dims).astype(np.float32)
-    pts = peak_local_max(res,threshold_abs=.2,exclude_border=False,footprint=footy)
-    if pid==9: 
-      pts = pts*(1,2,2)
-      res = zoom(res,(1,2,2))
-    score3  = point_matcher.match_unambiguous_nearestNeib(gtpts[i],pts,dub=3,scale=scale)
-    score10 = point_matcher.match_unambiguous_nearestNeib(gtpts[i],pts,dub=10,scale=scale)
+    if _zoom: x = zoom(x,_zoom)
+    x  = normalize3(x,2,99.4,clip=False)
+    dims = "ZYX" if info.ndim==3 else "YX"
+    res = detector.predict_raw(net,x,dims=dims).astype(np.float32)
+    pts = peak_local_max(res,threshold_abs=.2,exclude_border=False,footprint=np.ones(nms_footprint))
+    if _zoom:
+      pts = pts/_zoom
+    score3  = point_matcher.match_unambiguous_nearestNeib(gtpts[i],pts,dub=3, scale=info.scale)
+    score10 = point_matcher.match_unambiguous_nearestNeib(gtpts[i],pts,dub=10,scale=info.scale)
     
     print("time", i, "gt", score10.n_gt, "match", score10.n_matched, "prop", score10.n_proposed)
-    ltps[i] = pts
+    ltps_pred[i] = pts
+
+    # if i==pred_times[0]:
+    #   save(res, cfig.savedir / 'res0.npy')
+
     # s = {3:score3,10:score10}
     # scores.append(s)
     # pred.append(zmax(res))
     # raw.append(zmax(x))
 
-  save(ltps, cfig.savedir / f'ltps_{testset}.pkl')
+  save(ltps_pred, cfig.savedir / f'ltps_{testset}.pkl')
   # save(scores, cfig.savedir / f'scores_{testset}.pkl')
   # save(np.array(pred).astype(np.float16), cfig.savedir / f"pred_{testset}.npy")
   # save(np.array(raw).astype(np.float16),  cfig.savedir / f"raw_{testset}.npy")
 
 def e19_tracking(pid=0):
   """
-  v02: add CP-net tracking to p0.
+  v01: [3,19,2]
+  v02: add CP-net tracking to p0. [4,19,2]
   """
 
   (p0,p1,p2),pid = _parse_pid(pid,[4,19,2])
@@ -1057,8 +1063,8 @@ def e19_tracking(pid=0):
     cat {outdir}/{dataset}_DET.txt
     time $localtra {isbi_dir} {dataset} {info.ndigits} > {outdir}/{dataset}_TRA.txt
     cat {outdir}/{dataset}_TRA.txt
-    # rm {resdir}/*.tif
-    # rm {outdir}/*.tif
+    rm {resdir}/*.tif
+    rm {outdir}/*.tif
     """
     run(bashcmd,shell=True)
 
