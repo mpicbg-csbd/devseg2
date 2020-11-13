@@ -121,7 +121,10 @@ def get_isbi_info(myname,isbiname,dataset):
   d.ndim = 2 if '2D' in isbiname else 3
   scale = np.array(isbi_scales[isbiname])[::-1]
   d.scale = scale / scale[-1]
-  d.ignore_FP = '' if isbiname not in ["Fluo-N3DL-DRO", "Fluo-N3DL-TRIC", "Fluo-N3DL-TRIF"] else '0'
+  d.penalize_FP = '' if isbiname not in ["Fluo-N3DL-DRO", "Fluo-N3DL-TRIC", "Fluo-N3DL-TRIF"] else '0'
+  d.maskname  = "mask_{time:03d}.tif" if d.ndigits==3 else "mask_{time:04d}.tif"
+  d.man_track = "man_track{time:03d}.tif" if d.ndigits==3 else "man_track{time:04d}.tif"
+  d.rawname   = "t{time:03d}.tif" if d.ndigits==3 else "t{time:04d}.tif"
 
   return d
 

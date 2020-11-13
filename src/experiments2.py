@@ -61,13 +61,18 @@ import re
 
 savedir = Path('/projects/project-broaddus/devseg_2/expr/')
 
-def _parse_pid(pid_or_params,dims):  
+def _parse_pid(pid_or_params,dims):
   if hasattr(pid_or_params,'__len__') and len(pid_or_params)==len(dims):
     params = pid_or_params
     pid = np.ravel_multi_index(params,dims)
   elif 'int' in str(type(pid_or_params)):
     pid = pid_or_params
     params = np.unravel_index(pid,dims)
+  else:
+    a = hasattr(pid_or_params,'__len__')
+    b = len(pid_or_params)==len(dims)
+    print("ERROR", a, b)
+    assert False
   return params, pid
 
 def iterdims(shape):
@@ -860,6 +865,7 @@ def e18_isbidet(pid=0):
     bg_weight_multiplier=0.0
   # if myname=="MDA231":     kernel_sigmas = [1,3,3]
   # if myname=="A549":       kernel_sigmas = [1,5,5]
+  if myname=="H157":_zoom = (1,0.25,0.25)
   if myname=="hampster":
     # kernel_sigmas = [1,7,7]
     _zoom = (1,0.5,0.5)
@@ -923,7 +929,7 @@ def e18_isbidet(pid=0):
   cfig.savedir = savedir / f'e18_isbidet/v02/pid{pid:03d}/'
 
   ## Train the net
-  if True:
+  if False:
     T = detector.train_init(cfig)
     # T = detector.train_continue(cfig,cfig.savedir / 'm/best_weights_f1.pt')
     T.ta.train_times = train_times
@@ -962,7 +968,7 @@ def e18_isbidet(pid=0):
   raw    = []
   ltps_pred = dict()
   for i in pred_times:
-    rawname = f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{testset}/t{i:03d}.tif"
+    rawname = f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{testset}/" + tif_name.format(n=i)
     print(rawname)
     x = load(rawname)
     if _zoom: x = zoom(x,_zoom)
@@ -994,79 +1000,77 @@ def e18_isbidet(pid=0):
 def e19_tracking(pid=0):
   """
   v01: [3,19,2]
-  v02: add CP-net tracking to p0. [4,19,2]
+  v02: add CP-net tracking to p0. fix a major bug. split dataset loop into p3. fixed, small kern size. [4,19,2,2]
   """
 
-  (p0,p1,p2),pid = _parse_pid(pid,[4,19,2])
+  (p0,p1,p2,p3),pid = _parse_pid(pid,[4,19,2,2])
   if p2>0 and p0==1: return
 
+  dataset = ['01','02'][p3]
   myname, isbiname = isbi_datasets[p1]
   isbi_dir = f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/"
-  for dataset in ['01']:
-    info = get_isbi_info(myname,isbiname,dataset)
-    print(json.dumps({k:info.__dict__[k] for k in ['myname','isbiname','dataset','start','stop','scale','ndigits']},sort_keys=True, indent=2, default=str))
+  
+  info = get_isbi_info(myname,isbiname,dataset)
+  # print(json.dumps(info.__dict__,sort_keys=True, indent=2, default=str))
+  print(isbiname, dataset, sep='\t')
 
-    outdir = savedir/f"e19_tracking/v02/pid{pid:03d}/"
+  outdir = savedir/f"e19_tracking/v02/pid{pid:03d}/"
+  # outdir = savedir/f"e19_tracking/v02/pid_{p0}_{p1:02d}_{p2}_{p3}/"
 
-    _tracking = [lambda ltps: tracking.nn_tracking_on_ltps(ltps,scale=info.scale),
-                 lambda ltps: tracking.random_tracking_on_ltps(ltps)
-                ][p2]
+  _tracking = [lambda ltps: tracking.nn_tracking_on_ltps(ltps,scale=info.scale),
+               lambda ltps: tracking.random_tracking_on_ltps(ltps)
+              ][p2]
+  kern = np.ones([5,7,7]) if info.ndim==3 else np.ones([7,7])
 
-    start,stop = info.start,info.stop
-    if p0==0: ## permute existing labels via tracking
-      nap  = tracking.load_isbi2nap(isbi_dir,dataset,[start,stop])
-      ltps = tracking.nap2ltps(nap)
-      tb   = _tracking(ltps)
-      tracking._tb_add_orig_labels(tb,nap)
-      lbep = tracking.save_permute_existing(tb,isbi_dir,dataset,[start,stop],savedir=outdir)
-    if p0==1: ## make consistent label shape, but don't change label id's.
-      nap  = tracking.load_isbi2nap(isbi_dir,dataset,[start,stop])
-      kern = nap.avg_kern
-      kern = binary_dilation(kern.astype(np.uint8))
-      tracking.save_isbi(nap,shape=info.shape,_kern=kern,savedir=outdir)
-    if p0==2: ## make consistent label shape AND track
-      ltps = load(f"/projects/project-broaddus/rawdata/{myname}/traj/{isbiname}/{dataset}_traj.pkl")
-      if type(ltps) is dict:
-        ltps = [ltps[k] for k in sorted(ltps.keys())]
-      tb   = _tracking(ltps)
-      nap  = tracking.tb2nap(tb,ltps)
-      nap.tracklets[:,1] += start
-      kern  = np.ones([3,5,5]) if '3D' in isbiname else np.ones([5,5])
-      # kern  = binary_dilation(tracking.load_isbi2nap(isbi_dir,dataset,[start,stop]).avg_kern)
-      tracking.save_isbi(nap,shape=info.shape,_kern=kern,savedir=outdir)
-    if p0==3: ## track using CP-net detections
-      oldpid = list.index([x[1] for x in isbi_datasets], isbiname)
-      ltps   = load(f"/projects/project-broaddus/devseg_2/expr/e18_isbidet/v02/pid{oldpid:03d}/ltps_{dataset}.pkl")
-      if type(ltps) is dict:
-        _ltps = [ltps[k] for k in sorted(ltps.keys())]
-      tb   = _tracking(_ltps)
-      nap  = tracking.tb2nap(tb,_ltps)
-      nap.tracklets[:,1] += start
-      kern = np.ones([3,5,5]) if '3D' in isbiname else np.ones([5,5])
-      kern = tracking.load_isbi2nap(isbi_dir,dataset,[start,start+1]).avg_kern
-      kern = binary_dilation(np.pad(kern,[(8,8)]*info.ndim), iterations=5)
-      # return kern
-      tracking.save_isbi(nap,shape=info.shape,_kern=kern,savedir=outdir)
+  start,stop = info.start,info.stop
+  if p0==0: ## permute existing labels via tracking
+    nap  = tracking.load_isbi2nap(isbi_dir,dataset,[start,stop])
+    ltps = tracking.nap2ltps(nap)
+    tb   = _tracking(ltps)
+    tracking._tb_add_orig_labels(tb,nap)
+    lbep = tracking.save_permute_existing(tb,info,savedir=outdir)
+  if p0==1: ## make consistent label shape, but don't change label id's.
+    nap  = tracking.load_isbi2nap(isbi_dir,dataset,[start,stop])
+    tracking.save_isbi(nap,shape=info.shape,_kern=kern,savedir=outdir)
+  if p0==2: ## make consistent label shape AND track
+    ltps = load(f"/projects/project-broaddus/rawdata/{myname}/traj/{isbiname}/{dataset}_traj.pkl")
+    if type(ltps) is dict:
+      ltps = [ltps[k] for k in sorted(ltps.keys())]
+    tb   = _tracking(ltps)
+    nap  = tracking.tb2nap(tb,ltps)
+    nap.tracklets[:,1] += start
+    tracking.save_isbi(nap,shape=info.shape,_kern=kern,savedir=outdir)
+  if p0==3: ## track using CP-net detections
+    _e18_p1 = p1
+    _e18_p0 = p3 #{'01':0,'02':1}[dataset]
+    oldpid  = 19*_e18_p0 + _e18_p1
+    ltps    = load(f"/projects/project-broaddus/devseg_2/expr/e18_isbidet/v02/pid{oldpid:03d}/ltps_{dataset}.pkl")
+    if type(ltps) is dict:
+      _ltps = [ltps[k] for k in sorted(ltps.keys())]
+    tb      = _tracking(_ltps)
 
-    # lsd1 = tracking.lbep2lsd(tracking.load_lbep("naptest_pid18/res_track.txt"))
-    # lsd2 = tracking.TRAdir2lsd("naptest_pid18")
-    # tracking.compare_lsds(lsd1,lsd2)
+    if info.penalize_FP=='0':
+      nap_orig  = tracking.load_isbi2nap(isbi_dir,dataset,[start,start+1])
+      tb = tracking.filter_starting_tracks(tb,ltps,nap_orig)
+    nap  = tracking.tb2nap(tb,_ltps)
+    nap.tracklets[:,1] += start
+    tracking.save_isbi(nap,shape=info.shape,_kern=kern,savedir=outdir)
 
-    resdir  = Path(isbi_dir)/(dataset+"_RES")
-    bashcmd = f"""
-    localtra=/projects/project-broaddus/comparison_methods/EvaluationSoftware2/Linux/TRAMeasure
-    localdet=/projects/project-broaddus/comparison_methods/EvaluationSoftware2/Linux/DETMeasure
-    mkdir -p {resdir}
-    rm {resdir}/*
-    cp -r {outdir}/*.tif {outdir}/res_track.txt {resdir}/
-    time $localdet {isbi_dir} {dataset} {info.ndigits} {info.ignore_FP} > {outdir}/{dataset}_DET.txt
-    cat {outdir}/{dataset}_DET.txt
-    time $localtra {isbi_dir} {dataset} {info.ndigits} > {outdir}/{dataset}_TRA.txt
-    cat {outdir}/{dataset}_TRA.txt
-    rm {resdir}/*.tif
-    rm {outdir}/*.tif
-    """
-    run(bashcmd,shell=True)
+  resdir  = Path(isbi_dir)/(dataset+"_RES")
+  bashcmd = f"""
+  localtra=/projects/project-broaddus/comparison_methods/EvaluationSoftware2/Linux/TRAMeasure
+  localdet=/projects/project-broaddus/comparison_methods/EvaluationSoftware2/Linux/DETMeasure
+  mkdir -p {resdir}
+  rm {resdir}/*
+  cp -r {outdir}/*.tif {outdir}/res_track.txt {resdir}/
+  time $localdet {isbi_dir} {dataset} {info.ndigits} {info.penalize_FP} > {outdir}/{dataset}_DET.txt
+  cat {outdir}/{dataset}_DET.txt
+  time $localtra {isbi_dir} {dataset} {info.ndigits} > {outdir}/{dataset}_TRA.txt
+  cat {outdir}/{dataset}_TRA.txt
+  rm {resdir}/*
+  rm {outdir}/*.tif
+  """
+  run(bashcmd,shell=True)
 
 
 

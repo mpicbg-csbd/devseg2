@@ -121,34 +121,81 @@ def e08_res():
   res = np.array(res).reshape([10,2,512,512])
   save(res,"../expr/e08_horst/v02/final.npy")
 
-def e19_tracking():
 
-  res = np.full([3,19,2,2],-1.0)
+def e18_isbidet():
 
-  for name in glob("../expr/e19_tracking/v01/pid*/*TRA.txt"):
+  """
+  added v02.
+  """
+
+  res = dict()
+  # res[1,:,1]=-2
+  ## -1 = missing, -2 = not supposed to exist
+
+  for name in glob("../expr/e18_isbidet/v02/pid*/*.pkl"):
     print(name)
-    pid,ds = re.search(r'pid(\d+)/(0[12])_TRA\.txt',name).groups()
-    pid = int(pid)
-    (p0,p1,p2),pid = _parse_pid(pid,[3,19,2])
-    p3 = {'01':0,'02':1}[ds]
-    m = re.search(r'TRA measure: (\d\.\d+)', open(name,'r').read())
-    if m:
-      res[p0,p1,p2,p3] = float(m.group(1))
+    m = re.search(r'pid(\d+)/ltps_(0[12])\.pkl',name)
+    if not m: continue
+    pid,_ds = m.groups()
+    (p0,p1),pid = _parse_pid(int(pid),[2,19])
+    res[(p0,p1)] = load(name)
+    # m = re.search(r'(DET|TRA) measure: (\d\.\d+)', open(name,'r').read())
+    # if m: res[p0,p1,p2,p3,p4] = float(m.group(2))
+
+  # redo = np.array(np.where((res==[-1,-1]).sum(-1)!=0))
+  # res  = res.transpose([0,2,1,3]).reshape([4*2,19,2])[[0,1,2,4,5]]
+  # save(res,"../expr/e19_tracking/v02/res.npy")
+
+  return res
+
+
+
+def e19_tracking():
+  """
+  added v02.
+  """
+
+  res = np.full([4,19,2,2,2],-1.0)
+  # res = np.full([19,2,2,2],-1.0)
+  res[1,:,1]=-2
+  ## -1 = missing, -2 = not supposed to exist
+
+  for name in glob("../expr/e19_tracking/v02/pid*/*.txt"):
+    print(name)
+    m = re.search(r'pid(\d+)/(0[12])_(TRA|DET)\.txt',name)
+    if not m: continue
+    pid,_ds,p4 = m.groups()
+    (p0,p1,p2,p3),pid = _parse_pid(int(pid),[4,19,2,2])
+    # p0=3
+    p4 = {'TRA':1,'DET':0}[p4]
+    m = re.search(r'(DET|TRA) measure: (\d\.\d+)', open(name,'r').read())
+    if m: res[p0,p1,p2,p3,p4] = float(m.group(2))
+    # if m: res[p1,p2,p3,p4] = float(m.group(2))
 
   redo = np.array(np.where((res==[-1,-1]).sum(-1)!=0))
-  res  = res.transpose([0,2,1,3]).reshape([3*2,19,2])[[0,1,2,4,5]]
-  save(res,"../expr/e19_tracking/v01/res.npy")
+  # res  = res.transpose([0,2,1,3]).reshape([4*2,19,2])[[0,1,2,4,5]]
+  save(res,"../expr/e19_tracking/v02/res.npy")
 
   return res,redo
 
-def e19(pids):
-  for pid in pids:
-    (p0,p1,p2), pid = _parse_pid(pid,[3,19,2])
-    # name = f"slurm/e19_pid{pid:03d}.out"
-    name = f"../expr/e19_tracking/v01/pid{pid:03d}/02_TRA.txt"
-    print('\n\n',pid, name,'\n')
+def e19_showerrors():
+  """
+  v02.
+  """
+  for name in sorted(glob("../expr/e19_tracking/v02/*/*TRA.txt")):
+    print(Path(name).parts[-2:])
     run(f"cat {name}",shell=1)
-
+    continue
+    m = re.search(r'pid_(\d)_(\d\d)_(\d)_(\d)/(0[12])_(TRA|DET)\.txt',name)
+    # m = re.search(r'pid(\d{3})/(0[12])_(TRA|DET)\.txt',name))
+    if not m: continue
+    # p0,p1,p2,p3,ds,tra_or_det = m.groups()
+    # (p0,p1,p2,p3),pid = _parse_pid(int(pid),[4,19,2,2])
+    m2 = re.search(r'(DET|TRA) measure: (\d\.\d+)', open(name,'r').read())
+    if m2 and float(m.group(2))<0.8:
+      # print(pid,(p0,p1,p2,p3),_ds,p4)
+      print(m.groups())
+      run(f"cat {name}",shell=1)
 
 
 # { 5, 6, 7, 12, 13, 16,}
