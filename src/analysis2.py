@@ -121,7 +121,6 @@ def e08_res():
   res = np.array(res).reshape([10,2,512,512])
   save(res,"../expr/e08_horst/v02/final.npy")
 
-
 def e18_isbidet():
 
   """
@@ -148,42 +147,42 @@ def e18_isbidet():
 
   return res
 
-
-
 def e19_tracking():
   """
-  added v02.
+  added v02. 
+  now v03.
   """
 
-  res = np.full([4,19,2,2,2],-1.0)
+  # res = np.full([4,19,2,2,2],-1.0)
   # res = np.full([19,2,2,2],-1.0)
-  res[1,:,1]=-2
+  # res[1,:,1]=-2
   ## -1 = missing, -2 = not supposed to exist
+  res = dict()
 
-  for name in glob("../expr/e19_tracking/v02/pid*/*.txt"):
+  for name in sorted(glob("../expr/e19_tracking/v03/pid*/*.txt")):
     print(name)
     m = re.search(r'pid(\d+)/(0[12])_(TRA|DET)\.txt',name)
     if not m: continue
-    pid,_ds,p4 = m.groups()
-    (p0,p1,p2,p3),pid = _parse_pid(int(pid),[4,19,2,2])
-    # p0=3
-    p4 = {'TRA':1,'DET':0}[p4]
-    m = re.search(r'(DET|TRA) measure: (\d\.\d+)', open(name,'r').read())
-    if m: res[p0,p1,p2,p3,p4] = float(m.group(2))
-    # if m: res[p1,p2,p3,p4] = float(m.group(2))
-
-  redo = np.array(np.where((res==[-1,-1]).sum(-1)!=0))
+    pid,dataset,tradet = m.groups()
+    params,pid = _parse_pid(int(pid),[19,2])
+    isbi_id = params[0]
+    m2 = re.search(r'(DET|TRA) measure: (\d\.\d+)', open(name,'r').read())
+    if not m2: continue
+    res[(isbi_id,tradet,dataset)] = float(m2.group(2))
+    
+  # redo = np.array(np.where((res==[-1,-1]).sum(-1)!=0))
   # res  = res.transpose([0,2,1,3]).reshape([4*2,19,2])[[0,1,2,4,5]]
   save(res,"../expr/e19_tracking/v02/res.npy")
 
-  return res,redo
+  return res #,redo
 
 def e19_showerrors():
   """
   v02.
   """
   for name in sorted(glob("../expr/e19_tracking/v02/*/*TRA.txt")):
-    print(Path(name).parts[-2:])
+    ps,pid = _parse_pid(int(Path(name).parts[-2][3:]),[4,19,2,2,])
+    print(Path(name).parts[-2:], ps, end='\t',flush=True)
     run(f"cat {name}",shell=1)
     continue
     m = re.search(r'pid_(\d)_(\d\d)_(\d)_(\d)/(0[12])_(TRA|DET)\.txt',name)

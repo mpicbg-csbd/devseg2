@@ -76,7 +76,6 @@ def draw(tb):
   # nx.draw(tb,pos=pos,node_size=30,edge_color=cmap(colors))
   nx.draw(tb,pos=pos,node_size=30,node_color=cmap(colors))
 
-
 def gen_ltps1():
   res = []
   N,T = 1,10
@@ -210,22 +209,33 @@ def _tb_add_track_labels(tb):
       if tb.out_degree[v] != 1: track_id+=1
     # tb.nodes[s]['root']  = 0
 
+
+def check_tb_nap_lpts_consistency(tb,nap,lpts,track_id=None):
+  m = nap.tracklets[:,0]==track_id
+  print(nap.tracklets[m])
+  print(nap.tracklets[m].shape)
+
+  # times = nap.tracklets[m][:,1]
+  # for t in times:
+  #   kdt = pyKDTree(x[i]*scale)
+  #   _dis, _ind = kdt.query(x[i+1]*scale, k=1, distance_upper_bound=dub)
+
+  for n in tb.nodes:
+    if tb.nodes[n]['track']==track_id:
+      print(tb.nodes[n])
+
+
 def tb2nap(tb,ltps):
   trackid = np.array([n + (tb.nodes[n]['track'],) for n in tb.nodes])
-  # ipdb.set_trace()
   nodes, trackid = trackid[:,:2],trackid[:,[2]]
   idx     = np.lexsort(nodes.T[[1,0]])
   nodes,trackid = nodes[idx],trackid[idx]
   # ipdb.set_trace()
-  # _ltps = [ltps[_time][_id] for (_time,_id) in tb.nodes]
   _ltps = [ltps[_time][_id] for (_time,_id) in nodes]
   # _ltps = np.concatenate(ltps,axis=0)
   tracklets = np.concatenate([trackid, nodes[:,[0]], _ltps],axis=1).astype(np.uint)
   idx = np.lexsort(tracklets[:,[1,0]].T)
   tracklets = tracklets[idx]
-
-  tracklets 
-
 
   graph = dict()
   for e in tb.edges:
@@ -375,10 +385,13 @@ def save_isbi(nap, _kern=None, shape=(35, 512, 708), savedir="napri2isbi_test/")
     pts    = sub_tracklets[:,2:].astype(np.int)
     kerns  = [_kern * _id for _id in labels]
     stack  = conv_at_pts_multikern(pts,kerns,shape).astype(np.uint16)
+    stack  = expand_labels(stack,55)
     stackset.append(set(np.unique(stack)))
     save(stack, savedir / tifname.format(time=time))
 
   return lbep, labelset, stackset
+
+from expand_labels_scikit import expand_labels
 
 def save_permute_existing(tb, info, savedir):
   savedir = Path(savedir)
@@ -388,8 +401,7 @@ def save_permute_existing(tb, info, savedir):
     # WARNING: _time is pseudotime, which doesn't correspond with actual timestring for PSC PhC-C2DL-PSC datasets!!
     lab = load(name)
     mapping = {tb.nodes[n]['orig_trackid']:tb.nodes[n]['track'] for n in tb.nodes if n[0]==_time}
-    lab2 = relabel_from_mapping(lab,mapping).astype(np.uint)
-
+    lab2 = relabel_from_mapping(lab,mapping).astype(np.uint16)
     save(lab2, savedir / info.maskname.format(time=_time))
 
   # lbep = nap2lbep(tb2nap(tb,nap2ltps(nap)))
@@ -452,15 +464,13 @@ def lbep2lsd(lbep):
 def load_and_compare_lsds(Fluodir,ds='01'):
   Fluodir  = Path(Fluodir)
   d = SimpleNamespace()
-  d.lsd_orig_1 = lbep2lsd(load_lbep(Fluodir / f'{ds}_GT/TRA/man_track.txt'))
-  d.lsd_orig_2 = TRAdir2lsd(Fluodir / f'{ds}_GT/TRA/')
-  d.lsd_new_1  = lbep2lsd(load_lbep(Fluodir / f'{ds}_RES/res_track.txt'))
-  d.lsd_new_2  = TRAdir2lsd(Fluodir / f'{ds}_RES/')
-
-  from itertools import combinations
-  for x,y in combinations([d.lsd_orig_1,d.lsd_orig_2,d.lsd_new_1,d.lsd_new_2,],2):
-    compare_lsds(x,y)
-
+  # d.lsd_orig_1 = lbep2lsd(load_lbep(Fluodir / f'{ds}_GT/TRA/man_track.txt'))
+  # d.lsd_orig_2 = TRAdir2lsd(Fluodir / f'{ds}_GT/TRA/')
+  d.lbep  = lbep2lsd(load_lbep(Fluodir / f'{ds}_RES/res_track.txt'))
+  d.labs  = TRAdir2lsd(Fluodir / f'{ds}_RES/')
+  # from itertools import combinations
+  # for x,y in combinations([d.lsd_orig_1,d.lsd_orig_2,d.lsd_new_1,d.lsd_new_2,],2):
+  #   compare_lsds(x,y)
   return d
 
 # def lsd2lbep(lsd):
@@ -470,13 +480,16 @@ def load_and_compare_lsds(Fluodir,ds='01'):
 #       res[l].append(time)
 
 
-
 if __name__=='__main__':
   x = gen_ltps1()
   x[3] = np.array([]).reshape([0,2])
   print(x)
   tb = nn_tracking_on_ltps(x,scale=(1,1))
   print(tb.edges)
+
+
+
+
 
 
 
@@ -492,7 +505,6 @@ localtra=/projects/project-broaddus/comparison_methods/EvaluationSoftware/Linux/
 cp -r nap2isbi/ "$isbidir"01_RES/
 time $localtra $isbidir 01 3
 """
-
 
 
 """

@@ -59,6 +59,7 @@ def _config_example():
   config.fg_bg_thresh = np.exp(-16/2)
   config.bg_weight_multiplier = 0.0
   config.weight_decay = True
+  config.use_weights  = False
   config.time_weightdecay = 400 # for pixelwise weights
   ## image sampling
   config.sampler      = content_sampler ## sampler :: ta,td,config -> x,yt,w
@@ -303,20 +304,23 @@ def flat_sampler(ta,td,config):
 
   return x,yt,w
 
-def weights(yt,ta,trainer):
+def weights(yt,ta,config):
   "weight pixels in the slice based on pred patch content"
-  thresh = trainer.fg_bg_thresh
+  
   w = np.ones(yt.shape)
+  if not config.use_weights: return w
+
+  thresh = config.fg_bg_thresh
   m0 = yt<thresh # background
   m1 = yt>thresh # foreground
   if 0 < m0.sum() < m0.size:
     ws = 1/np.array([m0.mean(), m1.mean()]).astype(np.float)
-    ws[0] *= trainer.bg_weight_multiplier
+    ws[0] *= config.bg_weight_multiplier
     ws /= ws.mean()
     if np.isnan(ws).any(): ipdb.set_trace()
 
-    if trainer.weight_decay:
-      t0 = trainer.time_weightdecay
+    if config.weight_decay:
+      t0 = config.time_weightdecay
       ## decayto1 :: linearly decay scalar x to value 1 after 3 epochs, then const
       decayto1 = lambda x: x*(1-ta.i/(t0*3)) + ta.i/(t0*3) if ta.i<=(t0*3) else 1
       ws[0] = decayto1(ws[0])

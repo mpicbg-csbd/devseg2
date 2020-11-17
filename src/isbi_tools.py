@@ -59,27 +59,28 @@ import re
 #     return lab
 
 
-## proof of principle for every dataset
+
+## proof of principle for every dataset | my order | official order
 isbi_datasets = [
-  ("HSC",             "BF-C2DL-HSC"),
-  ("MuSC",            "BF-C2DL-MuSC"),
-  ("HeLa",            "DIC-C2DH-HeLa"),
-  ("MSC",             "Fluo-C2DL-MSC"),
-  ("A549",            "Fluo-C3DH-A549"),
-  ("A549-SIM",        "Fluo-C3DH-A549-SIM"),
-  ("H157",            "Fluo-C3DH-H157"),
-  ("MDA231",          "Fluo-C3DL-MDA231"),
-  ("GOWT1",           "Fluo-N2DH-GOWT1"),
-  ("SIM+",            "Fluo-N2DH-SIM+"),
-  ("HeLa",            "Fluo-N2DL-HeLa"),
-  ("celegans_isbi",   "Fluo-N3DH-CE"),
-  ("hampster",        "Fluo-N3DH-CHO"),
-  ("SIM+",            "Fluo-N3DH-SIM+"),
-  ("fly_isbi",        "Fluo-N3DL-DRO"),
-  ("trib_isbi_proj",  "Fluo-N3DL-TRIC"),
-  ("U373",            "PhC-C2DH-U373"),
-  ("PSC",             "PhC-C2DL-PSC"),
-  ("trib_isbi/crops_2xDown", "Fluo-N3DL-TRIF"),
+  ("HSC",             "BF-C2DL-HSC"),           #  0     0 
+  ("MuSC",            "BF-C2DL-MuSC"),          #  1     1 
+  ("HeLa",            "DIC-C2DH-HeLa"),         #  2     2 
+  ("MSC",             "Fluo-C2DL-MSC"),         #  3     3 
+  ("A549",            "Fluo-C3DH-A549"),        #  4     4 
+  ("A549-SIM",        "Fluo-C3DH-A549-SIM"),    #  5    16 
+  ("H157",            "Fluo-C3DH-H157"),        #  6     5 
+  ("MDA231",          "Fluo-C3DL-MDA231"),      #  7     6 
+  ("GOWT1",           "Fluo-N2DH-GOWT1"),       #  8     7 
+  ("SIM+",            "Fluo-N2DH-SIM+"),        #  9    17 
+  ("HeLa",            "Fluo-N2DL-HeLa"),        # 10     8 
+  ("celegans_isbi",   "Fluo-N3DH-CE"),          # 11     9 
+  ("hampster",        "Fluo-N3DH-CHO"),         # 12    10 
+  ("SIM+",            "Fluo-N3DH-SIM+"),        # 13    18 
+  ("fly_isbi",        "Fluo-N3DL-DRO"),         # 14    11 
+  ("trib_isbi_proj",  "Fluo-N3DL-TRIC"),        # 15    12 
+  ("U373",            "PhC-C2DH-U373"),         # 16    14 
+  ("PSC",             "PhC-C2DL-PSC"),          # 17    15 
+  ("trib_isbi/crops_2xDown", "Fluo-N3DL-TRIF"), # 18    13 
   ]
 
 ## WARNING: IN XYZ ORDER!!!
@@ -122,7 +123,7 @@ def get_isbi_info(myname,isbiname,dataset):
   scale = np.array(isbi_scales[isbiname])[::-1]
   d.scale = scale / scale[-1]
   d.penalize_FP = '' if isbiname not in ["Fluo-N3DL-DRO", "Fluo-N3DL-TRIC", "Fluo-N3DL-TRIF"] else '0'
-  d.maskname  = "mask_{time:03d}.tif" if d.ndigits==3 else "mask_{time:04d}.tif"
+  d.maskname  = "mask{time:03d}.tif" if d.ndigits==3 else "mask{time:04d}.tif"
   d.man_track = "man_track{time:03d}.tif" if d.ndigits==3 else "man_track{time:04d}.tif"
   d.rawname   = "t{time:03d}.tif" if d.ndigits==3 else "t{time:04d}.tif"
 

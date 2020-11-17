@@ -821,7 +821,6 @@ def e18_isbidet(pid=0):
   myname, isbiname  = isbi_datasets[p1]
   trainset = ["01","02"][p0]
   testset  = trainset
-  bg_weight_multiplier = 1.0
   info = get_isbi_info(myname,isbiname,testset)
 
   def _times():
@@ -855,20 +854,29 @@ def e18_isbidet(pid=0):
 
   _zoom = None
   nms_footprint = [3,9,9] if info.ndim==3 else [9,9]
+  bg_weight_multiplier = 1.0
 
   if myname=="celegans_isbi":
     # kernel_sigmas = [1,7,7]
     # bg_weight_multiplier = 0.2
     _zoom = (1,0.5,0.5)
   if myname=="trib_isbi":  kernel_sigmas = [3,3,3]
+  if myname=="MSC": 
+    a,b = info.shape
+    if info.dataset=="01": 
+      _zoom=(1/4,1/4)
+    else:
+      _zoom = (256/a, 392/b) ## almost exactly isotropic but divisible by 8!
   if myname=="fly_isbi":
     bg_weight_multiplier=0.0
+    _zoom = (2,1,1)
   # if myname=="MDA231":     kernel_sigmas = [1,3,3]
   # if myname=="A549":       kernel_sigmas = [1,5,5]
-  if myname=="H157":_zoom = (1,0.25,0.25)
+  if myname=="H157": _zoom = (1,1/2,1/2)
   if myname=="hampster":
     # kernel_sigmas = [1,7,7]
     _zoom = (1,0.5,0.5)
+  if isbiname=="Fluo-N3DH-SIM+": _zoom = (1,1/2,1/2)
 
   kernel_sigmas = np.array(kernel_sigmas)
   print("kernel_sigmas", kernel_sigmas)
@@ -887,7 +895,8 @@ def e18_isbidet(pid=0):
     td.target = detector.pts2target_gaussian(td.gt,td.input[0].shape,kernel_sigmas)
     td.input  = td.input[:,None]  ## add channels
     td.target = td.target[:,None]
-    td.input  = normalize3(td.input,2,99.4,clip=False)
+    axs = tuple(range(1,td.input.ndim))
+    td.input  = normalize3(td.input,2,99.4,axs=axs,clip=False)
 
     vd = SimpleNamespace()
     vd.input  = np.array([load(f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{trainset}/" + tif_name.format(n=n)) for n in vali_times])
@@ -898,7 +907,8 @@ def e18_isbidet(pid=0):
     vd.target = detector.pts2target_gaussian(vd.gt,vd.input[0].shape,kernel_sigmas)
     vd.input  = vd.input[:,None]
     vd.target = vd.target[:,None]
-    vd.input  = normalize3(vd.input,2,99.4,clip=False)
+    axs = tuple(range(1,td.input.ndim))
+    vd.input  = normalize3(vd.input,2,99.4,axs=axs,clip=False)
     
     return td,vd
 
@@ -911,7 +921,9 @@ def e18_isbidet(pid=0):
     cfig.bg_weight_multiplier = bg_weight_multiplier #0.2 #1.0
     cfig.time_weightdecay = 1600 # for pixelwise weights
     cfig.weight_decay = False
+    cfig.use_weights  = True
     cfig.sampler      = detector.content_sampler
+    # cfig.sampler = detector.flat_sampler
     cfig.patch_space  = np.array(batch_shape[2:])
     time_total = 10_000 # about 12k / hour? 200/min = 5mins/ 1k = 12k/hr
     cfig.time_agg = 1 # aggregate gradients before backprop
@@ -926,10 +938,10 @@ def e18_isbidet(pid=0):
 
   cfig = _config()
   cfig.load_train_and_vali_data = _ltvd
-  cfig.savedir = savedir / f'e18_isbidet/v02/pid{pid:03d}/'
+  cfig.savedir = savedir / f'e18_isbidet/v03/pid{pid:03d}/'
 
   ## Train the net
-  if False:
+  if 1:
     T = detector.train_init(cfig)
     # T = detector.train_continue(cfig,cfig.savedir / 'm/best_weights_f1.pt')
     T.ta.train_times = train_times
@@ -943,11 +955,12 @@ def e18_isbidet(pid=0):
   net.load_state_dict(torch.load(cfig.savedir / "m/best_weights_f1.pt"))
 
   ## Show prediction on train & vali data
-  if False:
+  if 0:
+    dims="NCZYX" if info.ndim==3 else "NCYX"
     td,vd = _ltvd(0)
-    res = detector.predict_raw(net,td.input,dims="NCZYX").astype(np.float16)
+    res = detector.predict_raw(net,td.input,dims=dims).astype(np.float16)
     save(res, cfig.savedir / 'pred_train.npy')
-    res = detector.predict_raw(net,vd.input,dims="NCZYX").astype(np.float16)
+    res = detector.predict_raw(net,vd.input,dims=dims).astype(np.float16)
     save(res, cfig.savedir / 'pred_vali.npy')
 
   ## Predict and Evaluate model result on all available data
@@ -1001,76 +1014,83 @@ def e19_tracking(pid=0):
   """
   v01: [3,19,2]
   v02: add CP-net tracking to p0. fix a major bug. split dataset loop into p3. fixed, small kern size. [4,19,2,2]
+  v03: loops over p0 and p2 internally to allow parallel execution over p1,p3. [19,2]
   """
 
-  (p0,p1,p2,p3),pid = _parse_pid(pid,[4,19,2,2])
-  if p2>0 and p0==1: return
+  (p1,p3),pid = _parse_pid(pid,[19,2])
+  for (p0,p2) in iterdims([4,2]):
+    if (p0,p2)==(1,1): continue
+    if (p0,p2)!=(3,0): continue
+    print(f"\n{pid}: {p0} {p1} {p2} {p3}")
 
-  dataset = ['01','02'][p3]
-  myname, isbiname = isbi_datasets[p1]
-  isbi_dir = f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/"
-  
-  info = get_isbi_info(myname,isbiname,dataset)
-  # print(json.dumps(info.__dict__,sort_keys=True, indent=2, default=str))
-  print(isbiname, dataset, sep='\t')
+    dataset = ['01','02'][p3]
+    myname, isbiname = isbi_datasets[p1]
+    isbi_dir = f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/"
+    
+    info = get_isbi_info(myname,isbiname,dataset)
+    # print(json.dumps(info.__dict__,sort_keys=True, indent=2, default=str))
+    print(isbiname, dataset, sep='\t')
 
-  outdir = savedir/f"e19_tracking/v02/pid{pid:03d}/"
-  # outdir = savedir/f"e19_tracking/v02/pid_{p0}_{p1:02d}_{p2}_{p3}/"
+    outdir = savedir/f"e19_tracking/v03/pid{pid:03d}/"
+    # outdir = savedir/f"e19_tracking/v02/pid_{p0}_{p1:02d}_{p2}_{p3}/"
 
-  _tracking = [lambda ltps: tracking.nn_tracking_on_ltps(ltps,scale=info.scale),
-               lambda ltps: tracking.random_tracking_on_ltps(ltps)
-              ][p2]
-  kern = np.ones([5,7,7]) if info.ndim==3 else np.ones([7,7])
+    _tracking = [lambda ltps: tracking.nn_tracking_on_ltps(ltps,scale=info.scale),
+                 lambda ltps: tracking.random_tracking_on_ltps(ltps)
+                ][p2]
+    kern = np.ones([3,5,5]) if info.ndim==3 else np.ones([5,5])
 
-  start,stop = info.start,info.stop
-  if p0==0: ## permute existing labels via tracking
-    nap  = tracking.load_isbi2nap(isbi_dir,dataset,[start,stop])
-    ltps = tracking.nap2ltps(nap)
-    tb   = _tracking(ltps)
-    tracking._tb_add_orig_labels(tb,nap)
-    lbep = tracking.save_permute_existing(tb,info,savedir=outdir)
-  if p0==1: ## make consistent label shape, but don't change label id's.
-    nap  = tracking.load_isbi2nap(isbi_dir,dataset,[start,stop])
-    tracking.save_isbi(nap,shape=info.shape,_kern=kern,savedir=outdir)
-  if p0==2: ## make consistent label shape AND track
-    ltps = load(f"/projects/project-broaddus/rawdata/{myname}/traj/{isbiname}/{dataset}_traj.pkl")
-    if type(ltps) is dict:
-      ltps = [ltps[k] for k in sorted(ltps.keys())]
-    tb   = _tracking(ltps)
-    nap  = tracking.tb2nap(tb,ltps)
-    nap.tracklets[:,1] += start
-    tracking.save_isbi(nap,shape=info.shape,_kern=kern,savedir=outdir)
-  if p0==3: ## track using CP-net detections
-    _e18_p1 = p1
-    _e18_p0 = p3 #{'01':0,'02':1}[dataset]
-    oldpid  = 19*_e18_p0 + _e18_p1
-    ltps    = load(f"/projects/project-broaddus/devseg_2/expr/e18_isbidet/v02/pid{oldpid:03d}/ltps_{dataset}.pkl")
-    if type(ltps) is dict:
-      _ltps = [ltps[k] for k in sorted(ltps.keys())]
-    tb      = _tracking(_ltps)
+    start,stop = info.start,info.stop
+    if p0==0: ## permute existing labels via tracking
+      nap  = tracking.load_isbi2nap(isbi_dir,dataset,[start,stop])
+      ltps = tracking.nap2ltps(nap)
+      tb   = _tracking(ltps)
+      tracking._tb_add_orig_labels(tb,nap)
+      lbep = tracking.save_permute_existing(tb,info,savedir=outdir)
+    if p0==1: ## make consistent label shape, but don't change label id's.
+      nap  = tracking.load_isbi2nap(isbi_dir,dataset,[start,stop])
+      tracking.save_isbi(nap,shape=info.shape,_kern=kern,savedir=outdir)
+    if p0==2: ## make consistent label shape AND track
+      ltps = load(f"/projects/project-broaddus/rawdata/{myname}/traj/{isbiname}/{dataset}_traj.pkl")
+      if type(ltps) is dict:
+        ltps = [ltps[k] for k in sorted(ltps.keys())]
+      tb   = _tracking(ltps)
+      nap  = tracking.tb2nap(tb,ltps)
+      nap.tracklets[:,1] += start
+      tracking.save_isbi(nap,shape=info.shape,_kern=kern,savedir=outdir)
+    if p0==3: ## track using CP-net detections
+      _e18_p1 = p1
+      _e18_p0 = p3 #{'01':0,'02':1}[dataset]
+      oldpid  = 19*_e18_p0 + _e18_p1
+      ltps    = load(f"/projects/project-broaddus/devseg_2/expr/e18_isbidet/v03/pid{oldpid:03d}/ltps_{dataset}.pkl")
+      if type(ltps) is dict:
+        _ltps = [ltps[k] for k in sorted(ltps.keys())]
+      tb      = _tracking(_ltps)
 
-    if info.penalize_FP=='0':
-      nap_orig  = tracking.load_isbi2nap(isbi_dir,dataset,[start,start+1])
-      tb = tracking.filter_starting_tracks(tb,ltps,nap_orig)
-    nap  = tracking.tb2nap(tb,_ltps)
-    nap.tracklets[:,1] += start
-    tracking.save_isbi(nap,shape=info.shape,_kern=kern,savedir=outdir)
+      if info.penalize_FP=='0':
+        nap_orig  = tracking.load_isbi2nap(isbi_dir,dataset,[start,start+1])
+        tb = tracking.filter_starting_tracks(tb,ltps,nap_orig)
+      
+      nap  = tracking.tb2nap(tb,_ltps)
+      nap.tracklets[:,1] += start
+      tracking.save_isbi(nap,shape=info.shape,_kern=kern,savedir=outdir)
 
-  resdir  = Path(isbi_dir)/(dataset+"_RES")
-  bashcmd = f"""
-  localtra=/projects/project-broaddus/comparison_methods/EvaluationSoftware2/Linux/TRAMeasure
-  localdet=/projects/project-broaddus/comparison_methods/EvaluationSoftware2/Linux/DETMeasure
-  mkdir -p {resdir}
-  rm {resdir}/*
-  cp -r {outdir}/*.tif {outdir}/res_track.txt {resdir}/
-  time $localdet {isbi_dir} {dataset} {info.ndigits} {info.penalize_FP} > {outdir}/{dataset}_DET.txt
-  cat {outdir}/{dataset}_DET.txt
-  time $localtra {isbi_dir} {dataset} {info.ndigits} > {outdir}/{dataset}_TRA.txt
-  cat {outdir}/{dataset}_TRA.txt
-  rm {resdir}/*
-  rm {outdir}/*.tif
-  """
-  run(bashcmd,shell=True)
+    resdir  = Path(isbi_dir)/(dataset+"_RES")
+    bashcmd = f"""
+    localtra=/projects/project-broaddus/comparison_methods/EvaluationSoftware2/Linux/TRAMeasure
+    localdet=/projects/project-broaddus/comparison_methods/EvaluationSoftware2/Linux/DETMeasure
+    mkdir -p {resdir}
+    # rm {resdir}/*
+    cp -r {outdir}/*.tif {outdir}/res_track.txt {resdir}/
+    $localdet {isbi_dir} {dataset} {info.ndigits} {info.penalize_FP} > {outdir}/{dataset}_DET.txt
+    cat {outdir}/{dataset}_DET.txt
+    $localtra {isbi_dir} {dataset} {info.ndigits} > {outdir}/{dataset}_TRA.txt
+    cat {outdir}/{dataset}_TRA.txt
+    # rm {resdir}/*
+    rm {outdir}/*.tif
+    """
+    run(bashcmd,shell=True)
+
+    # return tb,nap,ltps
 
 
 
