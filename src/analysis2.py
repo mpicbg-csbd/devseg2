@@ -21,6 +21,19 @@ def _parse_pid(pid_or_params,dims):
 def iterdims(shape):
   return itertools.product(*[range(x) for x in shape])
 
+
+
+def job11_sm_analysis():
+  signal = load('/projects/project-broaddus/rawdata/synth_membranes/gt.npy')[:6000:10]
+  noise  = load(savedir / 'e07_synmem/v2_t01/noise.npy')[:6000:10]
+  pred   = load(savedir / 'e07_synmem/v2_t01/pred.npy')
+  diff   = signal + noise - pred
+  print(signal.mean(), noise.mean(), pred.mean(), diff.mean())
+  """
+  most of the errors that i see are on membranes along the _horizontal_, i.e. the axis of the noise.
+  This is totally 
+  """
+
 def e14v05():
   dims = [4,3,5,190]
   res = np.zeros(dims)
@@ -151,15 +164,11 @@ def e19_tracking():
   """
   added v02. 
   now v03.
+  v04: tracks e19_v04 which tracks e18 v03...
   """
-
-  # res = np.full([4,19,2,2,2],-1.0)
-  # res = np.full([19,2,2,2],-1.0)
-  # res[1,:,1]=-2
-  ## -1 = missing, -2 = not supposed to exist
   res = dict()
 
-  for name in sorted(glob("../expr/e19_tracking/v03/pid*/*.txt")):
+  for name in sorted(glob("../expr/e19_tracking/v04/pid*/*.txt")):
     print(name)
     m = re.search(r'pid(\d+)/(0[12])_(TRA|DET)\.txt',name)
     if not m: continue
@@ -172,7 +181,7 @@ def e19_tracking():
     
   # redo = np.array(np.where((res==[-1,-1]).sum(-1)!=0))
   # res  = res.transpose([0,2,1,3]).reshape([4*2,19,2])[[0,1,2,4,5]]
-  save(res,"../expr/e19_tracking/v02/res.npy")
+  save(res,"../expr/e19_tracking/v04/res.npy")
 
   return res #,redo
 
