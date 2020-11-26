@@ -38,6 +38,8 @@ from segtools.ns2dir import load, save, flatten
 import collections
 import isbi_tools
 
+def _print(*x):
+  return print(*x,flush=True)
 
 def setup_dirs(savedir):
   if savedir.exists(): shutil.rmtree(savedir)
@@ -106,7 +108,6 @@ def check_config(config):
     assert type(d[k]) is type(e[k]), str(type(d[k]))
   print("Keys and Value Types Agree: Config Check Passed.")
 
-
 def train_continue(config,weights_file):
   check_config(config)
   config.savedir = Path(config.savedir).resolve()
@@ -172,28 +173,34 @@ def train(T):
       l  = np.mean(ta.losses[-10:])
       ymax,ystd = float(y.max()), float(y.std())
       ytmax,ytstd = float(yt.max()), float(yt.std())
-      print(f"i={ta.i:04d}, shape={x.shape}, loss={l:4f}, dt={dt:4f}, y={ymax:4f},{ystd:4f} yt={ytmax:4f},{ytstd:4f}", flush=True)
-
-    def _proj(x):
-      assert x.ndim in [2,3]
-      if x.ndim==2:
-        return x
-      else:
-        return x.max(0)
+      _print(f"i={ta.i:04d}, shape={x.shape}, loss={l:4f}, dt={dt:4f}, y={ymax:4f},{ystd:4f} yt={ytmax:4f},{ytstd:4f}")
 
     if ta.i%config.time_savecrop==0:
       with warnings.catch_warnings():
         n = ta.i//config.time_savecrop
         save(ta , config.savedir/"ta/")
-        _stack = _proj(x[0,0].detach().cpu().numpy().astype(np.float16)) ; save(_stack, config.savedir/f"epoch/x/a{n:03d}.npy")
-        _stack = _proj(y[0,0].detach().cpu().numpy().astype(np.float16)) ; save(_stack, config.savedir/f"epoch/y/a{n:03d}.npy")
-        _stack = _proj(yt[0,0].detach().cpu().numpy().astype(np.float16)); save(_stack, config.savedir/f"epoch/yt/a{n:03d}.npy")
-        _stack = _proj(w[0,0].detach().cpu().numpy().astype(np.float16)) ; save(_stack, config.savedir/f"epoch/w/a{n:03d}.npy")
+        save(prepsave(x[0,0]), config.savedir/f"epoch/x/a{n:03d}.npy")
+        save(prepsave(y[0,0]), config.savedir/f"epoch/y/a{n:03d}.npy")
+        save(prepsave(yt[0,0]), config.savedir/f"epoch/yt/a{n:03d}.npy")
+        save(prepsave(w[0,0]), config.savedir/f"epoch/w/a{n:03d}.npy")
 
     if ta.i%config.time_validate==0:
       n = ta.i//config.time_validate
       validate(vd,T)
 
+def _proj(x):
+  assert x.ndim in [2,3]
+  if x.ndim==2:
+    return x
+  else:
+    return x.max(0)
+
+def prepsave(x):
+  "x is 2D/3D array with no channels or batches"
+  if type(x) is torch.Tensor: x = x.detach().cpu().numpy()
+  if type(x) is np.ndarray:
+    return _proj(x.astype(np.float16))
+  assert False, "should be ndarray"
 
 def validate(vd,T):
   m,ta,config = T.m, T.ta, T.c
@@ -212,11 +219,13 @@ def validate(vd,T):
     s3  = [score3.f1, score3.n_matched,  score3.n_proposed,  score3.n_gt]
     s10 = [score10.f1, score10.n_matched, score10.n_proposed, score10.n_gt]
     st  = f"{ta.i:5d} {i} {score10.f1:6.3f} {score10.n_matched:4d} {score10.n_proposed:4d} {score10.n_gt:4d}"
-    print(st)
+    _print(st)
 
     ## save detections and loss, but only the basic info to save space
     _vs.append({'3':score3.f1, '10':score10.f1, 'loss':valloss})
-    # save(res[0].max(0).astype(np.float16),config.savedir / f"mx_z/e{n:03d}_i{i}.tif")
+    save(prepsave(vd.input[i,0]),   config.savedir / f"vali/x/a{n:03d}_i{i}.tif")
+    save(prepsave(res[0]),          config.savedir / f"vali/y/a{n:03d}_i{i}.tif")
+    save(prepsave(vd.target[i,0]),  config.savedir / f"vali/yt/a{n:03d}_i{i}.tif")
 
   ta.vali_scores.append(_vs)
 
@@ -225,13 +234,13 @@ def validate(vd,T):
 
   valilosses = [sum([x['loss'] for x in xx]) for xx in ta.vali_scores]
   if np.min(valilosses)==valilosses[-1]:
-    print(f"New best mse weights at {n}")
+    _print(f"New best mse weights at {n}")
     ta.best_weights_mse = n
     torch.save(m.net.state_dict(), config.savedir / f'm/best_weights_mse.pt')
 
   valilosses = [sum([x['10'] for x in xx]) for xx in ta.vali_scores]
   if np.max(valilosses)==valilosses[-1]:
-    print(f"New best f1 weights at {n}")
+    _print(f"New best f1 weights at {n}")
     ta.best_weights_f1 = n
     torch.save(m.net.state_dict(), config.savedir / f'm/best_weights_f1.pt')
 
@@ -268,14 +277,14 @@ def content_sampler(ta,td,config):
   size_space = np.array(td.input.shape[2:])
   ndim = len(size_space)
   _ipt = np.random.randint(0,len(td.gt[st]))
-  _pt = td.gt[st][_ipt] ## sample one centerpoint from the chosen time
-  _pt = _pt + (2*np.random.rand(ndim)-1)*config.patch_space*0.1 ## jitter by 10%
-  _pt = _pt - config.patch_space//2 ## center
+  _pt  = td.gt[st][_ipt] ## sample one centerpoint from the chosen time
+  _pt  = _pt + (2*np.random.rand(ndim)-1)*config.patch_space*0.1 ## jitter by 10%
+  _pt  = _pt - config.patch_space//2 ## center
   _max = np.clip([size_space - config.patch_space],a_min=[0]*ndim,a_max=None)
-  _pt = _pt.clip(min=[0]*ndim,max=_max)[0]
-  _pt = _pt.astype(int)
-  ss = tuple(slice(_pt[i],_pt[i] + config.patch_space[i]) for i in range(ndim))
-  ss = np.s_[[st],:] + ss
+  _pt  = _pt.clip(min=[0]*ndim,max=_max)[0]
+  _pt  = _pt.astype(int)
+  ss   = tuple(slice(_pt[i],_pt[i] + config.patch_space[i]) for i in range(ndim))
+  ss   = np.s_[[st],:] + ss
   
   # ipdb.set_trace()
   x  = td.input[ss]

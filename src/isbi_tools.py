@@ -112,7 +112,7 @@ def get_isbi_info(myname,isbiname,dataset):
   d.isbiname   = isbiname
   d.dataset    = dataset
   d.isbi_dir   = Path(f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/")
-  trackfiles = sorted((d.isbi_dir/(dataset+"_GT/TRA/")).glob("man_track*.tif"))
+  trackfiles   = sorted((d.isbi_dir/(dataset+"_GT/TRA/")).glob("man_track*.tif"))
   d.timebounds = [re.search(r'man_track(\d+)\.tif',str(x)).group(1) for x in trackfiles]
   d.timebounds = [d.timebounds[0],d.timebounds[-1]]
   d.ndigits    = len(d.timebounds[0])

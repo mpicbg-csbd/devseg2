@@ -278,5 +278,3 @@ def job16_downscaleTrib(ds="01"):
   shutil.copy(old_dir / name, new_dir / name)
 
 
-
-

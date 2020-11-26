@@ -811,6 +811,21 @@ def e18_isbidet(pid=0):
   info = get_isbi_info(myname,isbiname,testset)
   _zoom = None
 
+  if info.ndim==2:
+    batch_shape = [1,1,512,512]
+    _getnet = lambda : torch_models.Unet3(16, [[1],[1]], pool=(2,2), kernsize=(5,5), finallayer=torch_models.nn.Sequential)
+    kernel_sigmas = [5,5]
+    nms_footprint = [9,9]
+    time_total = 20_000
+  else:
+    batch_shape  = [1,1,16,128,128]
+    _getnet = lambda : torch_models.Unet3(16, [[1],[1]], pool=(1,2,2), kernsize=(3,5,5), finallayer=torch_models.nn.Sequential)
+    kernel_sigmas = [2,5,5]
+    nms_footprint = [3,9,9]
+    time_total = 10_000
+
+  print(json.dumps(info.__dict__,sort_keys=True, indent=2, default=str))
+
   def _times():
     """
     how many frames to train on? should be roughly sqrt N total frames. validate should be same.
@@ -818,29 +833,17 @@ def e18_isbidet(pid=0):
     t0,t1 = info.start, info.stop
     N = t1-t0
     Nsamples = int(N**0.5)
+    if info.ndim==2: Nsamples = 2*Nsamples
     gap = N//Nsamples
     dt = gap//2
     train_times = np.r_[t0:t1:gap]
-    vali_times  = np.r_[t0+dt:t1:gap]
+    vali_times  = np.r_[t0+dt:t1:3*gap]
     pred_times  = np.r_[t0:t1]
     assert np.in1d(train_times,vali_times).sum()==0
     return train_times, vali_times, pred_times
   train_times, vali_times, pred_times = _times()
   print(train_times,vali_times,pred_times)
   tif_name = "t{n:04d}.tif" if info.ndigits==4 else "t{n:03d}.tif"
-
-  if info.ndim==2:
-    batch_shape = [1,1,512,512]
-    _getnet = lambda : torch_models.Unet3(16, [[1],[1]], pool=(2,2), kernsize=(5,5), finallayer=torch_models.nn.Sequential)
-    kernel_sigmas = [5,5]
-    nms_footprint = [9,9]
-  else:
-    batch_shape  = [1,1,16,128,128]
-    _getnet = lambda : torch_models.Unet3(16, [[1],[1]], pool=(1,2,2), kernsize=(3,5,5), finallayer=torch_models.nn.Sequential)
-    kernel_sigmas = [2,5,5]
-    nms_footprint = [3,9,9]
-
-  print(json.dumps(info.__dict__,sort_keys=True, indent=2, default=str))
 
   def _config():
     cfig = SimpleNamespace()
@@ -854,13 +857,13 @@ def e18_isbidet(pid=0):
     cfig.use_weights  = True
     cfig.sampler      = detector.content_sampler
     cfig.patch_space  = np.array(batch_shape[2:])
-    time_total = 10_000 # about 12k / hour? 200/min = 5mins/ 1k = 12k/hr
+    # time_total = 20_000 
     cfig.time_agg = 1 # aggregate gradients before backprop
     cfig.time_loss = 10
     cfig.time_print = 100
     cfig.time_savecrop = max(100,time_total//50)
     cfig.time_validate = max(500,time_total//50)
-    cfig.time_total = time_total
+    cfig.time_total = time_total ## # about 12k / hour? 200/min = 5mins/ 1k = 12k/hr on 3D data
     cfig.lr = 4e-4
 
     return cfig
@@ -877,12 +880,15 @@ def e18_isbidet(pid=0):
     if info.dataset=="01": 
       _zoom=(1/4,1/4)
     else:
-      _zoom = (256/a, 392/b) ## almost exactly isotropic but divisible by 8!
+      # _zoom = (256/a, 392/b) ## almost exactly isotropic but divisible by 8!
+      _zoom = (128/a, 200/b) ## almost exactly isotropic but divisible by 8!
+  if myname=="HeLa":
+    kernel_sigmas = [11,11]
+    _zoom = (0.5,0.5)
   if myname=="fly_isbi":
     cfig.bg_weight_multiplier=0.0
     cfig.weight_decay = False
   # if myname=="MDA231":     kernel_sigmas = [1,3,3]
-  # if myname=="A549":       kernel_sigmas = [1,5,5]
   if myname=="H157":
     _zoom = (1/4,)*3
     cfig.sampler = detector.flat_sampler
@@ -918,6 +924,8 @@ def e18_isbidet(pid=0):
     vd.target = vd.target[:,None]
     axs = tuple(range(1,td.input.ndim))
     vd.input  = normalize3(vd.input,2,99.4,axs=axs,clip=False)
+
+
     
     return td,vd
 
@@ -939,7 +947,6 @@ def e18_isbidet(pid=0):
   net.load_state_dict(torch.load(cfig.savedir / "m/best_weights_f1.pt"))
 
   ## Show prediction on train & vali data
-  print(cfig.savedir)
   if 0:
     dims="NCZYX" if info.ndim==3 else "NCYX"
     td,vd = _ltvd(0)
@@ -1075,6 +1082,156 @@ def e19_tracking(pid=0):
     run(bashcmd,shell=True)
 
     # return tb,nap,ltps
+
+def e20_trainset(pid=0):
+  """
+  Construct fixed training datasets for each ISBI example.
+  Augmentation / content-based sampling, etc goes here.
+  We can optionally reconstruct the training data (or not) before each training run, and we'll have a record of scores for each patch.
+  uses same pid scheme as e18_isbidet.
+  """
+
+  (p0,p1),pid = _parse_pid(pid,[2,19])
+
+  myname, isbiname  = isbi_datasets[p1]
+  trainset = ["01","02"][p0]
+  testset  = trainset
+  info = get_isbi_info(myname,isbiname,testset)
+  _zoom = None
+
+  if info.ndim==2:
+    batch_shape = [1,1,512,512]
+    # _getnet = lambda : torch_models.Unet3(16, [[1],[1]], pool=(2,2), kernsize=(5,5), finallayer=torch_models.nn.Sequential)
+    kernel_sigmas = [5,5]
+    # nms_footprint = [9,9]
+    time_total = 20_000
+  else:
+    batch_shape  = [1,1,16,128,128]
+    # _getnet = lambda : torch_models.Unet3(16, [[1],[1]], pool=(1,2,2), kernsize=(3,5,5), finallayer=torch_models.nn.Sequential)
+    kernel_sigmas = [2,5,5]
+    # nms_footprint = [3,9,9]
+    time_total = 10_000
+
+  print(json.dumps(info.__dict__,sort_keys=True, indent=2, default=str))
+
+  ltps = load(f"/projects/project-broaddus/rawdata/{myname}/traj/{isbiname}/{trainset}_traj.pkl")
+
+  def _times():
+    """
+    how many frames to train on? should be roughly sqrt N total frames. validate should be same.
+    """
+    t0,t1 = info.start, info.stop
+    N = t1 - t0
+    pix_needed   = time_total * np.prod(batch_shape)
+    pix_i_have   = N*info.shape
+    cells_i_have = len(flatten(ltps))
+
+    # Nsamples = int(N**0.5)
+    # if info.ndim==2: Nsamples = 2*Nsamples
+    # gap = N//Nsamples
+    # dt = gap//2
+    # train_times = np.r_[t0:t1:gap]
+    # vali_times  = np.r_[t0+dt:t1:3*gap]
+
+    train_times = np.r_[0,-1] if info.ndim==3 else np.r_[t0:t1:5]
+    # pred_times  = np.r_[t0:t1]
+    # assert np.in1d(train_times,vali_times).sum()==0
+    # return train_times, vali_times, pred_times
+    return train_times
+
+  # train_times, vali_times, pred_times = _times()
+  train_times = _times()
+  # print(train_times,vali_times,pred_times)
+
+  def _config():
+    cfig = SimpleNamespace()
+    cfig.getnet = _getnet
+    cfig.nms_footprint = nms_footprint
+    cfig.rescale_for_matching = list(info.scale)
+
+    cfig.fg_bg_thresh = np.exp(-16/2)
+    cfig.bg_weight_multiplier = 1.0 #0.2 #1.0
+    cfig.time_weightdecay = 1600 # for pixelwise weights
+    cfig.weight_decay = True
+    cfig.use_weights  = True
+    cfig.sampler      = detector.content_sampler
+    cfig.patch_space  = np.array(batch_shape[2:])
+
+    # time_total = 20_000 
+    cfig.time_agg = 1 # aggregate gradients before backprop
+    cfig.time_loss = 10
+    cfig.time_print = 100
+    cfig.time_savecrop = max(100,time_total//50)
+    cfig.time_validate = max(500,time_total//50)
+    cfig.time_total = time_total ## # about 12k / hour? 200/min = 5mins/ 1k = 12k/hr on 3D data
+    cfig.lr = 4e-4
+
+    return cfig
+  cfig = _config()
+
+  if myname=="celegans_isbi":
+    # kernel_sigmas = [1,7,7]
+    # bg_weight_multiplier = 0.2
+    kernel_sigmas[...] = [1,5,5]
+    _zoom = (1,0.5,0.5)
+  if myname=="trib_isbi":  kernel_sigmas = [3,3,3]
+  if myname=="MSC":
+    a,b = info.shape
+    if info.dataset=="01": 
+      _zoom=(1/4,1/4)
+    else:
+      # _zoom = (256/a, 392/b) ## almost exactly isotropic but divisible by 8!
+      _zoom = (128/a, 200/b) ## almost exactly isotropic but divisible by 8!
+  if myname=="HeLa":
+    kernel_sigmas = [11,11]
+    _zoom = (0.5,0.5)
+  if myname=="fly_isbi":
+    cfig.bg_weight_multiplier=0.0
+    cfig.weight_decay = False
+  # if myname=="MDA231":     kernel_sigmas = [1,3,3]
+  if myname=="H157":
+    _zoom = (1/4,)*3
+    cfig.sampler = detector.flat_sampler
+  if myname=="hampster":
+    # kernel_sigmas = [1,7,7]
+    _zoom = (1,0.5,0.5)
+  if isbiname=="Fluo-N3DH-SIM+": _zoom = (1,1/2,1/2)
+  
+  
+
+  def _ltvd(config):
+    td = SimpleNamespace()
+    td.input  = np.array([load(f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{trainset}/" + tif_name.format(n=n)) for n in train_times])
+    td.gt     = [ltps[k] for k in train_times]
+    if _zoom:
+      td.input = zoom(td.input, (1,)+_zoom)
+      td.gt = [(v*_zoom).astype(np.int) for v in td.gt]
+    # ipdb.set_trace()
+    td.target = detector.pts2target_gaussian(td.gt,td.input[0].shape,kernel_sigmas)
+    td.input  = td.input[:,None]  ## add channels
+    td.target = td.target[:,None]
+    axs = tuple(range(1,td.input.ndim))
+    td.input  = normalize3(td.input,2,99.4,axs=axs,clip=False)
+
+    vd = SimpleNamespace()
+    vd.input  = np.array([load(f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{trainset}/" + tif_name.format(n=n)) for n in vali_times])
+    vd.gt     = [ltps[k] for k in vali_times]
+    if _zoom: 
+      vd.input = zoom(vd.input, (1,)+_zoom)
+      vd.gt = [(v*_zoom).astype(np.int) for v in vd.gt]
+    vd.target = detector.pts2target_gaussian(vd.gt,vd.input[0].shape,kernel_sigmas)
+    vd.input  = vd.input[:,None]
+    vd.target = vd.target[:,None]
+    axs = tuple(range(1,td.input.ndim))
+    vd.input  = normalize3(vd.input,2,99.4,axs=axs,clip=False)
+
+
+    
+    return td,vd
+
+  cfig.load_train_and_vali_data = _ltvd
+  cfig.savedir = savedir / f'e18_isbidet/v03/pid{pid:03d}/'
+
 
 
 
