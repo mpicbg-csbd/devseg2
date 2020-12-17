@@ -25,8 +25,9 @@ from segtools import point_tools
 import numpy_indexed as ndi
 from pykdtree.kdtree import KDTree as pyKDTree
 import re
-
+from expand_labels_scikit import expand_labels
 from types import SimpleNamespace
+from subprocess import run
 
 COLUMNS = ['label', 'frame', 'centroid-0', 'centroid-1', 'centroid-2']
 
@@ -50,21 +51,21 @@ def pad_and_stack_arrays(list_of_arrays, align_pt=None):
   res = np.stack([f(_r) for _r in zip(list_of_arrays,leftpad,rightpad)])
   return res
 
-def evaluate_isbi(base_dir,detname,pred='01',fullanno=True):
-  "evalid is a unique ID that prevents us from overwriting DET_log files from different experiments predicting on the same data."
-  fullanno = '' if fullanno else '0'
+# def evaluate_isbi(base_dir,detname,pred='01',fullanno=True):
+#   "evalid is a unique ID that prevents us from overwriting DET_log files from different experiments predicting on the same data."
+#   fullanno = '' if fullanno else '0'
 
-  cmd = dict(
-    localTRA="/Users/broaddus/Downloads/EvaluationSoftware_1/Mac/TRAMeasure",
-    remoteDET="/projects/project-broaddus/comparison_methods/EvaluationSoftware/Linux/DETMeasure",
-  )[cmd]
+#   cmd = dict(
+#     localTRA="/Users/broaddus/Downloads/EvaluationSoftware_1/Mac/TRAMeasure",
+#     remoteDET="/projects/project-broaddus/comparison_methods/EvaluationSoftware/Linux/DETMeasure",
+#   )[cmd]
 
-  DET_command = f"""
-  time {cmd} {base_dir} {pred} 3 {fullanno}
-  cd {base_dir}/{pred}_RES/
-  mv DET_log.txt {detname}
-  """
-  run([DET_command],shell=True)
+#   DET_command = f"""
+#   time {cmd} {base_dir} {pred} 3 {fullanno}
+#   cd {base_dir}/{pred}_RES/
+#   mv DET_log.txt {detname}
+#   """
+#   run([DET_command],shell=True)
 
 def draw(tb):
   pos  = nx.multipartite_layout(tb,subset_key='time')
@@ -122,9 +123,14 @@ def nn_tracking_on_ltps(ltps=None, scale=(1,1,1), dub=None):
 
 def filter_starting_tracks(tb,ltps,nap):
   m=nap.tracklets[:,1]==0
-  n0=nap.tracklets[m]
-  kdt = pyKDTree(ltps[0])
-  _dis, _ind = kdt.query(n0[:,2:], k=1, distance_upper_bound=None)
+  gtpts=nap.tracklets[m][:,2:]
+  g0 = filter_starting_tracks_pts(tb,ltps[0],gtpts)
+  return g0
+
+
+def filter_starting_tracks_pts(tb,pts0,gtpts):
+  kdt = pyKDTree(pts0)
+  _dis, _ind = kdt.query(gtpts, k=1, distance_upper_bound=None)
   roots = set((0,i) for i in _ind)
   # s0=set.union(*[c for c in nx.weakly_connected_components(tb) if len(set(c)&roots)>0])
   s0=roots
@@ -224,15 +230,17 @@ def check_tb_nap_lpts_consistency(tb,nap,lpts,track_id=None):
     if tb.nodes[n]['track']==track_id:
       print(tb.nodes[n])
 
-
-def tb2nap(tb,ltps):
+def tb2nap(tb,ltps=None):
   trackid = np.array([n + (tb.nodes[n]['track'],) for n in tb.nodes])
   nodes, trackid = trackid[:,:2],trackid[:,[2]]
   idx     = np.lexsort(nodes.T[[1,0]])
   nodes,trackid = nodes[idx],trackid[idx]
-  # ipdb.set_trace()
-  _ltps = [ltps[_time][_id] for (_time,_id) in nodes]
-  # _ltps = np.concatenate(ltps,axis=0)
+
+  if ltps:
+    _ltps = [ltps[_time][_id] for (_time,_id) in nodes]
+  else:
+    _ltps = [tb.nodes[(_time,_id)]['pt'] for (_time,_id) in nodes]
+
   tracklets = np.concatenate([trackid, nodes[:,[0]], _ltps],axis=1).astype(np.uint)
   idx = np.lexsort(tracklets[:,[1,0]].T)
   tracklets = tracklets[idx]
@@ -311,6 +319,15 @@ def _load_mantrack(path,dset,idx):
 
   return props
 
+
+def relabel_tracks_from_1(tb):
+  s = set(tb.nodes[n]['track'] for n in tb.nodes)
+  d = {k:v+1 for v,k in enumerate(sorted(s))}
+  for n in tb.nodes:
+    _t = tb.nodes[n]['track']
+    tb.nodes[n]['track'] = d[_t]
+
+
 def load_isbi2nap(path,dset,ntimes,):
   # path = str(path) + '/'
   path = Path(path)
@@ -346,6 +363,33 @@ def load_isbi2nap(path,dset,ntimes,):
   nap.kern = kern
   nap.avg_kern = avg_kern
   return nap
+
+def save_isbi_tb(tb,info,_kern=None):
+
+  if info.penalize_FP=='0':
+    from datagen import mantrack2pts
+    pts_zero = [tb.nodes[n]['pt'] for n in sorted(tb.nodes) if n[0]==0]
+    pts_gt_zero = mantrack2pts(load(info.isbi_dir / (info.dataset+"_GT") / "TRA" / info.man_track.format(time=info.start)))
+    tb = filter_starting_tracks_pts(tb,pts_zero,pts_gt_zero)
+    relabel_tracks_from_1(tb)
+  
+  nap = tb2nap(tb)
+  nap.tracklets[:,1] += info.start
+  if not _kern: _kern = np.ones([1,]*info.ndim)
+  save_isbi(nap,_kern=_kern,shape=info.shape,savedir=info.isbi_dir/(info.dataset+"_RES"))
+
+
+def eval_tb_isbi(tb,info,savedir):
+  save_isbi_tb(tb,info)
+  bashcmd = f"""
+  localtra=/projects/project-broaddus/comparison_methods/EvaluationSoftware2/Linux/TRAMeasure
+  localdet=/projects/project-broaddus/comparison_methods/EvaluationSoftware2/Linux/DETMeasure
+  $localdet {info.isbi_dir} {info.dataset} {info.ndigits} {info.penalize_FP} > {savedir}/{info.dataset}_DET.txt
+  cat {savedir}/{info.dataset}_DET.txt
+  $localtra {info.isbi_dir} {info.dataset} {info.ndigits} > {savedir}/{info.dataset}_TRA.txt
+  cat {savedir}/{info.dataset}_TRA.txt
+  """
+  run(bashcmd,shell=True)
 
 def save_isbi(nap, _kern=None, shape=(35, 512, 708), savedir="napri2isbi_test/"):
   """
@@ -390,8 +434,6 @@ def save_isbi(nap, _kern=None, shape=(35, 512, 708), savedir="napri2isbi_test/")
     save(stack, savedir / tifname.format(time=time))
 
   return lbep, labelset, stackset
-
-from expand_labels_scikit import expand_labels
 
 def save_permute_existing(tb, info, savedir):
   savedir = Path(savedir)

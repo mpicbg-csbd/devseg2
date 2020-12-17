@@ -4,12 +4,13 @@ export CUDA_LAUNCH_BLOCKING=1
 ipython
 
 import denoiser, detector, tracking
-from segtools.ns2dir import load,save,toarray
-import experiments2 as ex
 import networkx as nx
 import numpy_indexed as ndi
-import analysis2, ipy
+
 import numpy as np
+from segtools.ns2dir import load,save,toarray
+import experiments2 as ex
+import analysis2, ipy
 %load_ext line_profiler
 """
 
@@ -30,7 +31,7 @@ Detection and denoising.
 # import torch_models
 import ipdb
 import itertools
-# from math import floor,ceil
+from math import floor,ceil
 import numpy as np
 # from scipy.ndimage import label,zoom
 from skimage.feature  import peak_local_max
@@ -39,8 +40,6 @@ from pathlib import Path
 from segtools.ns2dir import load,save,flatten_sn,toarray
 from segtools import torch_models
 from types import SimpleNamespace
-import denoiser, denoise_utils
-import detector #, detect_utils
 import torch
 from segtools.numpy_utils import normalize3, perm2, collapse2, splt
 from segtools import point_matcher
@@ -52,11 +51,19 @@ import json
 from scipy.ndimage.morphology import binary_dilation
 
 import tracking
+import denoiser, denoise_utils
+import detector #, detect_utils
+import detector2
 
 from isbi_tools import get_isbi_info, isbi_datasets, isbi_scales
 from glob import glob
 import os
 import re
+from skimage.util import view_as_windows
+from expand_labels_scikit import expand_labels
+
+from scipy.ndimage.morphology import distance_transform_edt
+import datagen
 
 
 savedir = Path('/projects/project-broaddus/devseg_2/expr/')
@@ -90,6 +97,8 @@ slurm.e15 = 'sbatch -J e15_{pid:02d} -p gpu --gres gpu:1 -n 1 -t 12:00:00 -c 1 -
 slurm.e16 = 'sbatch -J e16_{pid:02d} -p gpu --gres gpu:1 -n 1 -t  2:00:00 -c 1 --mem 128000 -o slurm/e16_pid{pid:02d}.out -e slurm/e16_pid{pid:02d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e16_ce_adapt({pid})\"\' '
 slurm.e18 = 'sbatch -J e18_{pid:03d} -p gpu --gres gpu:1 -n 1 -t  6:00:00 -c 1 --mem 128000 -o slurm/e18_pid{pid:03d}.out -e slurm/e18_pid{pid:03d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e18_isbidet({pid})\"\' '
 slurm.e19 = 'sbatch -J e19_{pid:03d} -n 1 -t 1:00:00 -c 4 --mem 128000 -o slurm/e19_pid{pid:03d}.out -e slurm/e19_pid{pid:03d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e19_tracking({pid})\"\' '
+slurm.e20 = 'sbatch -J e20_{pid:03d} -n 1 -t 1:00:00 -c 1 --mem 128000 -o slurm/e20_pid{pid:03d}.out -e slurm/e20_pid{pid:03d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e20_trainset({pid})\"\' '
+slurm.e21 = 'sbatch -J e21_{pid:03d} -p gpu --gres gpu:1 -n 1 -t  6:00:00 -c 1 --mem 128000 -o slurm/e21_pid{pid:03d}.out -e slurm/e21_pid{pid:03d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e21_isbidet({pid})\"\' '
 
 def run_slurm(cmd,pids):
   ## copy the experiments file to a safe name that you WONT EDIT. If you edit the code while jobs are waiting in the SLURM queue it could cause inconsistencies.
@@ -800,7 +809,7 @@ def e18_isbidet(pid=0):
   """
   v01 : For each 3D ISBI dataset: Train, Vali, Predict on times 000,001,002 respectively. pid selects dataset. pid in range(19).
   v02 : change name to `e18_isbidet`. Train powerful models and predict across all times. pid in iterdims([2,19]).
-  v03 : WIP. fix normalization bug and use reflect BC padding on prediction.
+  v03 : fix normalization bug and use reflect BC padding on prediction.
   """
 
   (p0,p1),pid = _parse_pid(pid,[2,19])
@@ -808,7 +817,7 @@ def e18_isbidet(pid=0):
   myname, isbiname  = isbi_datasets[p1]
   trainset = ["01","02"][p0]
   testset  = trainset
-  info = get_isbi_info(myname,isbiname,testset)
+  info  = get_isbi_info(myname,isbiname,testset)
   _zoom = None
 
   if info.ndim==2:
@@ -870,32 +879,35 @@ def e18_isbidet(pid=0):
   cfig = _config()
 
   if myname=="celegans_isbi":
-    # kernel_sigmas = [1,7,7]
-    # bg_weight_multiplier = 0.2
-    kernel_sigmas[...] = [1,5,5]
-    _zoom = (1,0.5,0.5)
-  if myname=="trib_isbi":  kernel_sigmas = [3,3,3]
+      kernel_sigmas = [1,5,5]
+      _zoom = (1,0.5,0.5)
+  if myname=="trib_isbi":
+    kernel_sigmas = [3,3,3]
   if myname=="MSC":
-    a,b = info.shape
-    if info.dataset=="01": 
-      _zoom=(1/4,1/4)
-    else:
-      # _zoom = (256/a, 392/b) ## almost exactly isotropic but divisible by 8!
-      _zoom = (128/a, 200/b) ## almost exactly isotropic but divisible by 8!
-  if myname=="HeLa":
-    kernel_sigmas = [11,11]
-    _zoom = (0.5,0.5)
-  if myname=="fly_isbi":
-    cfig.bg_weight_multiplier=0.0
-    cfig.weight_decay = False
-  # if myname=="MDA231":     kernel_sigmas = [1,3,3]
-  if myname=="H157":
-    _zoom = (1/4,)*3
-    cfig.sampler = detector.flat_sampler
-  if myname=="hampster":
-    # kernel_sigmas = [1,7,7]
+      a,b = info.shape
+      if info.dataset=="01":
+        _zoom=(1/4,1/4)
+      else:
+        # _zoom = (256/a, 392/b) ## almost exactly isotropic but divisible by 8!
+        _zoom = (128/a, 200/b) ## almost exactly isotropic but divisible by 8!
+  if isbiname=="DIC-C2DH-HeLa":
+      kernel_sigmas = [11,11]
+      _zoom = (0.5,0.5)
+  if "A549" in myname:
     _zoom = (1,0.5,0.5)
-  if isbiname=="Fluo-N3DH-SIM+": _zoom = (1,1/2,1/2)
+  if myname=="fly_isbi":
+      cfig.bg_weight_multiplier=0.0
+      cfig.weight_decay = False
+  if myname=="MDA231":
+      kernel_sigmas = [1,3,3]
+  if myname=="H157":
+      _zoom = (1/4,)*3
+      cfig.sampler = detector.flat_sampler
+  if myname=="hampster":
+      # kernel_sigmas = [1,7,7]
+      _zoom = (1,0.5,0.5)
+  if isbiname=="Fluo-N3DH-SIM+":
+      _zoom = (1,1/2,1/2)
 
   ltps = load(f"/projects/project-broaddus/rawdata/{myname}/traj/{isbiname}/{trainset}_traj.pkl")
   
@@ -916,7 +928,7 @@ def e18_isbidet(pid=0):
     vd = SimpleNamespace()
     vd.input  = np.array([load(f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{trainset}/" + tif_name.format(n=n)) for n in vali_times])
     vd.gt     = [ltps[k] for k in vali_times]
-    if _zoom: 
+    if _zoom:
       vd.input = zoom(vd.input, (1,)+_zoom)
       vd.gt = [(v*_zoom).astype(np.int) for v in vd.gt]
     vd.target = detector.pts2target_gaussian(vd.gt,vd.input[0].shape,kernel_sigmas)
@@ -952,7 +964,7 @@ def e18_isbidet(pid=0):
     td,vd = _ltvd(0)
     # res = detector.predict_raw(net,td.input,dims=dims).astype(np.float16)
     # save(res, cfig.savedir / 'pred_train.npy')
-    res = detector.predict_raw(net,vd.input,dims=dims).astype(np.float16)
+    res = torch_models.predict_raw(net,vd.input,dims=dims).astype(np.float16)
     save(res, cfig.savedir / 'pred_vali.npy')
 
   ## Predict and Evaluate model result on all available data
@@ -979,7 +991,7 @@ def e18_isbidet(pid=0):
     if _zoom: x = zoom(x,_zoom)
     x  = normalize3(x,2,99.4,clip=False)
     dims = "ZYX" if info.ndim==3 else "YX"
-    res  = detector.predict_raw(net,x,dims=dims).astype(np.float32)
+    res  = torch_models.predict_raw(net,x,dims=dims).astype(np.float32)
     pts  = peak_local_max(res,threshold_abs=.2,exclude_border=False,footprint=np.ones(nms_footprint))
     if _zoom:
       pts = pts/_zoom
@@ -1002,235 +1014,7 @@ def e18_isbidet(pid=0):
   # save(np.array(pred).astype(np.float16), cfig.savedir / f"pred_{testset}.npy")
   # save(np.array(raw).astype(np.float16),  cfig.savedir / f"raw_{testset}.npy")
 
-def e19_tracking(pid=0):
-  """
-  v01: [3,19,2]
-  v02: add CP-net tracking to p0. fix a major bug. split dataset loop into p3. fixed, small kern size. [4,19,2,2]
-  v03: loops over p0 and p2 internally to allow parallel execution over p1,p3. [19,2]
-  v04: WIP using e18_v03 after big bug fix.
-  """
 
-  (p1,p3),pid = _parse_pid(pid,[19,2])
-  for (p0,p2) in iterdims([4,2]):
-    if (p0,p2)==(1,1): continue
-    if (p0,p2)!=(3,0): continue
-    print(f"\n{pid}: {p0} {p1} {p2} {p3}")
-
-    dataset = ['01','02'][p3]
-    myname, isbiname = isbi_datasets[p1]
-    isbi_dir = f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/"
-    
-    info = get_isbi_info(myname,isbiname,dataset)
-    # print(json.dumps(info.__dict__,sort_keys=True, indent=2, default=str))
-    print(isbiname, dataset, sep='\t')
-
-    outdir = savedir/f"e19_tracking/v04/pid{pid:03d}/"
-    # outdir = savedir/f"e19_tracking/v02/pid_{p0}_{p1:02d}_{p2}_{p3}/"
-
-    _tracking = [lambda ltps: tracking.nn_tracking_on_ltps(ltps,scale=info.scale),
-                 lambda ltps: tracking.random_tracking_on_ltps(ltps)
-                ][p2]
-    kern = np.ones([3,5,5]) if info.ndim==3 else np.ones([5,5])
-
-    start,stop = info.start,info.stop
-    if p0==0: ## permute existing labels via tracking
-      nap  = tracking.load_isbi2nap(isbi_dir,dataset,[start,stop])
-      ltps = tracking.nap2ltps(nap)
-      tb   = _tracking(ltps)
-      tracking._tb_add_orig_labels(tb,nap)
-      lbep = tracking.save_permute_existing(tb,info,savedir=outdir)
-    if p0==1: ## make consistent label shape, but don't change label id's.
-      nap  = tracking.load_isbi2nap(isbi_dir,dataset,[start,stop])
-      tracking.save_isbi(nap,shape=info.shape,_kern=kern,savedir=outdir)
-    if p0==2: ## make consistent label shape AND track
-      ltps = load(f"/projects/project-broaddus/rawdata/{myname}/traj/{isbiname}/{dataset}_traj.pkl")
-      if type(ltps) is dict:
-        ltps = [ltps[k] for k in sorted(ltps.keys())]
-      tb   = _tracking(ltps)
-      nap  = tracking.tb2nap(tb,ltps)
-      nap.tracklets[:,1] += start
-      tracking.save_isbi(nap,shape=info.shape,_kern=kern,savedir=outdir)
-    if p0==3: ## track using CP-net detections
-      oldpid  = _parse_pid([p3,p1],[2,19])[1]
-      ltps    = load(f"/projects/project-broaddus/devseg_2/expr/e18_isbidet/v03/pid{oldpid:03d}/ltps_{dataset}.pkl")
-      if type(ltps) is dict:
-        _ltps = [ltps[k] for k in sorted(ltps.keys())]
-      tb      = _tracking(_ltps)
-
-      if info.penalize_FP=='0':
-        nap_orig  = tracking.load_isbi2nap(isbi_dir,dataset,[start,start+1])
-        tb = tracking.filter_starting_tracks(tb,ltps,nap_orig)
-      
-      nap  = tracking.tb2nap(tb,_ltps)
-      nap.tracklets[:,1] += start
-      tracking.save_isbi(nap,shape=info.shape,_kern=kern,savedir=outdir)
-
-    resdir  = Path(isbi_dir)/(dataset+"_RES")
-    bashcmd = f"""
-    localtra=/projects/project-broaddus/comparison_methods/EvaluationSoftware2/Linux/TRAMeasure
-    localdet=/projects/project-broaddus/comparison_methods/EvaluationSoftware2/Linux/DETMeasure
-    mkdir -p {resdir}
-    # rm {resdir}/*
-    cp -r {outdir}/*.tif {outdir}/res_track.txt {resdir}/
-    $localdet {isbi_dir} {dataset} {info.ndigits} {info.penalize_FP} > {outdir}/{dataset}_DET.txt
-    cat {outdir}/{dataset}_DET.txt
-    $localtra {isbi_dir} {dataset} {info.ndigits} > {outdir}/{dataset}_TRA.txt
-    cat {outdir}/{dataset}_TRA.txt
-    # rm {resdir}/*
-    rm {outdir}/*.tif
-    """
-    run(bashcmd,shell=True)
-
-    # return tb,nap,ltps
-
-def e20_trainset(pid=0):
-  """
-  Construct fixed training datasets for each ISBI example.
-  Augmentation / content-based sampling, etc goes here.
-  We can optionally reconstruct the training data (or not) before each training run, and we'll have a record of scores for each patch.
-  uses same pid scheme as e18_isbidet.
-  """
-
-  (p0,p1),pid = _parse_pid(pid,[2,19])
-
-  myname, isbiname  = isbi_datasets[p1]
-  trainset = ["01","02"][p0]
-  testset  = trainset
-  info = get_isbi_info(myname,isbiname,testset)
-  _zoom = None
-
-  if info.ndim==2:
-    batch_shape = [1,1,512,512]
-    # _getnet = lambda : torch_models.Unet3(16, [[1],[1]], pool=(2,2), kernsize=(5,5), finallayer=torch_models.nn.Sequential)
-    kernel_sigmas = [5,5]
-    # nms_footprint = [9,9]
-    time_total = 20_000
-  else:
-    batch_shape  = [1,1,16,128,128]
-    # _getnet = lambda : torch_models.Unet3(16, [[1],[1]], pool=(1,2,2), kernsize=(3,5,5), finallayer=torch_models.nn.Sequential)
-    kernel_sigmas = [2,5,5]
-    # nms_footprint = [3,9,9]
-    time_total = 10_000
-
-  print(json.dumps(info.__dict__,sort_keys=True, indent=2, default=str))
-
-  ltps = load(f"/projects/project-broaddus/rawdata/{myname}/traj/{isbiname}/{trainset}_traj.pkl")
-
-  def _times():
-    """
-    how many frames to train on? should be roughly sqrt N total frames. validate should be same.
-    """
-    t0,t1 = info.start, info.stop
-    N = t1 - t0
-    pix_needed   = time_total * np.prod(batch_shape)
-    pix_i_have   = N*info.shape
-    cells_i_have = len(flatten(ltps))
-
-    # Nsamples = int(N**0.5)
-    # if info.ndim==2: Nsamples = 2*Nsamples
-    # gap = N//Nsamples
-    # dt = gap//2
-    # train_times = np.r_[t0:t1:gap]
-    # vali_times  = np.r_[t0+dt:t1:3*gap]
-
-    train_times = np.r_[0,-1] if info.ndim==3 else np.r_[t0:t1:5]
-    # pred_times  = np.r_[t0:t1]
-    # assert np.in1d(train_times,vali_times).sum()==0
-    # return train_times, vali_times, pred_times
-    return train_times
-
-  # train_times, vali_times, pred_times = _times()
-  train_times = _times()
-  # print(train_times,vali_times,pred_times)
-
-  def _config():
-    cfig = SimpleNamespace()
-    cfig.getnet = _getnet
-    cfig.nms_footprint = nms_footprint
-    cfig.rescale_for_matching = list(info.scale)
-
-    cfig.fg_bg_thresh = np.exp(-16/2)
-    cfig.bg_weight_multiplier = 1.0 #0.2 #1.0
-    cfig.time_weightdecay = 1600 # for pixelwise weights
-    cfig.weight_decay = True
-    cfig.use_weights  = True
-    cfig.sampler      = detector.content_sampler
-    cfig.patch_space  = np.array(batch_shape[2:])
-
-    # time_total = 20_000 
-    cfig.time_agg = 1 # aggregate gradients before backprop
-    cfig.time_loss = 10
-    cfig.time_print = 100
-    cfig.time_savecrop = max(100,time_total//50)
-    cfig.time_validate = max(500,time_total//50)
-    cfig.time_total = time_total ## # about 12k / hour? 200/min = 5mins/ 1k = 12k/hr on 3D data
-    cfig.lr = 4e-4
-
-    return cfig
-  cfig = _config()
-
-  if myname=="celegans_isbi":
-    # kernel_sigmas = [1,7,7]
-    # bg_weight_multiplier = 0.2
-    kernel_sigmas[...] = [1,5,5]
-    _zoom = (1,0.5,0.5)
-  if myname=="trib_isbi":  kernel_sigmas = [3,3,3]
-  if myname=="MSC":
-    a,b = info.shape
-    if info.dataset=="01": 
-      _zoom=(1/4,1/4)
-    else:
-      # _zoom = (256/a, 392/b) ## almost exactly isotropic but divisible by 8!
-      _zoom = (128/a, 200/b) ## almost exactly isotropic but divisible by 8!
-  if myname=="HeLa":
-    kernel_sigmas = [11,11]
-    _zoom = (0.5,0.5)
-  if myname=="fly_isbi":
-    cfig.bg_weight_multiplier=0.0
-    cfig.weight_decay = False
-  # if myname=="MDA231":     kernel_sigmas = [1,3,3]
-  if myname=="H157":
-    _zoom = (1/4,)*3
-    cfig.sampler = detector.flat_sampler
-  if myname=="hampster":
-    # kernel_sigmas = [1,7,7]
-    _zoom = (1,0.5,0.5)
-  if isbiname=="Fluo-N3DH-SIM+": _zoom = (1,1/2,1/2)
-  
-  
-
-  def _ltvd(config):
-    td = SimpleNamespace()
-    td.input  = np.array([load(f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{trainset}/" + tif_name.format(n=n)) for n in train_times])
-    td.gt     = [ltps[k] for k in train_times]
-    if _zoom:
-      td.input = zoom(td.input, (1,)+_zoom)
-      td.gt = [(v*_zoom).astype(np.int) for v in td.gt]
-    # ipdb.set_trace()
-    td.target = detector.pts2target_gaussian(td.gt,td.input[0].shape,kernel_sigmas)
-    td.input  = td.input[:,None]  ## add channels
-    td.target = td.target[:,None]
-    axs = tuple(range(1,td.input.ndim))
-    td.input  = normalize3(td.input,2,99.4,axs=axs,clip=False)
-
-    vd = SimpleNamespace()
-    vd.input  = np.array([load(f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{trainset}/" + tif_name.format(n=n)) for n in vali_times])
-    vd.gt     = [ltps[k] for k in vali_times]
-    if _zoom: 
-      vd.input = zoom(vd.input, (1,)+_zoom)
-      vd.gt = [(v*_zoom).astype(np.int) for v in vd.gt]
-    vd.target = detector.pts2target_gaussian(vd.gt,vd.input[0].shape,kernel_sigmas)
-    vd.input  = vd.input[:,None]
-    vd.target = vd.target[:,None]
-    axs = tuple(range(1,td.input.ndim))
-    vd.input  = normalize3(vd.input,2,99.4,axs=axs,clip=False)
-
-
-    
-    return td,vd
-
-  cfig.load_train_and_vali_data = _ltvd
-  cfig.savedir = savedir / f'e18_isbidet/v03/pid{pid:03d}/'
 
 
 

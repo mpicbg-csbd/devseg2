@@ -266,6 +266,10 @@ def pts2target_gaussian(list_of_pts,sh,sigmas):
 def pts2target_gaussian_sigmalist(list_of_pts,sh,list_of_sigmas):
   return np.array([pts2target_gaussian([x],sh,sig)[0] for x,sig in zip(list_of_pts,list_of_sigmas)])
 
+
+
+
+
 def content_sampler(ta,td,config):
   """
   sample near ground truth annotations (but flat over time)
@@ -273,7 +277,6 @@ def content_sampler(ta,td,config):
   """
 
   st = np.random.randint(td.input.shape[0])
-
   size_space = np.array(td.input.shape[2:])
   ndim = len(size_space)
   _ipt = np.random.randint(0,len(td.gt[st]))

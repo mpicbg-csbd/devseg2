@@ -165,23 +165,28 @@ def e19_tracking():
   added v02. 
   now v03.
   v04: tracks e19_v04 which tracks e18 v03...
+  v05: -> e19_v05 -> e21_v01
+  v06: e21_v02
   """
-  res = dict()
 
-  for name in sorted(glob("../expr/e19_tracking/v04/pid*/*.txt")):
+  # isbiID, 01/02, flat/content, random, DET/TRA
+  res = np.full([19,2,2,5,2],np.nan)
+
+  for name in sorted(glob("../expr/e21_isbidet/v02/pid*/*.txt")):
     print(name)
     m = re.search(r'pid(\d+)/(0[12])_(TRA|DET)\.txt',name)
     if not m: continue
     pid,dataset,tradet = m.groups()
-    params,pid = _parse_pid(int(pid),[19,2])
-    isbi_id = params[0]
+    params,pid = _parse_pid(int(pid),[19,2,2,5])
     m2 = re.search(r'(DET|TRA) measure: (\d\.\d+)', open(name,'r').read())
     if not m2: continue
-    res[(isbi_id,tradet,dataset)] = float(m2.group(2))
+    p4 = ['DET','TRA'].index(tradet)
+    idx = tuple(params) + (p4,)
+    res[idx] = float(m2.group(2))
     
   # redo = np.array(np.where((res==[-1,-1]).sum(-1)!=0))
   # res  = res.transpose([0,2,1,3]).reshape([4*2,19,2])[[0,1,2,4,5]]
-  save(res,"../expr/e19_tracking/v04/res.npy")
+  save(res,"../expr/e19_tracking/v06/res.npy")
 
   return res #,redo
 
@@ -206,4 +211,3 @@ def e19_showerrors():
       run(f"cat {name}",shell=1)
 
 
-# { 5, 6, 7, 12, 13, 16,}
