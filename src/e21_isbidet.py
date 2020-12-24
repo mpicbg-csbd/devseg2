@@ -140,15 +140,26 @@ def run(pid=0):
       return s
 
     def pred_many(self,net,filenames,savedir=None):
+      gtpts = load(f"/projects/project-broaddus/rawdata/{info.myname}/traj/{info.isbiname}/{info.dataset}_traj.pkl")
       ltps = []
+      _best_f1_score = 0.0
       dims = "ZYX" if info.ndim==3 else "YX"
       for i in range(len(filenames)):
+        print(i)
         x = zoom(load(filenames[i]),P.zoom,order=1)
         x = normalize3(x,2,99.4,clip=False)
         res = torch_models.predict_raw(net,x,dims=dims).astype(np.float32)
         pts = peak_local_max(res,threshold_abs=.2,exclude_border=False,footprint=np.ones(P.nms_footprint))
         pts = pts/P.zoom
-        if savedir: save(pts,savedir / "pts{i:04d}.pkl")
+        scores = point_matcher.match_unambiguous_nearestNeib(gtpts[i],pts,dub=10,scale=info.scale)
+        print(scores.f1)
+        if savedir: save(pts,savedir / "predpts/pts{i:04d}.pkl")
+        if savedir and scores.f1>_best_f1_score and i not in _traintimes(info):
+          _best_f1_score = scores.f1
+          save(x, savedir/"best/raw.tif")
+          save(res, savedir/"best/pred.tif")
+          save(pts, savedir/"best/pts.pkl")
+          save(gtpts[i], savedir/"best/pts_gt.pkl")
         ltps.append(pts)
       return ltps
 
@@ -187,21 +198,32 @@ def run(pid=0):
 
   print("Running e21 with savedir: \n", cfig.savedir, flush=True)
 
-  # dg = StandardGen(train_data_files); cfig.datagen = dg
+  # x = set(_traintimes(info))
+  # y = set(np.r_[:info.stop])
+  # print(len(x))
+  # return
+
+  dg = StandardGen(train_data_files); cfig.datagen = dg
   # save([dg.sampleMax(0) for _ in range(10)],cfig.savedir/"traindata.pkl")
   
-  # T = detector2.train_init(cfig)
+  T = detector2.train_init(cfig)
   # T = detector2.train_continue(cfig,cfig.savedir / 'm/best_weights_loss.pt')
-  # detector2.train(T)
+  detector2.train(T)
 
-  # net = cfig.getnet().cuda()
-  # net.load_state_dict(torch.load(cfig.savedir / "m/best_weights_loss.pt"))
-  # prednames = [f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{trainset}/" + info.rawname.format(time=i) for i in range(info.start,info.stop)]
-  # ltps = dg.pred_many(net,prednames)
-  ltps = load(cfig.savedir / f"ltps_{info.dataset}.pkl")
-  tb   = tracking.nn_tracking_on_ltps(ltps,scale=info.scale) # random_tracking_on_ltps(ltps)
-  scores = tracking.eval_tb_isbi(tb,info,savedir=cfig.savedir)
+  net = cfig.getnet().cuda()
+  net.load_state_dict(torch.load(cfig.savedir / "m/best_weights_loss.pt"))
+  prednames = [f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{trainset}/" + info.rawname.format(time=i) for i in range(info.start,info.stop)]
+  ltps = dg.pred_many(net,prednames,savedir=cfig.savedir)
+  # ltps = load(cfig.savedir / f"ltps_{info.dataset}.pkl")
+  # tb   = tracking.nn_tracking_on_ltps(ltps,scale=info.scale) # random_tracking_on_ltps(ltps)
+  # scores = tracking.eval_tb_isbi(tb,info,savedir=cfig.savedir)
   # ipdb.set_trace()
+
+def zmax(x):
+  if x.ndim==3: 
+    # return np.argmax(x,axis=0)
+    return x.max(0)
+  return x
 
 
 
@@ -221,12 +243,6 @@ def old_shit():
   # if myname == "celegans_isbi" and testset=='01':
   #   gtpts[6] = ltps[6]
   #   gtpts[7] = ltps[7]
-
-  def zmax(x):
-    if x.ndim==3: 
-      # return np.argmax(x,axis=0)
-      return x.max(0)
-    return x
 
   scores = []
   pred   = []
