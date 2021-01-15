@@ -126,7 +126,8 @@ def get_isbi_info(myname,isbiname,dataset):
   d.maskname  = "mask{time:03d}.tif" if d.ndigits==3 else "mask{time:04d}.tif"
   d.man_track = "man_track{time:03d}.tif" if d.ndigits==3 else "man_track{time:04d}.tif"
   d.rawname   = "t{time:03d}.tif" if d.ndigits==3 else "t{time:04d}.tif"
-
+  d.raw_full  = f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{dataset}/" + d.rawname
+  d.lab_full  = f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{dataset}_GT/TRA/" + d.man_track
   return d
 
 

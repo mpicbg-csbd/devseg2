@@ -93,7 +93,7 @@ def run(pid=0):
       # gtpts = load(f"/projects/project-broaddus/rawdata/{info.myname}/traj/{info.isbiname}/{info.dataset}_traj.pkl")
       gtpts = [d.pts for d in self.data]
       ltps  = []
-      _best_f1_score = 0.0
+      # _best_f1_score = 0.0
       # dims = "ZYX" if info.ndim==3 else "YX"
       dims = "YX"
       for i in range(len(self.data)):
@@ -107,15 +107,27 @@ def run(pid=0):
         scores = point_matcher.match_unambiguous_nearestNeib(gtpts[i],pts,dub=10,scale=[1,1])
         print(scores.f1)
         if savedir: save(pts,savedir / "predpts/pts{i:04d}.pkl")
+        # crop_errors_from_matching(x,res,scores)
         _traintimes = np.r_[:20]
-        if savedir and scores.f1>_best_f1_score and i not in _traintimes:
-          _best_f1_score = scores.f1
-          save(x, savedir/"best/raw.tif")
-          save(res, savedir/"best/pred.tif")
-          save(pts, savedir/"best/pts.pkl")
-          save(gtpts[i], savedir/"best/pts_gt.pkl")
+        # if savedir and scores.f1>_best_f1_score and i not in _traintimes:
+        if savedir:
+          # and i not in _traintimes:
+          # _best_f1_score = scores.f1
+          save(x, savedir/f"pred/d{i:04d}/raw.tif")
+          save(res, savedir/f"pred/d{i:04d}/pred.tif")
+          save(pts, savedir/f"pred/d{i:04d}/pts.pkl")
+          save(gtpts[i], savedir/f"pred/d{i:04d}/pts_gt.pkl")
         ltps.append(pts)
       return ltps
+
+  def crop_errors_from_matching(x,res,scores):
+    from segtools.point_tools import patches_from_centerpoints
+    ipdb.set_trace()
+    gt = scores.pts_gt
+    yp = scores.pts_yp
+    # gt
+    x_patches = patches_from_centerpoints(x, centerpoints, patchsize=(32,32))
+
 
   def _loss(net,sample):
     s  = sample

@@ -20,7 +20,11 @@ from segtools.ns2dir import load,save,flatten_sn,toarray
 from types import SimpleNamespace
 from segtools.point_tools import trim_images_from_pts2
 import shutil
+import re
+from experiments_common import iterdims
 
+from segtools.numpy_utils import normalize3
+from matplotlib import pyplot as plt
 
 ## one-time-tasks
 
@@ -178,30 +182,29 @@ def job14():
       allpts[time] = pts
     save(allpts, f"/projects/project-broaddus/rawdata/{_myname}/traj/{_isbiname}/{_dataset}_traj.pkl")
 
-isbi_datasets = [
-  ("HSC",            "BF-C2DL-HSC"),
-  ("MuSC",           "BF-C2DL-MuSC"),
-  ("HeLa",           "DIC-C2DH-HeLa"),
-  ("MSC",            "Fluo-C2DL-MSC"),
-  ("A549",           "Fluo-C3DH-A549"),
-  ("A549-SIM",       "Fluo-C3DH-A549-SIM"),
-  ("H157",           "Fluo-C3DH-H157"),
-  ("MDA231",         "Fluo-C3DL-MDA231"),
-  ("GOWT1",          "Fluo-N2DH-GOWT1"),
-  ("SIM+",           "Fluo-N2DH-SIM+"),
-  ("HeLa",           "Fluo-N2DL-HeLa"),
-  ("celegans_isbi",  "Fluo-N3DH-CE"),
-  ("hampster",       "Fluo-N3DH-CHO"),
-  ("SIM+",           "Fluo-N3DH-SIM+"),
-  ("fly_isbi",       "Fluo-N3DL-DRO"),
-  ("trib_isbi_proj", "Fluo-N3DL-TRIC"),
-  ("trib_isbi",      "Fluo-N3DL-TRIF"),
-  ("U373",           "PhC-C2DH-U373"),
-  ("PSC",            "PhC-C2DL-PSC"),
- ]
+# isbi_datasets = [
+#   ("HSC",            "BF-C2DL-HSC"),
+#   ("MuSC",           "BF-C2DL-MuSC"),
+#   ("HeLa",           "DIC-C2DH-HeLa"),
+#   ("MSC",            "Fluo-C2DL-MSC"),
+#   ("A549",           "Fluo-C3DH-A549"),
+#   ("A549-SIM",       "Fluo-C3DH-A549-SIM"),
+#   ("H157",           "Fluo-C3DH-H157"),
+#   ("MDA231",         "Fluo-C3DL-MDA231"),
+#   ("GOWT1",          "Fluo-N2DH-GOWT1"),
+#   ("SIM+",           "Fluo-N2DH-SIM+"),
+#   ("HeLa",           "Fluo-N2DL-HeLa"),
+#   ("celegans_isbi",  "Fluo-N3DH-CE"),
+#   ("hampster",       "Fluo-N3DH-CHO"),
+#   ("SIM+",           "Fluo-N3DH-SIM+"),
+#   ("fly_isbi",       "Fluo-N3DL-DRO"),
+#   ("trib_isbi_proj", "Fluo-N3DL-TRIC"),
+#   ("trib_isbi",      "Fluo-N3DL-TRIF"),
+#   ("U373",           "PhC-C2DH-U373"),
+#   ("PSC",            "PhC-C2DL-PSC"),
+#  ]
 
 def job15():
-  import re
   dataset = ["01","02"]
   for i in range(19*2):
     m,n = np.unravel_index(i,[19,2])
@@ -276,5 +279,79 @@ def job16_downscaleTrib(ds="01"):
   ## direct copy man_track.txt
   name = f"Fluo-N3DL-TRIF/{ds}_GT/TRA/man_track.txt"
   shutil.copy(old_dir / name, new_dir / name)
+
+from isbi_tools import get_isbi_info, isbi_datasets, isbi_scales
+from segtools.point_tools import trim_images_from_pts2
+import matplotlib
+
+savedir_global = Path("/projects/project-broaddus/devseg_2/expr/")
+
+def job17_ISBI_projections():
+  savedir = savedir_global / "dataviews"
+  dataset = ["01","02"]
+
+  cm_r = np.random.rand(256,3)
+  cm_r = (cm_r+0.2).clip(max=1.0)
+  cm_r[0] = (0,0,0)
+  cm_r = matplotlib.colors.ListedColormap(cm_r)
+
+  def cmrand(lab):
+    m = lab==0
+    x = lab%255
+    x += 1
+    x[m] = 0
+    x = cm_r(x)
+    return x
+  
+  for i in range(19*2):
+    p0,p1 = np.unravel_index(i,[19,2])
+    _myname, _isbiname = isbi_datasets[p0]
+    _dataset = dataset[p1]
+    info = get_isbi_info(_myname,_isbiname,_dataset)
+    print(_myname,_isbiname,_dataset)
+    # p = Path(f"/projects/project-broaddus/rawdata/{_myname}/{_isbiname}/{_dataset}_GT/TRA/")
+    # if "TRIC" not in _isbiname: continue
+
+    if info.ndim==2:
+      for p2,p3 in iterdims([2,2]):
+        p2,_t = [("start",info.start), ("stop",info.stop-1)][p2]
+        p3,_name = [("raw",info.raw_full.format(time=_t))
+                  ,("lab",info.lab_full.format(time=_t))][p3]
+        img = load(_name)
+        if p3=="raw":
+          img = normalize3(img,0,100)
+          img = (plt.cm.gray(img)*255).astype(np.uint8)
+        else:
+          img = (cmrand(img)*255).astype(np.uint8)
+        save(img, savedir / (_isbiname + f"_t-{_t}_d{_dataset}_{p3}.png"))
+        # print(savedir / (_isbiname + f"_t-{_t}_{p3}.tif"))
+    elif info.ndim==3:
+      for p2,p3,p4 in iterdims([2,2,3]):
+        p2,_t = [("start",info.start), ("stop",info.stop-1)][p2]
+        p3,_name = [("raw",info.raw_full.format(time=_t))
+                  ,("lab",info.lab_full.format(time=_t))][p3]
+        _X = ["Z","Y","X"][p4]
+        img  = load(_name)
+        if "TRI" in _isbiname or "DRO" in _isbiname:
+          traj = load(f"/projects/project-broaddus/rawdata/{_myname}/traj/{_isbiname}/{_dataset}_traj.pkl")
+          pts2,ss = trim_images_from_pts2(traj[_t])
+          img = img[ss]
+        img = img.max(p4)
+        if p3=="raw":
+          img = normalize3(img,0,100)
+          img = (plt.cm.gray(img)*255).astype(np.uint8)
+        else:
+          img = (cmrand(img)*255).astype(np.uint8)
+        save(img, savedir / (_isbiname + f"_t-{_t}_d{_dataset}_{p3}_max{_X}.png"))
+        # print(savedir / (_isbiname + f"_t-{_t}_{p3}_max{_X}.tif"))
+
+
+
+
+
+
+
+
+
 
 

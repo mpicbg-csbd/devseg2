@@ -1,4 +1,6 @@
 from experiments_common import *
+from pykdtree.kdtree import KDTree as pyKDTree
+from segtools.render import rgb_max
 
 print(savedir)
 
@@ -142,26 +144,73 @@ def run(pid=0):
     def pred_many(self,net,filenames,savedir=None):
       gtpts = load(f"/projects/project-broaddus/rawdata/{info.myname}/traj/{info.isbiname}/{info.dataset}_traj.pkl")
       ltps = []
-      _best_f1_score = 0.0
+      # _best_f1_score = 0.0
       dims = "ZYX" if info.ndim==3 else "YX"
-      for i in range(len(filenames)):
+      # for i in range(len(filenames)):
+
+      s0  = set(_traintimes(info)) #list()
+      s1  = set(range(len(filenames))) - s0
+      _t0 = list(np.random.choice(list(s0),min(10,len(s0)),replace=False))
+      _t1 = list(np.random.choice(list(s1),min(10,len(s1)),replace=False))
+      # _t0 = [0, 78] 
+      # _t1 = [101, 129]
+      # ipdb.set_trace()
+      print(_t0,_t1)
+      for i in _t0+_t1:
         print(i)
-        x = zoom(load(filenames[i]),P.zoom,order=1)
-        x = normalize3(x,2,99.4,clip=False)
+        raw = load(filenames[i])
+        raw = normalize3(raw,2,99.4,clip=False)
+        x = zoom(raw,P.zoom,order=1)
         res = torch_models.predict_raw(net,x,dims=dims).astype(np.float32)
         pts = peak_local_max(res,threshold_abs=.2,exclude_border=False,footprint=np.ones(P.nms_footprint))
         pts = pts/P.zoom
-        scores = point_matcher.match_unambiguous_nearestNeib(gtpts[i],pts,dub=10,scale=info.scale)
-        print(scores.f1)
-        if savedir: save(pts,savedir / "predpts/pts{i:04d}.pkl")
-        if savedir and scores.f1>_best_f1_score and i not in _traintimes(info):
-          _best_f1_score = scores.f1
-          save(x, savedir/"best/raw.tif")
-          save(res, savedir/"best/pred.tif")
-          save(pts, savedir/"best/pts.pkl")
-          save(gtpts[i], savedir/"best/pts_gt.pkl")
+        res = zoom(res, 1/np.array(P.zoom), order=1)
+        matching = point_matcher.match_unambiguous_nearestNeib(gtpts[i],pts,dub=10,scale=info.scale)
+        print(matching.f1)
+        # fp, fn = find_errors(raw,matching)
+        # if savedir: save(pts,savedir / "predpts/pts{i:04d}.pkl")
+
+        if savedir: # and matching.f1>_best_f1_score and i not in _traintimes(info):
+          # _best_f1_score = matching.f1
+          # ipdb.set_trace()
+          save(rgb_max(raw).astype(np.float16), savedir/f"pred/d{i:04d}/raw.tif")
+          # save(res, savedir/f"pred/d{i:04d}/pred.tif")
+          save(pts, savedir/f"pred/d{i:04d}/pts.pkl")
+          save(gtpts[i], savedir/f"pred/d{i:04d}/pts_gt.pkl")
+          # save(fp, savedir/f"errors/t{i:04d}/fp.pkl")
+          # save(fn, savedir/f"errors/t{i:04d}/fn.pkl")
         ltps.append(pts)
       return ltps
+
+  def find_points_within_patches(centerpoints, allpts, _patchsize):
+    kdt = pyKDTree(allpts)
+    # ipdb.set_trace()
+    N,D = centerpoints.shape
+    dists, inds = kdt.query(centerpoints, k=10, distance_upper_bound=np.linalg.norm(_patchsize)/2)
+    def _test(x,y):
+      return (np.abs(x-y) <= np.array(_patchsize)/2).all()
+    pts = [[allpts[n] for n in ns if n<len(allpts) and _test(centerpoints[i],allpts[n])] for i,ns in enumerate(inds)]
+    return pts
+
+  def find_errors(img,matching):
+    from segtools.point_tools import patches_from_centerpoints
+    # ipdb.set_trace()
+    _patchsize = (7,65,65)
+    _patchsize = (33,33)
+
+    pts = matching.pts_yp[~matching.yp_matched_mask]
+    patches = patches_from_centerpoints(img, pts, _patchsize)
+    yp_in = find_points_within_patches(pts, matching.pts_yp, _patchsize)
+    gt_in = find_points_within_patches(pts, matching.pts_gt, _patchsize)
+    fp = [SimpleNamespace(pt=pts[i],patch=patches[i],yp=[pts[i]] + yp_in[i],gt=gt_in[i]) for i in range(pts.shape[0])]
+
+    pts = matching.pts_gt[~matching.gt_matched_mask]
+    patches = patches_from_centerpoints(img, pts, _patchsize)
+    yp_in = find_points_within_patches(pts, matching.pts_yp, _patchsize)
+    gt_in = find_points_within_patches(pts, matching.pts_gt, _patchsize)
+    fn = [SimpleNamespace(pt=pts[i],patch=patches[i],yp=yp_in[i],gt=[pts[i]] + gt_in[i]) for i in range(pts.shape[0])]
+
+    return fp, fn
 
   def _loss(net,sample):
     s  = sample
@@ -204,15 +253,28 @@ def run(pid=0):
   # return
 
   dg = StandardGen(train_data_files); cfig.datagen = dg
+  # save(dg.data[0].target.astype(np.float32), cfig.savedir / 'target_t_120.tif')
+
   # save([dg.sampleMax(0) for _ in range(10)],cfig.savedir/"traindata.pkl")
   
-  T = detector2.train_init(cfig)
+  # T = detector2.train_init(cfig)
   # T = detector2.train_continue(cfig,cfig.savedir / 'm/best_weights_loss.pt')
-  detector2.train(T)
+  # detector2.train(T)
 
   net = cfig.getnet().cuda()
   net.load_state_dict(torch.load(cfig.savedir / "m/best_weights_loss.pt"))
+
   prednames = [f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{trainset}/" + info.rawname.format(time=i) for i in range(info.start,info.stop)]
+
+  # prednames = [f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{trainset}/" + info.rawname.format(time=i) for i in [120]]
+  # raw = load(prednames[0])
+  # raw = normalize3(raw,2,99.4,clip=False)
+  # x   = zoom(raw,P.zoom,order=1)
+  # res = torch_models.predict_raw(net,x,dims="ZYX").astype(np.float32)
+  # res = zoom(res,np.array([1])/P.zoom,)
+  # save(res,cfig.savedir / 'pred_t_120.tif')
+  # return
+
   ltps = dg.pred_many(net,prednames,savedir=cfig.savedir)
   # ltps = load(cfig.savedir / f"ltps_{info.dataset}.pkl")
   # tb   = tracking.nn_tracking_on_ltps(ltps,scale=info.scale) # random_tracking_on_ltps(ltps)
