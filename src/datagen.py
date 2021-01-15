@@ -178,7 +178,9 @@ from segtools.point_tools import trim_images_from_pts2
 
 def place_gaussian_at_pts(pts,sh,sigmas):
   s  = np.array(sigmas)
-  ks = (s*7).astype(np.int) ## must be ODD
+  ks = np.ceil(s*7).astype(np.int) #*6 + 1 ## gaurantees odd size and thus unique, brightest center pixel
+  ks = ks - ks%2 + 1## enfore ODD shape so kernel is centered! (grow even dims by 1 pix)
+  # ks = (s*7).astype(np.int) ## must be ODD
   def f(x):
     x = x - (ks-1)/2
     return np.exp(-(x*x/s/s).sum()/2)

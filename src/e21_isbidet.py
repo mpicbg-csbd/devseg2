@@ -16,6 +16,14 @@ def run_slurm(pids):
   shutil.copy("/projects/project-broaddus/devseg_2/src/e21_isbidet.py", "/projects/project-broaddus/devseg_2/src/e21_isbidet_copy.py")
   for pid in pids: Popen(slurm.format(pid=pid),shell=True)
 
+def slurm_entry(pid=0):
+  (p0,p1),pid = parse_pid(pid,[2,19])
+  for p2,p3 in iterdims([2,5]):
+    try:
+      run([p0,p1,p2,p3])
+    except:
+      print("FAIL on pids", [p0,p1,p2,p3])
+
 
 def _traintimes(info):
   t0,t1 = info.start, info.stop
@@ -38,23 +46,6 @@ def _traintimes(info):
   # return train_times, vali_times, pred_times
   return train_times
 
-def specialize(P,myname,info):
-  if myname in ["celegans_isbi","A549","A549-SIM","H157","hampster","Fluo-N3DH-SIM+"]:
-      P.zoom = {3:(1,0.5,0.5), 2:(0.5,0.5)}[info.ndim]
-  if myname=="trib_isbi":
-    P.kern = [3,3,3]
-  if myname=="MSC":
-    a,b = info.shape
-    P.zoom = {'01':(1/4,1/4), '02':(128/a, 200/b)}[info.dataset]
-    ## '02' rescaling is almost exactly isotropic while still being divisible by 8.
-  if info.isbiname=="DIC-C2DH-HeLa":
-    P.kern = [7,7]
-    P.zoom = (0.5,0.5)
-  if myname=="fly_isbi":
-    pass
-    # cfig.bg_weight_multiplier=0.0
-    # cfig.weight_decay = False
-
 def _init_params(ndim):
   P = SimpleNamespace()
   if ndim==2:
@@ -72,40 +63,62 @@ def _init_params(ndim):
   P.patch = np.array(P.patch)
   return P
 
-def slurm_entry(pid=0):
-  (p0,p1),pid = parse_pid(pid,[2,19])
-  for p2,p3 in iterdims([2,5]):
-    try:
-      run([p0,p1,p2,p3])
-    except:
-      print("FAIL on pids", [p0,p1,p2,p3])
+def _specialize(P,myname,info):
+  if myname in ["celegans_isbi","A549","A549-SIM","H157","hampster","Fluo-N3DH-SIM+"]:
+      P.zoom = {3:(1,0.5,0.5), 2:(0.5,0.5)}[info.ndim]
+  if myname=="trib_isbi":
+    P.kern = [3,3,3]
+  if myname=="MSC":
+    a,b = info.shape
+    P.zoom = {'01':(1/4,1/4), '02':(128/a, 200/b)}[info.dataset]
+    ## '02' rescaling is almost exactly isotropic while still being divisible by 8.
+  if info.isbiname=="DIC-C2DH-HeLa":
+    P.kern = [7,7]
+    P.zoom = (0.5,0.5)
+  if myname=="fly_isbi":
+    pass
+    # cfig.bg_weight_multiplier=0.0
+    # cfig.weight_decay = False
 
 def run(pid=0):
   """
   v01 : refactor of e18. make traindata AOT.
   add `_train` 0 = predict only, 1 = normal init, 2 = continue
   datagen generator -> StandardGen, customizable loss and validation metrics, and full detector2 refactor.
-  v02 : optimizing hyperparams. 
+  v02 : optimizing hyperparams. in [2,19,5,2]
+    p0: dataset in [01,02]
+    p1: isbi dataset in [0..18]
+    p2: sample flat vs content [0,1]
+    p3: random variation [0..4]
+    p4: pixel weights (should be per-dataset?) [0,1]
+  v03 : explore kernel size. [2,19,10]
+    p2: kernel size
+
+    p3: jitter: directed|random
+    p4: jitter magnitude?
+    we want to show performance vs jitter. [curve]. shape. 
   """
 
-  (p0,p1,p2,p3),pid = parse_pid(pid,[2,19,2,5])
-  # p2 sample flat vs content
-  # p3 random variation
-  # ~~p4 pixel weights (should be per-dataset?)~~
+  (p0,p1,p2),pid = parse_pid(pid,[2,19,10])
 
   myname, isbiname  = isbi_datasets[p1]
   trainset = ["01","02"][p0]
+  kernel_size = p2+1
   info = get_isbi_info(myname,isbiname,trainset)
   P = _init_params(info.ndim)
   print(json.dumps(info.__dict__,sort_keys=True, indent=2, default=str), flush=True)
+  print(_traintimes(info))
   train_data_files = [(f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{trainset}/" + info.rawname.format(time=n),
                        f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{trainset}_GT/TRA/" + info.man_track.format(time=n),
             )
           for n in _traintimes(info)]
+  _specialize(P,myname,info)
 
-  specialize(P,myname,info)
+  ## v03 ONLY
+  P.kern = np.array(kernel_size)*[1,1]
+  P.nms_footprint = [3,3] #np.ones(().astype(np.int))
 
-  savedir_local = savedir / f'e21_isbidet/v02/pid{pid:03d}/'
+  savedir_local = savedir / f'e21_isbidet/v03/pid{pid:03d}/'
 
   class StandardGen(object):
     def __init__(self, filenames):
@@ -121,24 +134,26 @@ def run(pid=0):
       Nvali  = ceil(N/8)
       Ntrain = N-Nvali
       idxs = np.r_[:Ntrain] if train_mode else np.r_[Ntrain:N]
-      sampler = [sample_flat, sample_content][p2]
+      sampler = [sample_flat, sample_content][1] #[p2] now fixed. always content sampling.
       x,yt = sampler(self.data[idxs],P.patch)
       if train_mode:
         x,yt = augment(x,yt)
       if myname=='fly_isbi':
         w = weights(yt,time,thresh=np.exp(-4**2/2),decayTime=3*1600,bg_weight_multiplier=0.0)
       else:
-        w = weights(yt,time,thresh=np.exp(-4**2/2),decayTime=3*1600,)
-      # w = np.ones_like(yt)
+        # w = weights(yt,time,thresh=np.exp(-4**2/2),decayTime=3*1600,)
+        w = np.ones_like(yt)
       s = SimpleNamespace(x=x,yt=yt,w=w)
-      s.yt_pts = peak_local_max(yt,threshold_abs=.2,exclude_border=False,footprint=np.ones(P.nms_footprint))
+      s.yt_pts = peak_local_max(yt+np.random.rand(*yt.shape)*1e-5,threshold_abs=.2,exclude_border=False,footprint=np.ones(P.nms_footprint))
+      # ipdb.set_trace()
       return s
 
     def sampleMax(self,t):
       s = self.sample(t)
-      s.x = s.x.max(0)
-      s.yt = s.yt.max(0)
-      s.w = s.w.max(0)
+      if s.x.ndim==3:
+        s.x = s.x.max(0)
+        s.yt = s.yt.max(0)
+        s.w = s.w.max(0)
       return s
 
     def pred_many(self,net,filenames,savedir=None):
@@ -149,7 +164,7 @@ def run(pid=0):
       # for i in range(len(filenames)):
 
       s0  = set(_traintimes(info)) #list()
-      s1  = set(range(len(filenames))) - s0
+      s1  = set(range(info.start,info.stop)) - s0
       _t0 = list(np.random.choice(list(s0),min(10,len(s0)),replace=False))
       _t1 = list(np.random.choice(list(s1),min(10,len(s1)),replace=False))
       # _t0 = [0, 78] 
@@ -173,8 +188,8 @@ def run(pid=0):
         if savedir: # and matching.f1>_best_f1_score and i not in _traintimes(info):
           # _best_f1_score = matching.f1
           # ipdb.set_trace()
-          save(rgb_max(raw).astype(np.float16), savedir/f"pred/d{i:04d}/raw.tif")
-          # save(res, savedir/f"pred/d{i:04d}/pred.tif")
+          save(raw.astype(np.float16), savedir/f"pred/d{i:04d}/raw.tif")
+          save(res, savedir/f"pred/d{i:04d}/pred.tif")
           save(pts, savedir/f"pred/d{i:04d}/pts.pkl")
           save(gtpts[i], savedir/f"pred/d{i:04d}/pts_gt.pkl")
           # save(fp, savedir/f"errors/t{i:04d}/fp.pkl")
@@ -253,13 +268,13 @@ def run(pid=0):
   # return
 
   dg = StandardGen(train_data_files); cfig.datagen = dg
+  # ipdb.set_trace()
   # save(dg.data[0].target.astype(np.float32), cfig.savedir / 'target_t_120.tif')
-
-  # save([dg.sampleMax(0) for _ in range(10)],cfig.savedir/"traindata.pkl")
   
-  # T = detector2.train_init(cfig)
+  T = detector2.train_init(cfig)
+  save([dg.sampleMax(0) for _ in range(10)],cfig.savedir/"traindata.pkl")
   # T = detector2.train_continue(cfig,cfig.savedir / 'm/best_weights_loss.pt')
-  # detector2.train(T)
+  detector2.train(T)
 
   net = cfig.getnet().cuda()
   net.load_state_dict(torch.load(cfig.savedir / "m/best_weights_loss.pt"))
