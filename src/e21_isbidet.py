@@ -7,7 +7,7 @@ print(savedir)
 _gpu  = "-p gpu --gres gpu:1 -n 1 -t  6:00:00 -c 1 --mem 128000 "
 _cpu  = "-n 1 -t 1:00:00 -c 4 --mem 128000 "
 slurm = 'sbatch -J e21_{pid:03d} {_resources} -o slurm/e21_pid{pid:03d}.out -e slurm/e21_pid{pid:03d}.err --wrap \'python3 -c \"import e21_isbidet_copy as ex; ex.slurm_entry({pid})\"\' '
-slurm = slurm.replace("{_resources}",_cpu)
+slurm = slurm.replace("{_resources}",_gpu)
 
 
 def run_slurm(pids):
@@ -17,13 +17,13 @@ def run_slurm(pids):
   for pid in pids: Popen(slurm.format(pid=pid),shell=True)
 
 def slurm_entry(pid=0):
-  (p0,p1),pid = parse_pid(pid,[2,19])
-  for p2,p3 in iterdims([2,5]):
-    try:
-      run([p0,p1,p2,p3])
-    except:
-      print("FAIL on pids", [p0,p1,p2,p3])
-
+  run(pid)
+  # (p0,p1),pid = parse_pid(pid,[2,19,9])
+  # run([p0,p1,p2])
+  # for p2,p3 in iterdims([2,5]):
+  #   try:
+  #   except:
+  #     print("FAIL on pids", [p0,p1,p2,p3])
 
 def _traintimes(info):
   t0,t1 = info.start, info.stop
@@ -91,19 +91,21 @@ def run(pid=0):
     p2: sample flat vs content [0,1]
     p3: random variation [0..4]
     p4: pixel weights (should be per-dataset?) [0,1]
-  v03 : explore kernel size. [2,19,10]
-    p2: kernel size
-
+  v03 : explore kernel size. [2,50]
+    p0: two datasets
+    p1: kernel size
+  v04 : explore jitter! [2,50]
     p3: jitter: directed|random
     p4: jitter magnitude?
     we want to show performance vs jitter. [curve]. shape. 
   """
 
-  (p0,p1,p2),pid = parse_pid(pid,[2,19,10])
+  (p0,p1),pid = parse_pid(pid,[2,50])
 
-  myname, isbiname  = isbi_datasets[p1]
-  trainset = ["01","02"][p0]
-  kernel_size = p2+1
+  myname, isbiname  = isbi_datasets[[8,17][p0]]
+  trainset = '01' #["01","02"][p0]
+  # kernel_size = [0.25,.5,1,2,4,8,16,24,32,64][p1]
+  kernel_size = 256**(p1/49) / 4
   info = get_isbi_info(myname,isbiname,trainset)
   P = _init_params(info.ndim)
   print(json.dumps(info.__dict__,sort_keys=True, indent=2, default=str), flush=True)
@@ -116,7 +118,7 @@ def run(pid=0):
 
   ## v03 ONLY
   P.kern = np.array(kernel_size)*[1,1]
-  P.nms_footprint = [3,3] #np.ones(().astype(np.int))
+  P.nms_footprint = [5,5] #np.ones(().astype(np.int))
 
   savedir_local = savedir / f'e21_isbidet/v03/pid{pid:03d}/'
 
@@ -144,7 +146,9 @@ def run(pid=0):
         # w = weights(yt,time,thresh=np.exp(-4**2/2),decayTime=3*1600,)
         w = np.ones_like(yt)
       s = SimpleNamespace(x=x,yt=yt,w=w)
-      s.yt_pts = peak_local_max(yt+np.random.rand(*yt.shape)*1e-5,threshold_abs=.2,exclude_border=False,footprint=np.ones(P.nms_footprint))
+      # s.yt_pts = peak_local_max(yt+np.random.rand(*yt.shape)*1e-5,threshold_abs=.2,exclude_border=False,footprint=np.ones(P.nms_footprint))
+      ## overdetect on peaks EVEN WITH FOOTPRINT because they have exactly the same value
+      s.yt_pts = peak_local_max(yt,threshold_abs=.2,exclude_border=False,footprint=np.ones(P.nms_footprint))
       # ipdb.set_trace()
       return s
 
@@ -156,46 +160,52 @@ def run(pid=0):
         s.w = s.w.max(0)
       return s
 
-    def pred_many(self,net,filenames,savedir=None):
-      gtpts = load(f"/projects/project-broaddus/rawdata/{info.myname}/traj/{info.isbiname}/{info.dataset}_traj.pkl")
-      ltps = []
-      # _best_f1_score = 0.0
-      dims = "ZYX" if info.ndim==3 else "YX"
-      # for i in range(len(filenames)):
+  def pred_many(net,times,dirname='pred',savedir=None):
+    gtpts = load(f"/projects/project-broaddus/rawdata/{info.myname}/traj/{info.isbiname}/{info.dataset}_traj.pkl")
+    dims = "ZYX" if info.ndim==3 else "YX"
 
-      s0  = set(_traintimes(info)) #list()
-      s1  = set(range(info.start,info.stop)) - s0
-      _t0 = list(np.random.choice(list(s0),min(10,len(s0)),replace=False))
-      _t1 = list(np.random.choice(list(s1),min(10,len(s1)),replace=False))
-      # _t0 = [0, 78] 
-      # _t1 = [101, 129]
-      # ipdb.set_trace()
-      print(_t0,_t1)
-      for i in _t0+_t1:
-        print(i)
-        raw = load(filenames[i])
-        raw = normalize3(raw,2,99.4,clip=False)
-        x = zoom(raw,P.zoom,order=1)
-        res = torch_models.predict_raw(net,x,dims=dims).astype(np.float32)
-        pts = peak_local_max(res,threshold_abs=.2,exclude_border=False,footprint=np.ones(P.nms_footprint))
-        pts = pts/P.zoom
-        res = zoom(res, 1/np.array(P.zoom), order=1)
-        matching = point_matcher.match_unambiguous_nearestNeib(gtpts[i],pts,dub=10,scale=info.scale)
-        print(matching.f1)
-        # fp, fn = find_errors(raw,matching)
-        # if savedir: save(pts,savedir / "predpts/pts{i:04d}.pkl")
+    def _single(i):
+      "i is time"
+      print(i)
+      name = f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{trainset}/" + info.rawname.format(time=i)
+      raw = load(name)
+      raw = normalize3(raw,2,99.4,clip=False)
+      x = zoom(raw,P.zoom,order=1)
+      res = torch_models.predict_raw(net,x,dims=dims).astype(np.float32)
+      res = res / res.max() ## 
+      pts = peak_local_max(res,threshold_abs=.2,exclude_border=False,footprint=np.ones(P.nms_footprint))
+      pts = pts/P.zoom
+      res = zoom(res, 1/np.array(P.zoom), order=1)
+      matching = point_matcher.match_unambiguous_nearestNeib(gtpts[i],pts,dub=10,scale=info.scale)
+      print(matching.f1)
+      # fp, fn = find_errors(raw,matching)
+      # if savedir: save(pts,savedir / "predpts/pts{i:04d}.pkl")
+      target = place_gaussian_at_pts(gtpts[i],raw.shape,P.kern)
+      mse = np.mean((res-target)**2)
+      scores = dict(f1=matching.f1,precision=matching.precision,recall=matching.recall,mse=mse)
+      return SimpleNamespace(**locals())
 
-        if savedir: # and matching.f1>_best_f1_score and i not in _traintimes(info):
-          # _best_f1_score = matching.f1
-          # ipdb.set_trace()
-          save(raw.astype(np.float16), savedir/f"pred/d{i:04d}/raw.tif")
-          save(res, savedir/f"pred/d{i:04d}/pred.tif")
-          save(pts, savedir/f"pred/d{i:04d}/pts.pkl")
-          save(gtpts[i], savedir/f"pred/d{i:04d}/pts_gt.pkl")
-          # save(fp, savedir/f"errors/t{i:04d}/fp.pkl")
-          # save(fn, savedir/f"errors/t{i:04d}/fn.pkl")
-        ltps.append(pts)
-      return ltps
+    def _save_preds(d,i):
+      # _best_f1_score = matching.f1
+      save(d.raw.astype(np.float16), savedir/f"{dirname}/d{i:04d}/raw.tif")
+      save(d.res.astype(np.float16), savedir/f"{dirname}/d{i:04d}/pred.tif")
+      save(d.target.astype(np.float16), savedir/f"{dirname}/d{i:04d}/target.tif")
+      save(d.pts, savedir/f"{dirname}/d{i:04d}/pts.pkl")
+      save(gtpts[i], savedir/f"{dirname}/d{i:04d}/pts_gt.pkl")
+      save(d.scores, savedir/f"{dirname}/d{i:04d}/scores.pkl")
+      # save(fp, savedir/f"errors/t{i:04d}/fp.pkl")
+      # save(fn, savedir/f"errors/t{i:04d}/fn.pkl")
+
+    def _f(i): ## i is time
+      d = _single(i)
+      # _save_preds(d,i)
+      return d.scores,d.pts
+
+    scores,ltps = map(list,zip(*[_f(i) for i in times]))
+    save(scores, savedir/f"{dirname}/scores3.pkl")
+    # save(scores, savedir/f"{dirname}/ltps.pkl")
+
+    return ltps
 
   def find_points_within_patches(centerpoints, allpts, _patchsize):
     kdt = pyKDTree(allpts)
@@ -251,6 +261,7 @@ def run(pid=0):
     cfig.time_validate = 100
     cfig.time_total = 10_000 if info.ndim==3 else 15_000 ## # about 12k / hour? 200/min = 5mins/ 1k = 12k/hr on 3D data (10x faster on 2D?)
     cfig.n_vali_samples = 10
+    cfig.save_every_n = 5
     cfig.lr = 4e-4
     cfig.savedir = savedir_local
     cfig.loss = _loss
@@ -258,103 +269,54 @@ def run(pid=0):
     cfig.vali_minmax  = [None,np.max]
     return cfig
 
+  # def optimize_plm(net,data):
+  #   def params2score(params):
+  #     def f(x):
+  #       (raw,gt) = x
+  #       # pred = 
+  #     avg_score = np.mean([f(x) for x in dataset])
+  #     return avg_score
+  #   params = #optimize(params0,params2score,)
+  #   return params
+
+
+
+  """
+  EVERYTHING BELOW THIS POINT IS LIKE A WORKSPACE THAT CHANGES RAPIDLY & USES FUNCTIONS DEFINED ABOVE.
+  """
+
   cfig = _config()
 
   print("Running e21 with savedir: \n", cfig.savedir, flush=True)
+
 
   # x = set(_traintimes(info))
   # y = set(np.r_[:info.stop])
   # print(len(x))
   # return
 
-  dg = StandardGen(train_data_files); cfig.datagen = dg
-  # ipdb.set_trace()
-  # save(dg.data[0].target.astype(np.float32), cfig.savedir / 'target_t_120.tif')
-  
-  T = detector2.train_init(cfig)
-  save([dg.sampleMax(0) for _ in range(10)],cfig.savedir/"traindata.pkl")
-  # T = detector2.train_continue(cfig,cfig.savedir / 'm/best_weights_loss.pt')
-  detector2.train(T)
+  # dg = StandardGen(train_data_files); cfig.datagen = dg
+  # save(dg.data[0].target.astype(np.float32), cfig.savedir / 'target_t_120.tif')  
+  # T = detector2.train_init(cfig)
+  # save([dg.sampleMax(0) for _ in range(10)],cfig.savedir/"traindata.pkl")
+  # # # T = detector2.train_continue(cfig,cfig.savedir / 'm/best_weights_loss.pt')
+  # detector2.train(T)
 
   net = cfig.getnet().cuda()
   net.load_state_dict(torch.load(cfig.savedir / "m/best_weights_loss.pt"))
 
-  prednames = [f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{trainset}/" + info.rawname.format(time=i) for i in range(info.start,info.stop)]
+  s0  = set(_traintimes(info)) #list()
+  s1  = set(range(info.start,info.stop)) - s0
+  # _t1 = [list(s1)[0]]
+  _t1 = list(s1)
+  # _t0 = list(np.random.choice(list(s0),min(5,len(s0)),replace=False))
+  # _t1 = list(np.random.choice(list(s1),min(5,len(s1)),replace=False))
 
-  # prednames = [f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{trainset}/" + info.rawname.format(time=i) for i in [120]]
-  # raw = load(prednames[0])
-  # raw = normalize3(raw,2,99.4,clip=False)
-  # x   = zoom(raw,P.zoom,order=1)
-  # res = torch_models.predict_raw(net,x,dims="ZYX").astype(np.float32)
-  # res = zoom(res,np.array([1])/P.zoom,)
-  # save(res,cfig.savedir / 'pred_t_120.tif')
-  # return
+  ltps = pred_many(net,_t1,dirname='pred_test',savedir=cfig.savedir)
+  # ltps = pred_many(net,_t0,dirname='pred_train',savedir=cfig.savedir)
 
-  ltps = dg.pred_many(net,prednames,savedir=cfig.savedir)
   # ltps = load(cfig.savedir / f"ltps_{info.dataset}.pkl")
   # tb   = tracking.nn_tracking_on_ltps(ltps,scale=info.scale) # random_tracking_on_ltps(ltps)
   # scores = tracking.eval_tb_isbi(tb,info,savedir=cfig.savedir)
   # ipdb.set_trace()
 
-def zmax(x):
-  if x.ndim==3: 
-    # return np.argmax(x,axis=0)
-    return x.max(0)
-  return x
-
-
-
-def old_shit():
-  ## After Training, Predict on some stuff
-
-  testset = trainset
-
-  ## Reload best weights
-  # net.load_state_dict(torch.load(cfig.savedir / "m/best_weights_point_match.pt"))
-  # net.load_state_dict(torch.load(cfig.savedir / "m/best_weights_latest.pt"))
-
-
-  ## Predict and Evaluate model result on all available data
-
-  gtpts = load(f"/projects/project-broaddus/rawdata/{myname}/traj/{isbiname}/{testset}_traj.pkl")
-  # if myname == "celegans_isbi" and testset=='01':
-  #   gtpts[6] = ltps[6]
-  #   gtpts[7] = ltps[7]
-
-  scores = []
-  pred   = []
-  raw    = []
-  ltps_pred = dict()
-  info_test = get_isbi_info(myname,isbiname,testset)
-  for i in range(info_test.start, info_test.stop):
-    rawname = f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{testset}/" + info_test.rawname.format(time=i)
-    print(rawname)
-    x = load(rawname)
-    if P.zoom: x = zoom(x,P.zoom)
-    x  = normalize3(x,2,99.4,clip=False)
-    res  = torch_models.predict_raw(net,x,dims=dims).astype(np.float32)
-    pts  = peak_local_max(res,threshold_abs=.2,exclude_border=False,footprint=np.ones(P.nms_footprint))
-    if P.zoom:
-      pts = pts/P.zoom
-    score3  = point_matcher.match_unambiguous_nearestNeib(gtpts[i],pts,dub=3, scale=info.scale)
-    score10 = point_matcher.match_unambiguous_nearestNeib(gtpts[i],pts,dub=10,scale=info.scale)
-    
-    print("time", i, "gt", score10.n_gt, "match", score10.n_matched, "prop", score10.n_proposed)
-    ltps_pred[i] = pts
-    
-    # save(res, cfig.savedir / f'pred/t{i:03d}.npy')
-    # save(x, cfig.savedir / f'raw/t{i:03d}.npy')
-    # save(pts, cfig.savedir / f'pts/t{i:03d}.npy')
-    # save(gtpts[i], cfig.savedir / f'gtpts/t{i:03d}.npy')
-
-
-    # if i==pred_times[0]:
-    # s = {3:score3,10:score10}
-    # scores.append(s)
-    # pred.append(zmax(res))
-    # raw.append(zmax(x))
-
-  save(ltps_pred, cfig.savedir / f'ltps_{testset}.pkl')
-  # save(scores, cfig.savedir / f'scores_{testset}.pkl')
-  # save(np.array(pred).astype(np.float16), cfig.savedir / f"pred_{testset}.npy")
-  # save(np.array(raw).astype(np.float16),  cfig.savedir / f"raw_{testset}.npy")

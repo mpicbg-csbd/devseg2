@@ -8,11 +8,10 @@ import networkx as nx
 #import numpy_indexed as ndi
 #import experiments2 as ex
 import analysis2, ipy
-import e21_isbidet as e21
+import e22_flywing as e22
 
 import numpy as np
 from segtools.ns2dir import load,save,toarray
-import e22_flywing as e22
 import e21_isbidet as e21
 
 %load_ext line_profiler

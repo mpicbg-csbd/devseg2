@@ -82,6 +82,7 @@ def _config_example():
   config.n_vali_samples = 10
   config.time_validate = 400
   config.time_total = 1_000
+  config.save_every_n = 1
   config.lr = 2e-4
   config.vali_metrics = [lambda y,s : 1.0,]
   config.vali_minmax = [np.max,] # how to pick best params from vali_metric
@@ -184,7 +185,8 @@ def train(T):
       save(ta , config.savedir/"ta/")
       validate(T)
       check_weights_and_save(T,n)
-      save_patches(T,n)
+      if ta.i % (config.time_validate*config.save_every_n) == 0:
+        save_patches(T,n)
 
 def _proj(x):
   assert x.ndim in [2,3]
