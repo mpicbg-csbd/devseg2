@@ -94,18 +94,16 @@ def run(pid=0):
   v03 : explore kernel size. [2,50]
     p0: two datasets
     p1: kernel size
-  v04 : explore jitter! [2,50]
-    p3: jitter: directed|random
-    p4: jitter magnitude?
+  v04 : unbiased jitter! [2,50]
+    p0: two datasets (GOWT1/p)
+    p1: noise_level: noise_level for random jitter
     we want to show performance vs jitter. [curve]. shape. 
   """
 
   (p0,p1),pid = parse_pid(pid,[2,50])
 
-  myname, isbiname  = isbi_datasets[[8,17][p0]]
+  myname, isbiname = isbi_datasets[[8,17][p0]]
   trainset = '01' #["01","02"][p0]
-  # kernel_size = [0.25,.5,1,2,4,8,16,24,32,64][p1]
-  kernel_size = 256**(p1/49) / 4
   info = get_isbi_info(myname,isbiname,trainset)
   P = _init_params(info.ndim)
   print(json.dumps(info.__dict__,sort_keys=True, indent=2, default=str), flush=True)
@@ -117,16 +115,34 @@ def run(pid=0):
   _specialize(P,myname,info)
 
   ## v03 ONLY
+  # kernel_size = 256**(p1/49) / 4
+  # P.kern = np.array(kernel_size)*[1,1]
+  # P.nms_footprint = [5,5] #np.ones(().astype(np.int))
+  ## v04 ONLY
+  kernel_size = 4.23 ##
   P.kern = np.array(kernel_size)*[1,1]
   P.nms_footprint = [5,5] #np.ones(().astype(np.int))
+  
+  noise_level = (p1/49)*20 #if p0==0 else (p1/49)*20
 
-  savedir_local = savedir / f'e21_isbidet/v03/pid{pid:03d}/'
+  savedir_local = savedir / f'e21_isbidet/v04/pid{pid:03d}/'
 
   class StandardGen(object):
     def __init__(self, filenames):
       data   = np.array([SimpleNamespace(raw=zoom(load(r),P.zoom,order=1),lab=zoom(load(l),P.zoom,order=0)) for r,l in filenames],dtype=np.object)
       ndim   = data[0].raw.ndim
       for d in data: d.pts = mantrack2pts(d.lab)
+      for d in data:
+        # x = ((np.random.rand(*d.pts.shape) - 0.5)*noise_level*2).astype(np.int) 
+        # ipdb.set_trace()
+        # _sh = 10000,2
+        ## floors towards zero. v04 ONLY. simulate noisy annotations.
+        _sh = d.pts.shape
+        x = np.random.randn(*_sh)
+        x = x / np.linalg.norm(x,axis=1)[:,None]
+        r = np.random.rand(_sh[0])**(1/_sh[1]) * noise_level
+        x = (x*r[:,None]).astype(np.int)
+        d.pts += x
       for d in data: d.target = place_gaussian_at_pts(d.pts,d.lab.shape,P.kern)
       for d in data: d.raw = normalize3(d.raw,2,99.4,clip=False)
       self.data  = data
@@ -172,6 +188,7 @@ def run(pid=0):
       raw = normalize3(raw,2,99.4,clip=False)
       x = zoom(raw,P.zoom,order=1)
       res = torch_models.predict_raw(net,x,dims=dims).astype(np.float32)
+      height = res.max()
       res = res / res.max() ## 
       pts = peak_local_max(res,threshold_abs=.2,exclude_border=False,footprint=np.ones(P.nms_footprint))
       pts = pts/P.zoom
@@ -199,11 +216,12 @@ def run(pid=0):
     def _f(i): ## i is time
       d = _single(i)
       # _save_preds(d,i)
-      return d.scores,d.pts
+      return d.scores,d.pts,d.height
 
-    scores,ltps = map(list,zip(*[_f(i) for i in times]))
+    scores,ltps,height = map(list,zip(*[_f(i) for i in times]))
     save(scores, savedir/f"{dirname}/scores3.pkl")
-    # save(scores, savedir/f"{dirname}/ltps.pkl")
+    save(height, savedir/f"{dirname}/height.pkl")
+    # save(ltps, savedir/f"{dirname}/ltps.pkl")
 
     return ltps
 
@@ -295,12 +313,12 @@ def run(pid=0):
   # print(len(x))
   # return
 
-  # dg = StandardGen(train_data_files); cfig.datagen = dg
+  dg = StandardGen(train_data_files); cfig.datagen = dg
   # save(dg.data[0].target.astype(np.float32), cfig.savedir / 'target_t_120.tif')  
-  # T = detector2.train_init(cfig)
+  T = detector2.train_init(cfig)
   # save([dg.sampleMax(0) for _ in range(10)],cfig.savedir/"traindata.pkl")
   # # # T = detector2.train_continue(cfig,cfig.savedir / 'm/best_weights_loss.pt')
-  # detector2.train(T)
+  detector2.train(T)
 
   net = cfig.getnet().cuda()
   net.load_state_dict(torch.load(cfig.savedir / "m/best_weights_loss.pt"))
