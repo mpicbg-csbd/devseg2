@@ -142,10 +142,10 @@ def train_init(config):
   td,vd = SimpleNamespace(),SimpleNamespace()
   td.s = config.datagen.sample(0)
   vd.s = config.datagen.sample(0,train_mode=0)
-  save(_prepsave(td.s.x),   config.savedir / f"patches_train/x/a_i0.tif")
-  save(_prepsave(td.s.yt),  config.savedir / f"patches_train/yt/a_i0.tif")
-  save(_prepsave(vd.s.x),   config.savedir / f"patches_vali/x/a_i0.tif")
-  save(_prepsave(vd.s.yt),  config.savedir / f"patches_vali/yt/a_i0.tif")
+  save(_prepsave(td.s.x, proj=False),   config.savedir / f"patches_train/x/a_i0.tif")
+  save(_prepsave(td.s.yt, proj=False),  config.savedir / f"patches_train/yt/a_i0.tif")
+  save(_prepsave(vd.s.x, proj=False),   config.savedir / f"patches_vali/x/a_i0.tif")
+  save(_prepsave(vd.s.yt, proj=False),  config.savedir / f"patches_vali/yt/a_i0.tif")
 
   ta = SimpleNamespace(i=1,losses=[],lr=config.lr,save_count=0,vali_scores=[],timings=[])
   ta.vali_names = [f.__name__ for f in config.vali_metrics]
@@ -195,11 +195,14 @@ def _proj(x):
   else:
     return x.max(0)
 
-def _prepsave(x):
+def _prepsave(x,proj=True):
   "x is 2D/3D array with no channels or batches"
   if type(x) is torch.Tensor: x = x.detach().cpu().numpy()
   if type(x) is np.ndarray:
-    return _proj(x.astype(np.float16))
+    if proj:
+      return _proj(x.astype(np.float16))
+    else:
+      return x.astype(np.float16)
   assert False, "should be ndarray"
 
 def save_patches(T,n):

@@ -1,8 +1,9 @@
 from experiments_common import *
 from pykdtree.kdtree import KDTree as pyKDTree
 from segtools.render import rgb_max
+from numpy import r_,s_
 
-print(savedir)
+print("savedir:", savedir)
 
 _gpu  = "-p gpu --gres gpu:1 -n 1 -t  6:00:00 -c 1 --mem 128000 "
 _cpu  = "-n 1 -t 1:00:00 -c 4 --mem 128000 "
@@ -37,6 +38,7 @@ def _traintimes(info):
   Nsamples = 5 if info.ndim==3 else min(N//2,100)
   gap = ceil(N/Nsamples)
   # dt = gap//2
+
   # train_times = np.r_[t0:t1:gap]
   # vali_times  = np.r_[t0+dt:t1:3*gap]
   train_times = np.r_[t0:t1:gap]
@@ -63,7 +65,7 @@ def _init_params(ndim):
   P.patch = np.array(P.patch)
   return P
 
-def _specialize(P,myname,info):
+def _specialize_isbi(P,myname,info):
   if myname in ["celegans_isbi","A549","A549-SIM","H157","hampster","Fluo-N3DH-SIM+"]:
       P.zoom = {3:(1,0.5,0.5), 2:(0.5,0.5)}[info.ndim]
   if myname=="trib_isbi":
@@ -98,74 +100,105 @@ def run(pid=0):
     p0: two datasets (GOWT1/p)
     p1: noise_level: noise_level for random jitter
     we want to show performance vs jitter. [curve]. shape. 
+  v05 : redo celegans. test training data size. [10,5]:
+    p0 : n training images from _early times_
+    p1 : repeats ?
+  v06 : redo celegans, just the basic training on single images. NO xy SCALING!
+    p0 : timepoint to use
+    p1 : repeats
+  v07 : sampling methods: does it matter what we use? 
   """
 
-  (p0,p1),pid = parse_pid(pid,[2,50])
+  (p0,p1),pid = parse_pid(pid,[7,5])
 
-  myname, isbiname = isbi_datasets[[8,17][p0]]
+  myname, isbiname = isbi_datasets[11] # v05
   trainset = '01' #["01","02"][p0]
   info = get_isbi_info(myname,isbiname,trainset)
   P = _init_params(info.ndim)
   print(json.dumps(info.__dict__,sort_keys=True, indent=2, default=str), flush=True)
   print(_traintimes(info))
-  train_data_files = [(f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{trainset}/" + info.rawname.format(time=n),
+  # _ttimes = [[6,7],[100,101],[180,181],[6,100,180,7,101,181]][p0]
+  
+  ## v05 only
+  # _train  = (r_[0:70:70/10] + 70/2/10).astype(np.int)[:p0+1]
+  # _train  = r_[_train,100,180]
+  # _vali   = _train + 1
+  # 
+  
+  ## v06 only
+  if p0<3:
+    _ttimes = [[6,7],[100,101],[180,181]][p0]
+  if p0 in [3,4]:
+    _ttimes = [6,100,180,7,101,181]
+  if p0==5:
+    _ttimes = [2,6,30,100,180,1,7,101,181]
+  if p0==6:
+    _ttimes = [2,6,30,100,150,180,189,1,7,101,181]
+
+  _testtime = [5,8,99,102,179,182]
+  # return _ttimes
+
+  train_data_files = [(f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{trainset}/"        + info.rawname.format(time=n),
                        f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{trainset}_GT/TRA/" + info.man_track.format(time=n),
             )
-          for n in _traintimes(info)]
-  _specialize(P,myname,info)
+          for n in _ttimes] # v05,v06 #_traintimes(info)]
+  _specialize_isbi(P,myname,info)
+  P.zoom = (1,1,1) if p0 in [0,1,2,3] else (1,0.5,0.5) # v06
+
+  def match(yt_pts,pts):
+    return match_unambiguous_nearestNeib(yt_pts,pts,dub=100,scale=[3,1,1])
 
   ## v03 ONLY
   # kernel_size = 256**(p1/49) / 4
   # P.kern = np.array(kernel_size)*[1,1]
   # P.nms_footprint = [5,5] #np.ones(().astype(np.int))
   ## v04 ONLY
-  kernel_size = 4.23 ##
-  P.kern = np.array(kernel_size)*[1,1]
-  P.nms_footprint = [5,5] #np.ones(().astype(np.int))
-  
-  noise_level = (p1/49)*20 #if p0==0 else (p1/49)*20
+  # kernel_size = 4.23 ##
+  # P.kern = np.array(kernel_size)*[1,1]
+  # P.nms_footprint = [5,5] #np.ones(().astype(np.int))
+  # noise_level = (p1/49)*20 #if p0==0 else (p1/49)*20
 
-  savedir_local = savedir / f'e21_isbidet/v04/pid{pid:03d}/'
+  savedir_local = savedir / f'e21_isbidet/v06/pid{pid:03d}/'
 
   class StandardGen(object):
     def __init__(self, filenames):
       data   = np.array([SimpleNamespace(raw=zoom(load(r),P.zoom,order=1),lab=zoom(load(l),P.zoom,order=0)) for r,l in filenames],dtype=np.object)
       ndim   = data[0].raw.ndim
       for d in data: d.pts = mantrack2pts(d.lab)
-      for d in data:
-        # x = ((np.random.rand(*d.pts.shape) - 0.5)*noise_level*2).astype(np.int) 
-        # ipdb.set_trace()
-        # _sh = 10000,2
-        ## floors towards zero. v04 ONLY. simulate noisy annotations.
-        _sh = d.pts.shape
-        x = np.random.randn(*_sh)
-        x = x / np.linalg.norm(x,axis=1)[:,None]
-        r = np.random.rand(_sh[0])**(1/_sh[1]) * noise_level
-        x = (x*r[:,None]).astype(np.int)
-        d.pts += x
+      ## v04 ONLY. simulate noisy annotations.
+      # for d in data:
+      #   # x = ((np.random.rand(*d.pts.shape) - 0.5)*noise_level*2).astype(np.int) 
+      #   # ipdb.set_trace()
+      #   # _sh = 10000,2
+      #   ## floors towards zero
+      #   _sh = d.pts.shape
+      #   x = np.random.randn(*_sh)
+      #   x = x / np.linalg.norm(x,axis=1)[:,None]
+      #   r = np.random.rand(_sh[0])**(1/_sh[1]) * noise_level
+      #   x = (x*r[:,None]).astype(np.int)
+      #   d.pts += x
       for d in data: d.target = place_gaussian_at_pts(d.pts,d.lab.shape,P.kern)
       for d in data: d.raw = normalize3(d.raw,2,99.4,clip=False)
-      self.data  = data
+      self.data = data
 
     def sample(self,time,train_mode=True):
       N = len(self.data)
-      Nvali  = ceil(N/8)
+      Nvali  = [1,1,1,3,3,4,4][p0] # ceil(N/8) v06 (=3 only if p0==3)
       Ntrain = N-Nvali
       idxs = np.r_[:Ntrain] if train_mode else np.r_[Ntrain:N]
-      sampler = [sample_flat, sample_content][1] #[p2] now fixed. always content sampling.
+      sampler = [sample_flat, sample_content, sample_iterate][1] #[p2] now fixed. always content sampling.
       x,yt = sampler(self.data[idxs],P.patch)
       if train_mode:
         x,yt = augment(x,yt)
       if myname=='fly_isbi':
         w = weights(yt,time,thresh=np.exp(-4**2/2),decayTime=3*1600,bg_weight_multiplier=0.0)
       else:
-        # w = weights(yt,time,thresh=np.exp(-4**2/2),decayTime=3*1600,)
-        w = np.ones_like(yt)
+        w = weights(yt,time,thresh=np.exp(-4**2/2),decayTime=3*1600,bg_weight_multiplier=1/5)
+        # w = np.ones_like(yt)
       s = SimpleNamespace(x=x,yt=yt,w=w)
+      ## prevent overdetect on peaks EVEN WITH FOOTPRINT because they have exactly the same value
       # s.yt_pts = peak_local_max(yt+np.random.rand(*yt.shape)*1e-5,threshold_abs=.2,exclude_border=False,footprint=np.ones(P.nms_footprint))
-      ## overdetect on peaks EVEN WITH FOOTPRINT because they have exactly the same value
       s.yt_pts = peak_local_max(yt,threshold_abs=.2,exclude_border=False,footprint=np.ones(P.nms_footprint))
-      # ipdb.set_trace()
       return s
 
     def sampleMax(self,t):
@@ -192,9 +225,10 @@ def run(pid=0):
       res = res / res.max() ## 
       pts = peak_local_max(res,threshold_abs=.2,exclude_border=False,footprint=np.ones(P.nms_footprint))
       pts = pts/P.zoom
-      res = zoom(res, 1/np.array(P.zoom), order=1)
-      matching = point_matcher.match_unambiguous_nearestNeib(gtpts[i],pts,dub=10,scale=info.scale)
+      # matching = point_matcher.match_unambiguous_nearestNeib(gtpts[i],pts,dub=10,scale=[3,1,1])
+      matching = match(gtpts[i],pts)
       print(matching.f1)
+      res = zoom(res, 1/np.array(P.zoom), order=1)
       # fp, fn = find_errors(raw,matching)
       # if savedir: save(pts,savedir / "predpts/pts{i:04d}.pkl")
       target = place_gaussian_at_pts(gtpts[i],raw.shape,P.kern)
@@ -204,23 +238,24 @@ def run(pid=0):
 
     def _save_preds(d,i):
       # _best_f1_score = matching.f1
-      save(d.raw.astype(np.float16), savedir/f"{dirname}/d{i:04d}/raw.tif")
-      save(d.res.astype(np.float16), savedir/f"{dirname}/d{i:04d}/pred.tif")
-      save(d.target.astype(np.float16), savedir/f"{dirname}/d{i:04d}/target.tif")
+      save(d.raw.astype(np.float16).max(0), savedir/f"{dirname}/d{i:04d}/raw.tif")
+      save(d.res.astype(np.float16).max(0), savedir/f"{dirname}/d{i:04d}/pred.tif")
+      save(d.target.astype(np.float16).max(0), savedir/f"{dirname}/d{i:04d}/target.tif")
       save(d.pts, savedir/f"{dirname}/d{i:04d}/pts.pkl")
       save(gtpts[i], savedir/f"{dirname}/d{i:04d}/pts_gt.pkl")
       save(d.scores, savedir/f"{dirname}/d{i:04d}/scores.pkl")
+      save(d.matching, savedir/f"{dirname}/d{i:04d}/matching.pkl")
       # save(fp, savedir/f"errors/t{i:04d}/fp.pkl")
       # save(fn, savedir/f"errors/t{i:04d}/fn.pkl")
 
     def _f(i): ## i is time
       d = _single(i)
-      # _save_preds(d,i)
+      if i in _testtime: _save_preds(d,i)
       return d.scores,d.pts,d.height
 
     scores,ltps,height = map(list,zip(*[_f(i) for i in times]))
-    save(scores, savedir/f"{dirname}/scores3.pkl")
-    save(height, savedir/f"{dirname}/height.pkl")
+    # save(scores, savedir/f"{dirname}/scores.pkl")
+    # save(height, savedir/f"{dirname}/height.pkl")
     # save(ltps, savedir/f"{dirname}/ltps.pkl")
 
     return ltps
@@ -270,14 +305,15 @@ def run(pid=0):
   def point_match(y,sample):
     s = sample
     pts   = peak_local_max(y,threshold_abs=.2,exclude_border=False,footprint=np.ones(P.nms_footprint))
-    score = match_unambiguous_nearestNeib(s.yt_pts,pts,dub=10,scale=info.scale)
+    score = match(s.yt_pts,pts)
     return score.f1
 
   def _config():
     cfig = SimpleNamespace()
     cfig.getnet = P.getnet
     cfig.time_validate = 100
-    cfig.time_total = 10_000 if info.ndim==3 else 15_000 ## # about 12k / hour? 200/min = 5mins/ 1k = 12k/hr on 3D data (10x faster on 2D?)
+    ## 30_000 for C.Elegans ONLY
+    cfig.time_total = 30_000 if info.ndim==3 else 15_000 ## # about 12k / hour? 200/min = 5mins/ 1k = 12k/hr on 3D data (10x faster on 2D?)
     cfig.n_vali_samples = 10
     cfig.save_every_n = 5
     cfig.lr = 4e-4
@@ -298,7 +334,6 @@ def run(pid=0):
   #   return params
 
 
-
   """
   EVERYTHING BELOW THIS POINT IS LIKE A WORKSPACE THAT CHANGES RAPIDLY & USES FUNCTIONS DEFINED ABOVE.
   """
@@ -307,30 +342,36 @@ def run(pid=0):
 
   print("Running e21 with savedir: \n", cfig.savedir, flush=True)
 
-
   # x = set(_traintimes(info))
   # y = set(np.r_[:info.stop])
   # print(len(x))
   # return
 
-  dg = StandardGen(train_data_files); cfig.datagen = dg
-  # save(dg.data[0].target.astype(np.float32), cfig.savedir / 'target_t_120.tif')  
-  T = detector2.train_init(cfig)
-  # save([dg.sampleMax(0) for _ in range(10)],cfig.savedir/"traindata.pkl")
-  # # # T = detector2.train_continue(cfig,cfig.savedir / 'm/best_weights_loss.pt')
-  detector2.train(T)
+  if False:
+    dg = StandardGen(train_data_files); cfig.datagen = dg
+    # save(dg.data[0].target.astype(np.float32), cfig.savedir / 'target_t_120.tif')  
+
+    # T = detector2.train_init(cfig)
+    # save([dg.sampleMax(0) for _ in range(10)],cfig.savedir/"traindata.pkl")
+
+    T = detector2.train_continue(cfig,cfig.savedir / 'm/best_weights_loss.pt')
+    detector2.train(T)
 
   net = cfig.getnet().cuda()
   net.load_state_dict(torch.load(cfig.savedir / "m/best_weights_loss.pt"))
 
-  s0  = set(_traintimes(info)) #list()
-  s1  = set(range(info.start,info.stop)) - s0
+  # s0  = set(_traintimes(info)) #list()
+  s0  = set(_ttimes) # v05, v06
+  s1  = set(range(info.start,info.stop)) # - s0 # v05,v06
   # _t1 = [list(s1)[0]]
   _t1 = list(s1)
+  _t1 = [18]
+  _t1 = _testtime
+  # _t1 = [0,1,2,16,]
   # _t0 = list(np.random.choice(list(s0),min(5,len(s0)),replace=False))
   # _t1 = list(np.random.choice(list(s1),min(5,len(s1)),replace=False))
 
-  ltps = pred_many(net,_t1,dirname='pred_test',savedir=cfig.savedir)
+  ltps = pred_many(net,_t1,dirname='pred_all',savedir=cfig.savedir)
   # ltps = pred_many(net,_t0,dirname='pred_train',savedir=cfig.savedir)
 
   # ltps = load(cfig.savedir / f"ltps_{info.dataset}.pkl")

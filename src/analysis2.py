@@ -219,5 +219,15 @@ def e21_collect_scores():
   # save(res,"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v03/scores3.pkl")
   # res = [load(f"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v03/pid{i:03d}/pred_test/height.pkl") for i in range(100)]
   # save(res,"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v03/height.pkl")
-  res = [load(f"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v04/pid{i:03d}/pred_test/scores3.pkl") for i in range(100)]
-  save(res,"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v04/scores3.pkl")
+  # res = [load(f"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v04/pid{i:03d}/pred_test/scores3.pkl") for i in range(100)]
+  # save(res,"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v04/scores3.pkl")
+  # res = [load(f"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v06/pid{i:03d}/pred_all/scores.pkl") for i in range(30)]
+  # save(res,"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v06/scores_all.pkl")
+  res = [load(f"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v06/pid{i:03d}/pred_all/scores.pkl") for i in range(35)]
+  save(res,"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v06/scores.pkl")
+
+
+
+
+
+

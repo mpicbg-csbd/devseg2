@@ -59,7 +59,6 @@ from segtools.point_matcher import match_points_single, match_unambiguous_neares
 from tracking import nn_tracking_on_ltps, random_tracking_on_ltps
 
 
-
 savedir = Path('/projects/project-broaddus/devseg_2/expr/')
 
 def parse_pid(pid_or_params,dims):
@@ -78,3 +77,8 @@ def parse_pid(pid_or_params,dims):
 
 def iterdims(shape):
   return itertools.product(*[range(x) for x in shape])
+
+
+
+
+

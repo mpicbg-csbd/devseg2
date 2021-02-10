@@ -189,7 +189,6 @@ def place_gaussian_at_pts(pts,sh,sigmas):
   target = conv_at_pts4(pts,kern,sh,lambda a,b:np.maximum(a,b))
   return target
 
-
 def augment(x,*ys):
   noiselevel = 0.2
   ndim = x.ndim ## WARNING. SLIGHT DIFFERENCE FROM DETECTOR.PY.
@@ -218,6 +217,36 @@ def augment(x,*ys):
   ys = tuple(y.copy() for y in ys)
   return (x,) + ys
 
+def augment2(x,*ys):
+  noiselevel = 0.2
+  ndim = x.ndim
+  ## TODO: this only works when number of channels==1. probably want indep noise for each channel.
+  # x += np.random.uniform(0,noiselevel,(1,)*ndim)*np.random.uniform(-1,1,x.shape)
+  # x += np.random.uniform(0,noiselevel,(1,))*np.random.uniform(-1,1,x.shape)
+
+  ## TODO: special "content aware" augmentation involving simplistic intensity-based segmentation techniques
+
+
+  ## evenly sample all random flips and 90deg XY rotations (not XZ or YZ rotations)
+  ## TODO: continuous rotations (in 3D!) (with anisotropic voxels!) (do we even need bounds checking?)
+  ## TODO: maybe this could all be shorter with modular arithmetic. dim -2 is always Y, dim -1 is always X.
+  if ndim==3:
+    space_dims = {'Z':0,'Y':1,'X':2}
+  elif ndim==2:
+    space_dims = {'Y':0,'X':1}
+  
+  for d in space_dims.values():
+    if np.random.rand() < 0.5:
+      x  = np.flip(x,d)
+      ys = tuple(np.flip(y,d) for y in ys)
+  if np.random.rand() < 0.5 and x.shape[space_dims['Y']]==x.shape[space_dims['X']]:
+    x  = x.swapaxes(space_dims['Y'],space_dims['X'])
+    ys = tuple(y.swapaxes(space_dims['Y'],space_dims['X']) for y in ys)
+
+  x = x.copy()
+  ys = tuple(y.copy() for y in ys)
+  return (x,) + ys
+
 
 def sample_flat(data,_patch):
   _p1 = np.random.randint(len(data))
@@ -228,7 +257,6 @@ def sample_flat(data,_patch):
   x  = data[_p1].raw[ss].copy()
   yt = data[_p1].target[ss].copy()
   return x,yt
-
 
 def sample_content(data,_patch):
   _p1 = np.random.randint(len(data)) # timepoint
@@ -261,7 +289,8 @@ def weights(yt,time,thresh=1.0,decayTime=None,bg_weight_multiplier=1.0):
   m0 = yt<thresh # background
   m1 = yt>thresh # foreground
   if 0 < m0.sum() < m0.size:
-    ws = 1/np.array([m0.mean(), m1.mean()]).astype(np.float)
+    # ws = 1/np.array([m0.mean(), m1.mean()]).astype(np.float) ## REMOVE. WE DON'T WANT TO BALANCE FG/BG. WE WANT TO EMPHASIZE FG.
+    ws = [1,1] * np.array(1.)
     ws[0] *= bg_weight_multiplier
     ws /= ws.mean()
     if np.isnan(ws).any(): ipdb.set_trace()
