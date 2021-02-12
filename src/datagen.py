@@ -63,7 +63,7 @@ from isbi_tools import get_isbi_info, isbi_datasets, isbi_scales
 from glob import glob
 import os
 import re
-from skimage.util import view_as_windows
+from skimage.util import view_as_windows, view_as_blocks
 from expand_labels_scikit import expand_labels
 
 
@@ -175,6 +175,18 @@ from segtools.point_tools import trim_images_from_pts2
 #   _, gt_pts   = zip(*[lab2target(x) for x in lab_patches])
 #   return raw_patches, target_patches, gt_pts
 
+def shape2slicelist(imgshape,patchsize,divisible=(1,4,4)):
+  D  = len(patchsize)
+  ns = np.ceil(np.array(imgshape) / patchsize).astype(int)
+  ss = (np.indices(ns).T * patchsize).reshape([-1,D])
+  # pad = [(0,0),(0,0),(0,0)]
+  def _f(_s,i):
+    low  = _s[i]
+    high = min(_s[i]+patchsize[i],imgshape[i])
+    high = low + floor((high-low)/divisible[i])*divisible[i]
+    return slice(low, high)
+  ss = [[_f(_s,i) for i in np.r_[:D]] for _s in ss]
+  return ss
 
 def place_gaussian_at_pts(pts,sh,sigmas):
   s  = np.array(sigmas)
@@ -274,12 +286,6 @@ def sample_content(data,_patch):
   x = data[_p1].raw[ss].copy()
   yt = data[_p1].target[ss].copy()
   return x,yt
-
-def sample_iterate(data,_patch,n):
-  totalsize = np.prod([d.target.size for d in data])
-  totalpatches = ceil(totalsize / np.prod(_patch))
-  pass
-
 
 
 def weights(yt,time,thresh=1.0,decayTime=None,bg_weight_multiplier=1.0):

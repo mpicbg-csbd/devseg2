@@ -44,9 +44,10 @@ def setup_dirs(savedir):
   (savedir/'m').mkdir(exist_ok=True,parents=True)
   shutil.copy("/projects/project-broaddus/devseg_2/src/detector2.py",savedir)
 
+
 def _config_example():
+
   config = SimpleNamespace()
-  
   config.savedir = Path("An/Example/Directory")
   ## Build the network
   config.getnet = lambda : torch_models.Unet3(16, [[1],[1]], pool=(1,2,2), kernsize=(3,5,5), finallayer=torch_models.nn.Sequential)
@@ -78,7 +79,8 @@ def _config_example():
     return y,loss
 
   config.loss = loss
-  config.datagen = StandardGen()
+  # config.datagen = StandardGen()
+  config.sample = StandardGen().sample
   config.n_vali_samples = 10
   config.time_validate = 400
   config.time_total = 1_000
@@ -140,8 +142,8 @@ def train_init(config):
   print("Weights randomized...")
   
   td,vd = SimpleNamespace(),SimpleNamespace()
-  td.s = config.datagen.sample(0)
-  vd.s = config.datagen.sample(0,train_mode=0)
+  td.s = config.sample(0)
+  vd.s = config.sample(0,train_mode=0)
   save(_prepsave(td.s.x, proj=False),   config.savedir / f"patches_train/x/a_i0.tif")
   save(_prepsave(td.s.yt, proj=False),  config.savedir / f"patches_train/yt/a_i0.tif")
   save(_prepsave(vd.s.x, proj=False),   config.savedir / f"patches_vali/x/a_i0.tif")
@@ -161,7 +163,7 @@ def train(T):
 
   for ta.i in range(ta.i,config.time_total+1):
 
-    s = config.datagen.sample(ta.i)
+    s = config.sample(ta.i)
     y,loss = config.loss(m.net,s) #config.datagen.sample(ta.i,train_mode=1))
     loss.backward()
     y = y.detach().cpu().numpy()
@@ -214,7 +216,7 @@ def save_patches(T,n):
     save(_prepsave(y),   T.c.savedir / f"patches_vali/y/a{n:03d}_i{i}.tif")
 
 def _vali_loss_single(T):
-  s = T.c.datagen.sample(T.ta.i,train_mode=0)
+  s = T.c.sample(T.ta.i,train_mode=0)
   with torch.no_grad(): y,loss = T.c.loss(T.m.net,s)
   y = y.detach().cpu().numpy()
   loss = loss.cpu().numpy()

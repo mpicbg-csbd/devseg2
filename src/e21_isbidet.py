@@ -1,4 +1,6 @@
 from experiments_common import *
+
+
 from pykdtree.kdtree import KDTree as pyKDTree
 from segtools.render import rgb_max
 from numpy import r_,s_
@@ -107,6 +109,8 @@ def run(pid=0):
     p0 : timepoint to use
     p1 : repeats
   v07 : sampling methods: does it matter what we use? 
+    p0 : [iterative sampling, flat sampling]
+    p1 : repeats
   """
 
   (p0,p1),pid = parse_pid(pid,[7,5])
@@ -158,7 +162,8 @@ def run(pid=0):
   # P.nms_footprint = [5,5] #np.ones(().astype(np.int))
   # noise_level = (p1/49)*20 #if p0==0 else (p1/49)*20
 
-  savedir_local = savedir / f'e21_isbidet/v06/pid{pid:03d}/'
+  savedir_local = savedir / f'e21_isbidet/v07/pid{pid:03d}/'
+
 
   class StandardGen(object):
     def __init__(self, filenames):
@@ -181,13 +186,54 @@ def run(pid=0):
       for d in data: d.raw = normalize3(d.raw,2,99.4,clip=False)
       self.data = data
 
-    def sample(self,time,train_mode=True):
+      ## train/vali for iterative sampling
+      slicelist = shape2slicelist(data[0].raw.shape, P.patch, divisible=(1,8,8))
+      slicelist = [(i,ss) for ss in slicelist for i in range(len(data))]
+      np.random.seed(0)
+      # np.random.shuffle(slicelist)
+      N = len(self.data)
+      Nvali  = ceil(N/8)
+      Ntrain = N-Nvali
+      self.train_slices = slicelist[:Ntrain]
+      self.vali_slices  = slicelist[Ntrain:]
+
+      ## an index into data must be (i∈len(data),ss∈data[0].shape)
+      ## we can make a list of non-overlapping slices, filter out slices based on data content?, split slices into train/vali, all without _actually_ shuffling patches or forgetting their orig spacetime location!
+
+
+    def get_patch(self,idx):
+      i,ss = idx
+      s = SimpleNamespace()
+      s.x = self.data[i].raw[ss].copy()
+      s.yt = self.data[i].target[ss].copy()
+      return s
+
+    def sample_content(self,train_mode=True):
       N = len(self.data)
       Nvali  = [1,1,1,3,3,4,4][p0] # ceil(N/8) v06 (=3 only if p0==3)
       Ntrain = N-Nvali
-      idxs = np.r_[:Ntrain] if train_mode else np.r_[Ntrain:N]
-      sampler = [sample_flat, sample_content, sample_iterate][1] #[p2] now fixed. always content sampling.
-      x,yt = sampler(self.data[idxs],P.patch)
+      idxs = np.r_[:Ntrain] if train_mode else np.r_[Ntrain:N]      
+      x,yt = sample_content(self.data[idxs],P.patch)
+      return x,yt
+
+    def sample_iterate(self,time,train_mode=True):
+      if train_mode:
+        _t = time % len(self.train_slices)
+        idx = self.train_slices[_t]
+        s   = self.get_patch(idx)
+        if _t == -1: np.random.shuffle(self.train_slices)
+      else:
+        _t = np.random.choice(range(len(self.vali_slices)))
+        idx = self.vali_slices[_t]
+        s   = self.get_patch(idx)
+      return s
+
+    def sample(self,time,train_mode=True):
+      if p0
+      # x,yt = self.sample_content(train_mode)
+      s = self.sample_iterate(time,train_mode)
+      x,yt = s.x, s.yt
+
       if train_mode:
         x,yt = augment(x,yt)
       if myname=='fly_isbi':
@@ -347,14 +393,17 @@ def run(pid=0):
   # print(len(x))
   # return
 
-  if False:
-    dg = StandardGen(train_data_files); cfig.datagen = dg
+  if True:
+    dg = StandardGen(train_data_files); 
+    ipdb.set_trace()
+    cfig.sample = dg.sample
+    # cfig.datagen = dg
     # save(dg.data[0].target.astype(np.float32), cfig.savedir / 'target_t_120.tif')  
 
-    # T = detector2.train_init(cfig)
+    T = detector2.train_init(cfig)
     # save([dg.sampleMax(0) for _ in range(10)],cfig.savedir/"traindata.pkl")
 
-    T = detector2.train_continue(cfig,cfig.savedir / 'm/best_weights_loss.pt')
+    # T = detector2.train_continue(cfig,cfig.savedir / 'm/best_weights_loss.pt')
     detector2.train(T)
 
   net = cfig.getnet().cuda()
