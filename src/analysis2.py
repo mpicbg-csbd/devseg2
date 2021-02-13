@@ -2,6 +2,7 @@ from segtools.ns2dir import load,save,toarray
 import numpy as np
 import itertools
 
+from types import SimpleNamespace
 from glob import glob
 import re
 from subprocess import run
@@ -223,8 +224,17 @@ def e21_collect_scores():
   # save(res,"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v04/scores3.pkl")
   # res = [load(f"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v06/pid{i:03d}/pred_all/scores.pkl") for i in range(30)]
   # save(res,"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v06/scores_all.pkl")
-  res = [load(f"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v06/pid{i:03d}/pred_all/scores.pkl") for i in range(35)]
-  save(res,"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v06/scores.pkl")
+  # res = [load(f"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v06/pid{i:03d}/pred_all/scores.pkl") for i in range(35)]
+  # save(res,"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v06/scores.pkl")
+  scores = [load(f"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v07/pid{i:03d}/pred_all/scores.pkl") for i in range(10)]
+  height = [load(f"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v07/pid{i:03d}/pred_all/height.pkl") for i in range(10)]
+  ltps = [load(f"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v07/pid{i:03d}/pred_all/ltps.pkl") for i in range(10)]
+  ta     = [load(f"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v07/pid{i:03d}/ta/",regex=r".*\.(pkl|json)") for i in range(10)]
+  res    = SimpleNamespace(scores=scores,height=height,ta=ta,)
+  save(res,"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v07/artifacts.pkl")
+
+
+
 
 
 

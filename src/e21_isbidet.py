@@ -108,46 +108,41 @@ def run(pid=0):
   v06 : redo celegans, just the basic training on single images. NO xy SCALING!
     p0 : timepoint to use
     p1 : repeats
-  v07 : sampling methods: does it matter what we use? 
-    p0 : [iterative sampling, flat sampling]
+  v07 : sampling methods: does it matter what we use? [2,5]
+    p0 : [iterative sampling, content sampling]
     p1 : repeats
   """
 
-  (p0,p1),pid = parse_pid(pid,[7,5])
+  (p0,p1),pid = parse_pid(pid,[2,5])
 
   myname, isbiname = isbi_datasets[11] # v05
-  trainset = '01' #["01","02"][p0]
+  trainset = '01' #["01","02"][p0] # v06 
   info = get_isbi_info(myname,isbiname,trainset)
   P = _init_params(info.ndim)
   print(json.dumps(info.__dict__,sort_keys=True, indent=2, default=str), flush=True)
   print(_traintimes(info))
   # _ttimes = [[6,7],[100,101],[180,181],[6,100,180,7,101,181]][p0]
   
-  ## v05 only
-  # _train  = (r_[0:70:70/10] + 70/2/10).astype(np.int)[:p0+1]
-  # _train  = r_[_train,100,180]
-  # _vali   = _train + 1
-  # 
-  
-  ## v06 only
-  if p0<3:
-    _ttimes = [[6,7],[100,101],[180,181]][p0]
-  if p0 in [3,4]:
-    _ttimes = [6,100,180,7,101,181]
-  if p0==5:
-    _ttimes = [2,6,30,100,180,1,7,101,181]
-  if p0==6:
-    _ttimes = [2,6,30,100,150,180,189,1,7,101,181]
+  # ## v06 only
+  # if p0<3:
+  #   _ttimes = [[6,7],[100,101],[180,181]][p0]
+  # if p0 in [3,4]:
+  #   _ttimes = [6,100,180,7,101,181]
+  # if p0==5:
+  #   _ttimes = [2,6,30,100,180,1,7,101,181]
+  # if p0==6:
 
+  # _ttimes = _traintimes(info)
+  _ttimes = [2,6,30,100,150,180,189,1,7,101,181]
   _testtime = [5,8,99,102,179,182]
-  # return _ttimes
 
   train_data_files = [(f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{trainset}/"        + info.rawname.format(time=n),
                        f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{trainset}_GT/TRA/" + info.man_track.format(time=n),
             )
-          for n in _ttimes] # v05,v06 #_traintimes(info)]
+          for n in _ttimes]
   _specialize_isbi(P,myname,info)
-  P.zoom = (1,1,1) if p0 in [0,1,2,3] else (1,0.5,0.5) # v06
+
+  # P.zoom = (1,1,1) if p0 in [0,1,2,3] else (1,0.5,0.5) # v06
 
   def match(yt_pts,pts):
     return match_unambiguous_nearestNeib(yt_pts,pts,dub=100,scale=[3,1,1])
@@ -189,9 +184,13 @@ def run(pid=0):
       ## train/vali for iterative sampling
       slicelist = shape2slicelist(data[0].raw.shape, P.patch, divisible=(1,8,8))
       slicelist = [(i,ss) for ss in slicelist for i in range(len(data))]
+      # slicelist = [ss for ss in slicelist if (self.get_patch(ss).yt>0.5).sum()>0]
+      # dist = [self.get_patch(ss).yt.sum() for ss in slicelist] #, [1,10,20,30,40,50,60,70,80,90,99]
+      # print(dist)
       np.random.seed(0)
-      # np.random.shuffle(slicelist)
-      N = len(self.data)
+      np.random.shuffle(slicelist)
+      N = len(slicelist)
+      print("N = ", N)
       Nvali  = ceil(N/8)
       Ntrain = N-Nvali
       self.train_slices = slicelist[:Ntrain]
@@ -210,7 +209,8 @@ def run(pid=0):
 
     def sample_content(self,train_mode=True):
       N = len(self.data)
-      Nvali  = [1,1,1,3,3,4,4][p0] # ceil(N/8) v06 (=3 only if p0==3)
+      # Nvali  = [1,1,1,3,3,4,4][p0] # ceil(N/8) v06
+      Nvali  = 4 # v07
       Ntrain = N-Nvali
       idxs = np.r_[:Ntrain] if train_mode else np.r_[Ntrain:N]      
       x,yt = sample_content(self.data[idxs],P.patch)
@@ -218,21 +218,24 @@ def run(pid=0):
 
     def sample_iterate(self,time,train_mode=True):
       if train_mode:
-        _t = time % len(self.train_slices)
+        N   = len(self.train_slices)
+        _t  = time % N
         idx = self.train_slices[_t]
         s   = self.get_patch(idx)
-        if _t == -1: np.random.shuffle(self.train_slices)
+        if _t == N-1: np.random.shuffle(self.train_slices)
       else:
-        _t = np.random.choice(range(len(self.vali_slices)))
+        N   = len(self.vali_slices)
+        _t  = np.random.choice(range(N))
         idx = self.vali_slices[_t]
         s   = self.get_patch(idx)
       return s
 
     def sample(self,time,train_mode=True):
-      if p0
-      # x,yt = self.sample_content(train_mode)
-      s = self.sample_iterate(time,train_mode)
-      x,yt = s.x, s.yt
+      if p0==0:
+        s = self.sample_iterate(time,train_mode)
+        x,yt = s.x, s.yt
+      if p0==1:
+        x,yt = self.sample_content(train_mode)
 
       if train_mode:
         x,yt = augment(x,yt)
@@ -300,9 +303,9 @@ def run(pid=0):
       return d.scores,d.pts,d.height
 
     scores,ltps,height = map(list,zip(*[_f(i) for i in times]))
-    # save(scores, savedir/f"{dirname}/scores.pkl")
-    # save(height, savedir/f"{dirname}/height.pkl")
-    # save(ltps, savedir/f"{dirname}/ltps.pkl")
+    save(scores, savedir/f"{dirname}/scores.pkl")
+    save(height, savedir/f"{dirname}/height.pkl")
+    save(ltps, savedir/f"{dirname}/ltps.pkl")
 
     return ltps
 
@@ -358,7 +361,7 @@ def run(pid=0):
     cfig = SimpleNamespace()
     cfig.getnet = P.getnet
     cfig.time_validate = 100
-    ## 30_000 for C.Elegans ONLY
+    ## 30_000 for C.Elegans ONLY v07/v06
     cfig.time_total = 30_000 if info.ndim==3 else 15_000 ## # about 12k / hour? 200/min = 5mins/ 1k = 12k/hr on 3D data (10x faster on 2D?)
     cfig.n_vali_samples = 10
     cfig.save_every_n = 5
@@ -388,20 +391,13 @@ def run(pid=0):
 
   print("Running e21 with savedir: \n", cfig.savedir, flush=True)
 
-  # x = set(_traintimes(info))
-  # y = set(np.r_[:info.stop])
-  # print(len(x))
-  # return
-
   if True:
     dg = StandardGen(train_data_files); 
-    ipdb.set_trace()
     cfig.sample = dg.sample
-    # cfig.datagen = dg
     # save(dg.data[0].target.astype(np.float32), cfig.savedir / 'target_t_120.tif')  
 
     T = detector2.train_init(cfig)
-    # save([dg.sampleMax(0) for _ in range(10)],cfig.savedir/"traindata.pkl")
+    save([dg.sampleMax(i) for i in range(10)],cfig.savedir/"traindata.pkl")
 
     # T = detector2.train_continue(cfig,cfig.savedir / 'm/best_weights_loss.pt')
     detector2.train(T)
@@ -414,8 +410,8 @@ def run(pid=0):
   s1  = set(range(info.start,info.stop)) # - s0 # v05,v06
   # _t1 = [list(s1)[0]]
   _t1 = list(s1)
-  _t1 = [18]
-  _t1 = _testtime
+  # _t1 = [18]
+  # _t1 = _testtime
   # _t1 = [0,1,2,16,]
   # _t0 = list(np.random.choice(list(s0),min(5,len(s0)),replace=False))
   # _t1 = list(np.random.choice(list(s1),min(5,len(s1)),replace=False))
