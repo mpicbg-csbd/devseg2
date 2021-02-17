@@ -88,7 +88,7 @@ def run(pid=0):
   """
   v01 : refactor of e18. make traindata AOT.
   add `_train` 0 = predict only, 1 = normal init, 2 = continue
-  datagen generator -> StandardGen, customizable loss and validation metrics, and full detector2 refactor.
+  datagen generator -> CenterpointGen, customizable loss and validation metrics, and full detector2 refactor.
   v02 : optimizing hyperparams. in [2,19,5,2]
     p0: dataset in [01,02]
     p1: isbi dataset in [0..18]
@@ -116,7 +116,7 @@ def run(pid=0):
   (p0,p1),pid = parse_pid(pid,[2,5])
 
   myname, isbiname = isbi_datasets[11] # v05
-  trainset = '01' #["01","02"][p0] # v06 
+  trainset = '02' #["01","02"][p0] # v06 
   info = get_isbi_info(myname,isbiname,trainset)
   P = _init_params(info.ndim)
   print(json.dumps(info.__dict__,sort_keys=True, indent=2, default=str), flush=True)
@@ -133,12 +133,12 @@ def run(pid=0):
   # if p0==6:
 
   # _ttimes = _traintimes(info)
-  _ttimes = [2,6,30,100,150,180,189,1,7,101,181]
-  _testtime = [5,8,99,102,179,182]
+  _ttimes     = [2,6,30,100,150,180,189,1,7,101,181]
+  _testtime   = [5,8,99,102,179,182]
+  _testtime02 = [0,12,25,40,65,88,167]
 
   train_data_files = [(f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{trainset}/"        + info.rawname.format(time=n),
-                       f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{trainset}_GT/TRA/" + info.man_track.format(time=n),
-            )
+                       f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{trainset}_GT/TRA/" + info.man_track.format(time=n),)
           for n in _ttimes]
   _specialize_isbi(P,myname,info)
 
@@ -160,7 +160,7 @@ def run(pid=0):
   savedir_local = savedir / f'e21_isbidet/v07/pid{pid:03d}/'
 
 
-  class StandardGen(object):
+  class CenterpointGen(object):
     def __init__(self, filenames):
       data   = np.array([SimpleNamespace(raw=zoom(load(r),P.zoom,order=1),lab=zoom(load(l),P.zoom,order=0)) for r,l in filenames],dtype=np.object)
       ndim   = data[0].raw.ndim
@@ -229,6 +229,7 @@ def run(pid=0):
         idx = self.vali_slices[_t]
         s   = self.get_patch(idx)
       return s
+
 
     def sample(self,time,train_mode=True):
       if p0==0:
@@ -299,7 +300,7 @@ def run(pid=0):
 
     def _f(i): ## i is time
       d = _single(i)
-      if i in _testtime: _save_preds(d,i)
+      if i in _testtime02: _save_preds(d,i)
       return d.scores,d.pts,d.height
 
     scores,ltps,height = map(list,zip(*[_f(i) for i in times]))
@@ -391,8 +392,8 @@ def run(pid=0):
 
   print("Running e21 with savedir: \n", cfig.savedir, flush=True)
 
-  if True:
-    dg = StandardGen(train_data_files); 
+  if False:
+    dg = CenterpointGen(train_data_files); 
     cfig.sample = dg.sample
     # save(dg.data[0].target.astype(np.float32), cfig.savedir / 'target_t_120.tif')  
 
@@ -412,11 +413,12 @@ def run(pid=0):
   _t1 = list(s1)
   # _t1 = [18]
   # _t1 = _testtime
+  _t1 = _testtime02
   # _t1 = [0,1,2,16,]
   # _t0 = list(np.random.choice(list(s0),min(5,len(s0)),replace=False))
   # _t1 = list(np.random.choice(list(s1),min(5,len(s1)),replace=False))
 
-  ltps = pred_many(net,_t1,dirname='pred_all',savedir=cfig.savedir)
+  ltps = pred_many(net,_t1,dirname='pred_all_02',savedir=cfig.savedir)
   # ltps = pred_many(net,_t0,dirname='pred_train',savedir=cfig.savedir)
 
   # ltps = load(cfig.savedir / f"ltps_{info.dataset}.pkl")

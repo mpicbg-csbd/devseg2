@@ -226,11 +226,14 @@ def e21_collect_scores():
   # save(res,"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v06/scores_all.pkl")
   # res = [load(f"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v06/pid{i:03d}/pred_all/scores.pkl") for i in range(35)]
   # save(res,"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v06/scores.pkl")
-  scores = [load(f"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v07/pid{i:03d}/pred_all/scores.pkl") for i in range(10)]
-  height = [load(f"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v07/pid{i:03d}/pred_all/height.pkl") for i in range(10)]
-  ltps = [load(f"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v07/pid{i:03d}/pred_all/ltps.pkl") for i in range(10)]
-  ta     = [load(f"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v07/pid{i:03d}/ta/",regex=r".*\.(pkl|json)") for i in range(10)]
-  res    = SimpleNamespace(scores=scores,height=height,ta=ta,)
+  scores = [load(f"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v07/pid{i:03d}/pred_all/scores.pkl") for i in range(5,10)]
+  height = [load(f"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v07/pid{i:03d}/pred_all/height.pkl") for i in range(5,10)]
+  ltps = [load(f"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v07/pid{i:03d}/pred_all/ltps.pkl") for i in range(5,10)]
+  scores02 = [load(f"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v07/pid{i:03d}/pred_all_02/scores.pkl") for i in range(5,10)]
+  height02 = [load(f"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v07/pid{i:03d}/pred_all_02/height.pkl") for i in range(5,10)]
+  ltps02 = [load(f"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v07/pid{i:03d}/pred_all_02/ltps.pkl") for i in range(5,10)]
+  ta     = [load(f"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v07/pid{i:03d}/ta/",regex=r".*\.(pkl|json)") for i in range(5,10)]
+  res    = SimpleNamespace(scores=scores,height=height,ta=ta,scores02=scores02,height02=height02,ltps02=ltps02,)
   save(res,"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v07/artifacts.pkl")
 
 
