@@ -84,15 +84,34 @@ def _specialize_isbi(P,myname,info):
     # cfig.bg_weight_multiplier=0.0
     # cfig.weight_decay = False
 
+
+
+def add_centerpoint_noise(data):
+  """
+  v04 only
+  """  
+  for d in data:
+    # x = ((np.random.rand(*d.pts.shape) - 0.5)*noise_level*2).astype(np.int) 
+    # ipdb.set_trace()
+    # _sh = 10000,2
+    ## floors towards zero
+    _sh = d.pts.shape
+    x = np.random.randn(*_sh)
+    x = x / np.linalg.norm(x,axis=1)[:,None]
+    r = np.random.rand(_sh[0])**(1/_sh[1]) * noise_level
+    x = (x*r[:,None]).astype(np.int)
+    d.pts += x
+
+
 def run(pid=0):
   """
   v01 : refactor of e18. make traindata AOT.
-  add `_train` 0 = predict only, 1 = normal init, 2 = continue
-  datagen generator -> CenterpointGen, customizable loss and validation metrics, and full detector2 refactor.
-  v02 : optimizing hyperparams. in [2,19,5,2]
+    add `_train` 0 = predict only, 1 = normal init, 2 = continue
+    datagen generator -> CenterpointGen, customizable loss and validation metrics, and full detector2 refactor.
+  v02 : optimizing hyperparams. in [2,19,5,2] or [2,19,2,5,2] ? 
     p0: dataset in [01,02]
     p1: isbi dataset in [0..18]
-    p2: sample flat vs content [0,1]
+    p2: sample flat vs content [0,1] ## ?WAS THIS REALLY HERE?
     p3: random variation [0..4]
     p4: pixel weights (should be per-dataset?) [0,1]
   v03 : explore kernel size. [2,50]
@@ -111,12 +130,15 @@ def run(pid=0):
   v07 : sampling methods: does it matter what we use? [2,5]
     p0 : [iterative sampling, content sampling]
     p1 : repeats
+  v08 : segmentation
+    p0 : dataset ∈ 0..18
+    p1 : acquisition ∈ 0,1
   """
 
-  (p0,p1),pid = parse_pid(pid,[2,5])
+  (p0,p1),pid = parse_pid(pid,[19,2])
 
-  myname, isbiname = isbi_datasets[11] # v05
-  trainset = '02' #["01","02"][p0] # v06 
+  myname, isbiname = isbi_datasets[p0] # v05
+  trainset = ["01","02"][p1] # v06 
   info = get_isbi_info(myname,isbiname,trainset)
   P = _init_params(info.ndim)
   print(json.dumps(info.__dict__,sort_keys=True, indent=2, default=str), flush=True)
@@ -157,26 +179,128 @@ def run(pid=0):
   # P.nms_footprint = [5,5] #np.ones(().astype(np.int))
   # noise_level = (p1/49)*20 #if p0==0 else (p1/49)*20
 
-  savedir_local = savedir / f'e21_isbidet/v07/pid{pid:03d}/'
+  savedir_local = savedir / f'e21_isbidet/v08/pid{pid:03d}/'
 
+  def load_all_seg(info):
+    # f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{trainset}_GT/SEG/" + info.man_seg.format(time=)
+    _segnames = glob(f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{trainset}_GT/SEG/*.tif")
+    def _f(segname):
+      # time = int(seg2d[-7:-4])
+      # zslice = int(seg2d[-7:-4])
+      _d = info.ndigits
+      _time = int(segname[-4-_d:-4]) if info.ndim==2 else int(segname[-7-_d:-7])
+      return f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{trainset}/" + info.rawname.format(time=_time)
+    _rawnames = [_f(s) for s in _segnames]
+    _ttrain_seg = list(zip(_rawnames,_segnames))
+    return _ttrain_seg
+
+  def _segdata(filenames):
+    data   = np.array([SimpleNamespace(raw=zoom(load(r),P.zoom,order=1),lab=zoom(load(l),P.zoom,order=0)) for r,l in filenames],dtype=np.object)
+    ndim   = data[0].raw.ndim
+    # for d in data: d.pts = mantrack2pts(d.lab)
+    # add_centerpoint_noise(data) ## v04 ONLY. simulate noisy annotations.
+    # for d in data: d.target = place_gaussian_at_pts(d.pts,d.lab.shape,P.kern)
+    for d in data:
+      d.target = np.zeros(d.raw.shape)
+      d.target[d.lab>0] = 1
+    for d in data: d.raw = normalize3(d.raw,2,99.4,clip=False)
+
+    # res = SimpleNamespace()
+    # res.data = data
+    # res.
+
+    return data
+
+  def segsample(time,train_mode=True):
+    N = len(segdata)
+    Nvali  = ceil(N/8)
+    Ntrain = N-Nvali
+    n0,n1 = (0,Ntrain) if train_mode else (Ntrain,None)
+    _data = segdata[n0:n1]
+
+    def _f():
+      _n = np.random.choice(r_[:len(_data)])
+      d  = _data[_n]
+      pt = (np.random.rand(info.ndim)*(np.array(d.raw.shape)-P.patch)).astype(int)
+      ss = tuple([slice(pt[i],pt[i]+P.patch[i]) for i in range(len(P.patch))])
+      # print(ss)
+      x = d.raw[ss].copy()
+      yt = d.target[ss].copy()
+      s = SimpleNamespace(x=x,yt=yt)
+      return s
+    s = _f()
+    while s.yt.sum()==0:
+      s = segsample(time,train_mode)
+    s.w = np.ones(s.x.shape)
+    return s
+
+
+  segdata = _segdata(load_all_seg(info))
+  for i in range(10):
+    s = segsample(0)
+    print(s.yt.sum())
+
+
+  def pred_segment(net,times,dirname='pred_seg',savedir=None):
+    # gtpts = load(f"/projects/project-broaddus/rawdata/{info.myname}/traj/{info.isbiname}/{info.dataset}_traj.pkl")
+    dims = "ZYX" if info.ndim==3 else "YX"
+
+    def _single(i):
+      "i is time"
+      print(i)
+      name = f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{trainset}/" + info.rawname.format(time=i)
+      raw = load(name)
+      raw = normalize3(raw,2,99.4,clip=False)
+      x   = zoom(raw,P.zoom,order=1)
+      pred = torch_models.predict_raw(net,x,dims=dims).astype(np.float32)
+      height = pred.max()
+      pred = pred / pred.max() ## 
+      pred = zoom(pred, 1/np.array(P.zoom), order=1)
+      seg = label(pred>0.5)[0]
+      # pts = peak_local_max(pred,threshold_abs=.2,exclude_border=False,footprint=np.ones(P.nms_footprint))
+      # pts = pts/P.zoom
+      # matching = point_matcher.match_unambiguous_nearestNeib(gtpts[i],pts,dub=10,scale=[3,1,1])
+      # matching = seg_match(gtpts[i],pts)
+      # print(matching.f1)
+      # fp, fn = find_errors(raw,matching)
+      # if savedir: save(pts,savedir / "predpts/pts{i:04d}.pkl")
+      # target = place_gaussian_at_pts(gtpts[i],raw.shape,P.kern)
+      # mse = np.mean((pred-target)**2)
+      # scores = dict(f1=matching.f1,precision=matching.precision,recall=matching.recall,mse=mse)
+      return SimpleNamespace(**locals())
+
+    def _save_preds(d,i):
+      # _best_f1_score = matching.f1
+      save(d.raw.astype(np.float16), savedir/f"{dirname}/d{i:04d}/raw.tif")
+      save(d.pred.astype(np.float16), savedir/f"{dirname}/d{i:04d}/pred.tif")
+      save(d.seg.astype(np.float16), savedir/f"{dirname}/d{i:04d}/seg.tif")
+      # save(d.target.astype(np.float16).max(0), savedir/f"{dirname}/d{i:04d}/target.tif")
+      # save(d.pts, savedir/f"{dirname}/d{i:04d}/pts.pkl")
+      # save(gtpts[i], savedir/f"{dirname}/d{i:04d}/pts_gt.pkl")
+      # save(d.scores, savedir/f"{dirname}/d{i:04d}/scores.pkl")
+      # save(d.matching, savedir/f"{dirname}/d{i:04d}/matching.pkl")
+      # save(fp, savedir/f"errors/t{i:04d}/fp.pkl")
+      # save(fn, savedir/f"errors/t{i:04d}/fn.pkl")
+
+    def _f(i): ## i is time
+      d = _single(i)
+      # if i in _testtime02: _save_preds(d,i)
+      _save_preds(d,i)
+      return 0,0,0
+      # return d.scores,d.pts,d.height
+
+    scores,ltps,height = map(list,zip(*[_f(i) for i in times]))
+    # save(scores, savedir/f"{dirname}/scores.pkl")
+    # save(height, savedir/f"{dirname}/height.pkl")
+    # save(ltps, savedir/f"{dirname}/ltps.pkl")
+    # return ltps
 
   class CenterpointGen(object):
     def __init__(self, filenames):
       data   = np.array([SimpleNamespace(raw=zoom(load(r),P.zoom,order=1),lab=zoom(load(l),P.zoom,order=0)) for r,l in filenames],dtype=np.object)
       ndim   = data[0].raw.ndim
       for d in data: d.pts = mantrack2pts(d.lab)
-      ## v04 ONLY. simulate noisy annotations.
-      # for d in data:
-      #   # x = ((np.random.rand(*d.pts.shape) - 0.5)*noise_level*2).astype(np.int) 
-      #   # ipdb.set_trace()
-      #   # _sh = 10000,2
-      #   ## floors towards zero
-      #   _sh = d.pts.shape
-      #   x = np.random.randn(*_sh)
-      #   x = x / np.linalg.norm(x,axis=1)[:,None]
-      #   r = np.random.rand(_sh[0])**(1/_sh[1]) * noise_level
-      #   x = (x*r[:,None]).astype(np.int)
-      #   d.pts += x
+      # add_centerpoint_noise(data) ## v04 ONLY. simulate noisy annotations.
       for d in data: d.target = place_gaussian_at_pts(d.pts,d.lab.shape,P.kern)
       for d in data: d.raw = normalize3(d.raw,2,99.4,clip=False)
       self.data = data
@@ -198,7 +322,6 @@ def run(pid=0):
 
       ## an index into data must be (i∈len(data),ss∈data[0].shape)
       ## we can make a list of non-overlapping slices, filter out slices based on data content?, split slices into train/vali, all without _actually_ shuffling patches or forgetting their orig spacetime location!
-
 
     def get_patch(self,idx):
       i,ss = idx
@@ -230,7 +353,6 @@ def run(pid=0):
         s   = self.get_patch(idx)
       return s
 
-
     def sample(self,time,train_mode=True):
       if p0==0:
         s = self.sample_iterate(time,train_mode)
@@ -259,7 +381,7 @@ def run(pid=0):
         s.w = s.w.max(0)
       return s
 
-  def pred_many(net,times,dirname='pred',savedir=None):
+  def pred_centerpoint(net,times,dirname='pred',savedir=None):
     gtpts = load(f"/projects/project-broaddus/rawdata/{info.myname}/traj/{info.isbiname}/{info.dataset}_traj.pkl")
     dims = "ZYX" if info.ndim==3 else "YX"
 
@@ -269,7 +391,7 @@ def run(pid=0):
       name = f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{trainset}/" + info.rawname.format(time=i)
       raw = load(name)
       raw = normalize3(raw,2,99.4,clip=False)
-      x = zoom(raw,P.zoom,order=1)
+      x   = zoom(raw,P.zoom,order=1)
       res = torch_models.predict_raw(net,x,dims=dims).astype(np.float32)
       height = res.max()
       res = res / res.max() ## 
@@ -369,8 +491,8 @@ def run(pid=0):
     cfig.lr = 4e-4
     cfig.savedir = savedir_local
     cfig.loss = _loss
-    cfig.vali_metrics = [height, point_match]
-    cfig.vali_minmax  = [None,np.max]
+    cfig.vali_metrics = [height] #[height, point_match]
+    cfig.vali_minmax  = [None] #[None,np.max]
     return cfig
 
   # def optimize_plm(net,data):
@@ -382,7 +504,6 @@ def run(pid=0):
   #     return avg_score
   #   params = #optimize(params0,params2score,)
   #   return params
-
 
   """
   EVERYTHING BELOW THIS POINT IS LIKE A WORKSPACE THAT CHANGES RAPIDLY & USES FUNCTIONS DEFINED ABOVE.
@@ -396,12 +517,21 @@ def run(pid=0):
     dg = CenterpointGen(train_data_files); 
     cfig.sample = dg.sample
     # save(dg.data[0].target.astype(np.float32), cfig.savedir / 'target_t_120.tif')  
-
     T = detector2.train_init(cfig)
     save([dg.sampleMax(i) for i in range(10)],cfig.savedir/"traindata.pkl")
-
     # T = detector2.train_continue(cfig,cfig.savedir / 'm/best_weights_loss.pt')
     detector2.train(T)
+
+  if True:
+    # dg = CenterpointGen(train_data_files);
+    cfig.sample = segsample
+    # save(dg.data[0].target.astype(np.float32), cfig.savedir / 'target_t_120.tif')  
+    T = detector2.train_init(cfig)
+    save([segsample(i) for i in range(10)],cfig.savedir/"traindata_seg.pkl")
+    # T = detector2.train_continue(cfig,cfig.savedir / 'm/best_weights_loss.pt')
+    detector2.train(T)
+
+
 
   net = cfig.getnet().cuda()
   net.load_state_dict(torch.load(cfig.savedir / "m/best_weights_loss.pt"))
@@ -413,13 +543,14 @@ def run(pid=0):
   _t1 = list(s1)
   # _t1 = [18]
   # _t1 = _testtime
-  _t1 = _testtime02
+  # _t1 = _testtime02
   # _t1 = [0,1,2,16,]
   # _t0 = list(np.random.choice(list(s0),min(5,len(s0)),replace=False))
   # _t1 = list(np.random.choice(list(s1),min(5,len(s1)),replace=False))
 
-  ltps = pred_many(net,_t1,dirname='pred_all_02',savedir=cfig.savedir)
-  # ltps = pred_many(net,_t0,dirname='pred_train',savedir=cfig.savedir)
+  # ltps = pred_centerpoint(net,_t1,dirname='pred_all',savedir=cfig.savedir)
+  ltps = pred_segment(net,_t1,dirname='pred_all',savedir=cfig.savedir)
+  # ltps = pred_centerpoint(net,_t0,dirname='pred_train',savedir=cfig.savedir)
 
   # ltps = load(cfig.savedir / f"ltps_{info.dataset}.pkl")
   # tb   = tracking.nn_tracking_on_ltps(ltps,scale=info.scale) # random_tracking_on_ltps(ltps)

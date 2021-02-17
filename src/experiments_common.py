@@ -21,7 +21,7 @@ import ipdb
 import itertools
 from math import floor,ceil
 import numpy as np
-# from scipy.ndimage import label,zoom
+from scipy.ndimage import label,zoom
 from skimage.feature  import peak_local_max
 from skimage.measure  import regionprops
 from pathlib import Path
@@ -35,7 +35,6 @@ from segtools import point_matcher
 from subprocess import run, Popen
 import shutil
 from segtools.point_tools import trim_images_from_pts2
-from scipy.ndimage import zoom
 import json
 from scipy.ndimage.morphology import binary_dilation
 
