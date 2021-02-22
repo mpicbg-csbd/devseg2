@@ -211,6 +211,10 @@ def e19_showerrors():
       print(m.groups())
       run(f"cat {name}",shell=1)
 
+
+
+
+
 def e21_collect_scores():
   # res = [load(f"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v03/pid{i:03d}/pred_test/scores.pkl") for i in range(100)]
   # save(res,"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v03/scores1.pkl")

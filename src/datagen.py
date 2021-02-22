@@ -270,20 +270,26 @@ def sample_flat(data,_patch):
   yt = data[_p1].target[ss].copy()
   return x,yt
 
+
+def jitter_center_inbounds(pt,patch,bounds,jitter=0.1):
+  D = patch.ndim
+  _pt  = pt + (2*np.random.rand(D))*patch*jitter ## jitter by 10% of patch width
+  _pt  = _pt - patch//2 ## center
+  _max = np.clip([bounds - patch],a_min=[0]*D,a_max=None)
+  _pt  = _pt.clip(min=[0]*D,max=_max)[0] ## clip to bounds
+  _pt  = _pt.astype(int)
+  ss  = tuple(slice(_pt[i],_pt[i] + patch[i]) for i in range(len(_pt)))
+  return ss
+
+
 def sample_content(data,_patch):
   _p1 = np.random.randint(len(data)) # timepoint
   _p2 = np.random.randint(len(data[_p1].pts)) # object center at timepoint
   pt  = data[_p1].pts[_p2]
   ndim = len(pt)
 
-  pt  = pt + (2*np.random.rand(ndim))*_patch*0.1 ## jitter by 10%
-  pt  = pt - _patch//2 ## center
-  _max = np.clip([data[_p1].target.shape - _patch],a_min=[0]*ndim,a_max=None)
-  pt  = pt.clip(min=[0]*ndim,max=_max)[0] ## clip to bounds
-  pt  = pt.astype(int)
-  ss  = tuple(slice(pt[i],pt[i] + _patch[i]) for i in range(len(pt)))
-
-  x = data[_p1].raw[ss].copy()
+  ss = jitter_center_inbounds(pt,_patch,data[_p1].raw.shape,jitter=0.1)
+  x  = data[_p1].raw[ss].copy()
   yt = data[_p1].target[ss].copy()
   return x,yt
 

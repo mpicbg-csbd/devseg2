@@ -51,7 +51,6 @@ from skimage.util import view_as_windows
 from expand_labels_scikit import expand_labels
 
 from scipy.ndimage.morphology import distance_transform_edt
-import datagen
 
 from datagen import * 
 # mantrack2pts, place_gaussian_at_pts, normalize3, sample_flat, sample_content, sample_iterate, shape2slicelist, augment, weights

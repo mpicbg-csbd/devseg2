@@ -121,10 +121,19 @@ def train_continue(config,weights_file):
   td,vd = SimpleNamespace(),SimpleNamespace()
   td.s = SimpleNamespace() #config.datagen.sample(0)
   vd.s = SimpleNamespace() #config.datagen.sample(0,train_mode=0)
-  td.s.x  = load(config.savedir / f"patches_train/x/a_i0.tif")
-  td.s.yt = load(config.savedir / f"patches_train/yt/a_i0.tif")
-  vd.s.x  = load(config.savedir / f"patches_vali/x/a_i0.tif")
-  vd.s.yt = load(config.savedir / f"patches_vali/yt/a_i0.tif")
+  
+  td.s = config.sample(0)
+  vd.s = config.sample(0,train_mode=0)
+  save(_prepsave(td.s.x,  proj=False),   config.savedir / f"patches_train/x/a_i0.tif")
+  save(_prepsave(td.s.yt, proj=False),  config.savedir / f"patches_train/yt/a_i0.tif")
+  save(_prepsave(vd.s.x,  proj=False),   config.savedir / f"patches_vali/x/a_i0.tif")
+  save(_prepsave(vd.s.yt, proj=False),  config.savedir / f"patches_vali/yt/a_i0.tif")
+
+  if False:
+    td.s.x  = load(config.savedir / f"patches_train/x/a_i0.tif")
+    td.s.yt = load(config.savedir / f"patches_train/yt/a_i0.tif")
+    vd.s.x  = load(config.savedir / f"patches_vali/x/a_i0.tif")
+    vd.s.yt = load(config.savedir / f"patches_vali/yt/a_i0.tif")
 
   T  = SimpleNamespace(m=m,vd=vd,td=td,ta=ta,c=config)
   return T
@@ -139,14 +148,14 @@ def train_init(config):
   m.opt = torch.optim.Adam(m.net.parameters(), lr = config.lr)
   # save(torch_models.receptivefield(m.net,kern=(3,5,5)),config.savedir / 'receptive_field.tif')
   torch_models.init_weights(m.net)
-  print("Weights randomized...")
+  print("Network params randomized...")
   
   td,vd = SimpleNamespace(),SimpleNamespace()
   td.s = config.sample(0)
   vd.s = config.sample(0,train_mode=0)
-  save(_prepsave(td.s.x, proj=False),   config.savedir / f"patches_train/x/a_i0.tif")
+  save(_prepsave(td.s.x,  proj=False),   config.savedir / f"patches_train/x/a_i0.tif")
   save(_prepsave(td.s.yt, proj=False),  config.savedir / f"patches_train/yt/a_i0.tif")
-  save(_prepsave(vd.s.x, proj=False),   config.savedir / f"patches_vali/x/a_i0.tif")
+  save(_prepsave(vd.s.x,  proj=False),   config.savedir / f"patches_vali/x/a_i0.tif")
   save(_prepsave(vd.s.yt, proj=False),  config.savedir / f"patches_vali/yt/a_i0.tif")
 
   ta = SimpleNamespace(i=1,losses=[],lr=config.lr,save_count=0,vali_scores=[],timings=[])

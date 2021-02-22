@@ -91,7 +91,7 @@ isbi_scales = {
   "Fluo-N3DH-CE":        (0.09 , 0.09, 1.0),
   "Fluo-N3DH-CHO":       (0.202, 0.202, 1.0),
   "Fluo-N3DL-DRO":       (0.406, 0.406, 2.03),
-  "Fluo-N3DL-TRIC":      (1.,1.,1.), # NA dueto cartographic projections
+  "Fluo-N3DL-TRIC":      (1.,1.,1.), # NA due to cartographic projections
   "Fluo-N3DL-TRIF":      (0.38 , 0.38, 0.38),
   "Fluo-C3DH-A549-SIM":  (0.126, 0.126, 1.0),
   "Fluo-N3DH-SIM+":      (0.125, 0.125, 0.200),
@@ -126,6 +126,7 @@ def get_isbi_info(myname,isbiname,dataset):
   d.maskname  = "mask{time:03d}.tif" if d.ndigits==3 else "mask{time:04d}.tif"
   d.man_track = "man_track{time:03d}.tif" if d.ndigits==3 else "man_track{time:04d}.tif"
   d.rawname   = "t{time:03d}.tif" if d.ndigits==3 else "t{time:04d}.tif"
+  # d.man_seg   = {(3,3): "man_seg_{time:03d}_{z:03d}.tif", 
   d.raw_full  = f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{dataset}/" + d.rawname
   d.lab_full  = f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/{dataset}_GT/TRA/" + d.man_track
   return d
