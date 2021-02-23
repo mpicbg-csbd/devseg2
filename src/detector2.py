@@ -50,7 +50,7 @@ def _config_example():
   config = SimpleNamespace()
   config.savedir = Path("An/Example/Directory")
   ## Build the network
-  config.getnet = lambda : torch_models.Unet3(16, [[1],[1]], pool=(1,2,2), kernsize=(3,5,5), finallayer=torch_models.nn.Sequential)
+  config.net = torch_models.Unet3(16, [[1],[1]], pool=(1,2,2), kernsize=(3,5,5), finallayer=torch_models.nn.Sequential)
   
   ## fg/bg weights stuff for fluorescence images & class-imbalanced data
   class StandardGen(object):
@@ -113,7 +113,8 @@ def train_continue(config,weights_file):
   check_config(config)
   config.savedir = Path(config.savedir).resolve()
   m = SimpleNamespace()
-  m.net = config.getnet().cuda()
+  # m.net = config.getnet().cuda()
+  m.net = config.net
   m.net.load_state_dict(torch.load(weights_file))
   m.opt = torch.optim.Adam(m.net.parameters(), lr = config.lr)
   ta = load(config.savedir / "ta/")
@@ -144,7 +145,8 @@ def train_init(config):
   setup_dirs(config.savedir)
   ## load model, save receptive field, randomize weights...
   m = SimpleNamespace()
-  m.net = config.getnet().cuda()
+  # m.net = config.getnet().cuda()
+  m.net = config.net
   m.opt = torch.optim.Adam(m.net.parameters(), lr = config.lr)
   # save(torch_models.receptivefield(m.net,kern=(3,5,5)),config.savedir / 'receptive_field.tif')
   torch_models.init_weights(m.net)
@@ -154,9 +156,9 @@ def train_init(config):
   td.s = config.sample(0)
   vd.s = config.sample(0,train_mode=0)
   save(_prepsave(td.s.x,  proj=False),   config.savedir / f"patches_train/x/a_i0.tif")
-  save(_prepsave(td.s.yt, proj=False),  config.savedir / f"patches_train/yt/a_i0.tif")
+  save(_prepsave(td.s.yt, proj=False),  config.savedir /  f"patches_train/yt/a_i0.tif")
   save(_prepsave(vd.s.x,  proj=False),   config.savedir / f"patches_vali/x/a_i0.tif")
-  save(_prepsave(vd.s.yt, proj=False),  config.savedir / f"patches_vali/yt/a_i0.tif")
+  save(_prepsave(vd.s.yt, proj=False),  config.savedir /  f"patches_vali/yt/a_i0.tif")
 
   ta = SimpleNamespace(i=1,losses=[],lr=config.lr,save_count=0,vali_scores=[],timings=[])
   ta.vali_names = [f.__name__ for f in config.vali_metrics]
@@ -188,13 +190,21 @@ def train(T):
       l = float(loss)
       ymax,ystd = float(y.max()), float(y.std())
       ytmax,ytstd = float(s.yt.max()), float(s.yt.std())
-      print(f"i={ta.i:04d}, shape={y.shape}, loss={l:4f}, dt={dt:4f}, y={ymax:4f},{ystd:4f} yt={ytmax:4f},{ytstd:4f}",end='\r',flush=True)
+      print(f"i={ta.i:04d}, loss={l:4f}, dt={dt:4f}, y={ymax:4f},{ystd:4f} yt={ytmax:4f},{ytstd:4f}",end='\r',flush=True)
 
     if ta.i % config.time_validate == 0:
       n = ta.i // config.time_validate
       ta.losses.append(np.mean(_losses[-config.time_validate:]))
       save(ta , config.savedir/"ta/")
       validate(T)
+      names = ["val_loss"] + T.ta.vali_names
+      print()
+      for i in range(len(names)):
+        name  = names[i]
+        score = T.ta.vali_scores[-1][i]
+        print(f"{name}: {score:6f}")
+
+      # print(f"i={ta.i:04d}, val_loss={val_loss:4f}, ",end='\r',flush=True)
       check_weights_and_save(T,n)
       if ta.i % (config.time_validate*config.save_every_n) == 0:
         save_patches(T,n)
