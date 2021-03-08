@@ -11,6 +11,13 @@ from skimage.measure  import regionprops
 # import tifffile
 from pathlib import Path
 
+# from isbi_tools import get_isbi_info, isbi_datasets, isbi_scales
+from segtools.point_tools import trim_images_from_pts2
+import matplotlib
+
+savedir_global = Path("/projects/project-broaddus/devseg_2/expr/")
+
+
 # from subprocess import Popen,run
 # from segtools.math_utils import conv_at_pts_multikern
 # import files
@@ -182,27 +189,27 @@ def job14():
       allpts[time] = pts
     save(allpts, f"/projects/project-broaddus/rawdata/{_myname}/traj/{_isbiname}/{_dataset}_traj.pkl")
 
-# isbi_datasets = [
-#   ("HSC",            "BF-C2DL-HSC"),
-#   ("MuSC",           "BF-C2DL-MuSC"),
-#   ("HeLa",           "DIC-C2DH-HeLa"),
-#   ("MSC",            "Fluo-C2DL-MSC"),
-#   ("A549",           "Fluo-C3DH-A549"),
-#   ("A549-SIM",       "Fluo-C3DH-A549-SIM"),
-#   ("H157",           "Fluo-C3DH-H157"),
-#   ("MDA231",         "Fluo-C3DL-MDA231"),
-#   ("GOWT1",          "Fluo-N2DH-GOWT1"),
-#   ("SIM+",           "Fluo-N2DH-SIM+"),
-#   ("HeLa",           "Fluo-N2DL-HeLa"),
-#   ("celegans_isbi",  "Fluo-N3DH-CE"),
-#   ("hampster",       "Fluo-N3DH-CHO"),
-#   ("SIM+",           "Fluo-N3DH-SIM+"),
-#   ("fly_isbi",       "Fluo-N3DL-DRO"),
-#   ("trib_isbi_proj", "Fluo-N3DL-TRIC"),
-#   ("trib_isbi",      "Fluo-N3DL-TRIF"),
-#   ("U373",           "PhC-C2DH-U373"),
-#   ("PSC",            "PhC-C2DL-PSC"),
-#  ]
+isbi_datasets = [
+  ("HSC",            "BF-C2DL-HSC"),
+  ("MuSC",           "BF-C2DL-MuSC"),
+  ("HeLa",           "DIC-C2DH-HeLa"),
+  ("MSC",            "Fluo-C2DL-MSC"),
+  ("A549",           "Fluo-C3DH-A549"),
+  ("A549-SIM",       "Fluo-C3DH-A549-SIM"),
+  ("H157",           "Fluo-C3DH-H157"),
+  ("MDA231",         "Fluo-C3DL-MDA231"),
+  ("GOWT1",          "Fluo-N2DH-GOWT1"),
+  ("SIM+",           "Fluo-N2DH-SIM+"),
+  ("HeLa",           "Fluo-N2DL-HeLa"),
+  ("celegans_isbi",  "Fluo-N3DH-CE"),
+  ("hampster",       "Fluo-N3DH-CHO"),
+  ("SIM+",           "Fluo-N3DH-SIM+"),
+  ("fly_isbi",       "Fluo-N3DL-DRO"),
+  ("trib_isbi_proj", "Fluo-N3DL-TRIC"),
+  ("U373",           "PhC-C2DH-U373"),
+  ("PSC",            "PhC-C2DL-PSC"),
+  ("trib_isbi",      "Fluo-N3DL-TRIF"),
+ ]
 
 def job15():
   dataset = ["01","02"]
@@ -280,11 +287,6 @@ def job16_downscaleTrib(ds="01"):
   name = f"Fluo-N3DL-TRIF/{ds}_GT/TRA/man_track.txt"
   shutil.copy(old_dir / name, new_dir / name)
 
-from isbi_tools import get_isbi_info, isbi_datasets, isbi_scales
-from segtools.point_tools import trim_images_from_pts2
-import matplotlib
-
-savedir_global = Path("/projects/project-broaddus/devseg_2/expr/")
 
 def job17_ISBI_projections():
   savedir = savedir_global / "dataviews"
@@ -346,10 +348,76 @@ def job17_ISBI_projections():
         # print(savedir / (_isbiname + f"_t-{_t}_{p3}_max{_X}.tif"))
 
 
+import zarr
+from glob import glob
+from time import time
+from tifffile import imread
+import os
 
+def conver_dirtree(root):
+  for _dir,_subdirs,_files in os.walk(root):
+    _dir = Path(_dir)
+    fs = sorted(_files)
+    # if len(fs)>2: continue
+    for _f in fs: #[fs[0],fs[-1]]:
+      if _f.endswith(".tif"):
+        name = _dir / _f
+        newname = name.with_suffix(".zarr")
+        newname = str(newname).replace("rawdata","rawdata/zarr")
+        print(name)
+        print(newname)
+        x = load(name)
+        zarr.save_array(str(newname),x)
 
+def job18_convrt_to_zarr():
+  # [6,11,12,13,14,15,18]
+  for i in [0,1,2,3,4,5,7,8,9,10,16,17]:
+    # for j in [0,1]:
+    myname,isbiname = isbi_datasets[i]
+    # dataset = ["01","02"][j]
+    root = f"/projects/project-broaddus/rawdata/{myname}/{isbiname}/"
+    conver_dirtree(root)
 
+def job19_compare_tif_zarr_timings():
+  tiff_filenames = sorted(glob(f"/projects/project-broaddus/rawdata/fly_isbi/Fluo-N3DL-DRO/01/*.tif"))
+  zarr_filenames = [x.replace("fly_isbi","fly_isbi/zarr").replace(".tif",".zarr") for x in tiff_filenames]
 
+  def open_file_and_mean(filename):
+    if filename.endswith(".tif"):
+      t1 = time()
+      x = imread(filename)
+      # a,b,c = x.shape
+      # x = x[a//4:a//2,b//4:b//2,c//4:c//2]
+      # res = np.mean(x)    #.mean()
+      t2 = time()
+    elif filename.endswith(".zarr"):
+      t1 = time()
+      x = zarr.open_array(filename)
+      # a,b,c = x.shape
+      # x = x[a//4:a//2,b//4:b//2,c//4:c//2]
+      # res = np.mean(x)
+      t2 = time()
+
+    return (t2-t1)
+
+  tiff_times = np.array([open_file_and_mean(x) for x in tiff_filenames])
+  zarr_times = np.array([open_file_and_mean(x) for x in zarr_filenames])
+
+  print()
+
+  print("----------")
+  print("TIFF stats:")
+  mean = np.mean(tiff_times)
+  std = np.std(tiff_times)
+  print(f"mean: {mean:6f}")
+  print(f"stddev: {std:6f}")
+
+  print("----------")
+  print("ZARR stats:")
+  mean = np.mean(zarr_times)
+  std = np.std(zarr_times)
+  print(f"mean: {mean:6f}")
+  print(f"stddev: {std:6f}")
 
 
 

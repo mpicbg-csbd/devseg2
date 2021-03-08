@@ -3,7 +3,7 @@ import ipdb
 from segtools.math_utils import conv_at_pts4
 import itertools
 
-def nearest_neib_masker(x,yt,T):
+def nearest_neib_masker(x):
   sh = x.shape[2:]
   ndim = len(sh)
   frac = 0.01
@@ -13,21 +13,20 @@ def nearest_neib_masker(x,yt,T):
   for i in range(ndim):
     neibs[:,i] = neibs[:,i].clip(min=0,max=sh[i]-1)
 
-  yt = x.copy()
   ss_pts = (0,0,) + tuple(pts.T[i] for i in range(ndim))
   ss_neibs = (0,0,) + tuple(neibs.T[i] for i in range(ndim))
   x[ss_pts] = x[ss_neibs]
   _w = np.zeros(x.shape)
   _w[ss_pts] = 1
 
-  return x,yt,_w
+  return x,_w
 
-def structN2V_masker(x,yt,T):
+def structN2V_masker(x,_mask):
   """
   each point in coords corresponds to the center of the mask.
   then for point in the mask with value=1 we assign a random value
   """
-  mask = T.config.mask
+  mask = _mask.copy()
   ndim = mask.ndim
   center = np.array(mask.shape)//2
   ## leave the center value alone
@@ -54,12 +53,11 @@ def structN2V_masker(x,yt,T):
 
     # patch[tuple(coords)] = 2
 
-  return x,yt,w
+  return x,w
 
-def footprint_masker(x,yt,T):
+def footprint_masker(x,yt,footprint):
   # patch_space = x.shape
-  kern = T.config.mask
-  ma = mask_from_footprint(x.shape[2:],kern,)
+  ma = mask_from_footprint(x.shape[2:],footprint,)
   # print(ma.shape)
   ma = ma[None,None] ## samples , channels
   yt = x.copy()
@@ -67,15 +65,14 @@ def footprint_masker(x,yt,T):
   w = (ma==2).astype(np.float32)
   return x,yt,w
 
-def mask_from_footprint(sh,kern,frac=0.01):
+def mask_from_footprint(sh,footprint,frac=0.01):
   # takes a shape sh. returns random mask with that shape
   pts = (np.random.rand(int(np.prod(sh)*frac),3)*sh).astype(int)
-  target = conv_at_pts4(pts,kern,sh,lambda a,b:np.maximum(a,b))
+  target = conv_at_pts4(pts,footprint,sh,lambda a,b:np.maximum(a,b))
   target = target.astype(np.uint8)
   return target
 
-def mask_2(patch_size,frac):
-  "build random mask for small number of central pixels"
+def random_mask(patch_size,frac):
   n = int(np.prod(patch_size) * frac)
   kern = np.zeros((19,3,3)) ## must be odd
   kern[:,1,1] = 1
@@ -88,9 +85,9 @@ def mask_2(patch_size,frac):
   for dx in deltas.T:
     inds = (indices+dx[:,None]).T.clip(min=[0,0,0],max=np.array(patch_size)-1).T
     newmask[tuple(inds)] = 1
+  return mask
 
-def sparse_3set_mask(d):
-  "build random mask for small number of central pixels"
+def sparse_3set_mask3D(patch_size,frac,xmask,ymask,zmask):
   n = int(np.prod(d.patch_size) * d.frac)
   z_inds = np.random.randint(0,d.patch_size[0],n)
   y_inds = np.random.randint(0,d.patch_size[1],n)
