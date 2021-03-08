@@ -86,7 +86,7 @@ class BaseModel(object):
     cfig.predict_and_compress = self.predict_and_compress
     self.train_cfig = cfig
 
-  def train(self,sampler,_continue=1):
+  def train(self,_continue=1):
     
     # if _continue==TrainStart.FRESH:
     if _continue==1:
@@ -108,8 +108,8 @@ class BaseModel(object):
 
     for ta.i in range(ta.i,config.time_total+1):
 
-      # s = self.sample(ta.i)
-      s = next(sampler)
+      s = self.sample(ta.i)
+      # s = next(sampler)
       y,loss = self.loss(self.net,s) #config.datagen.sample(ta.i,train_mode=1))
       loss.backward()
       y = y.detach().cpu().numpy()
@@ -130,7 +130,7 @@ class BaseModel(object):
       if ta.i % config.time_validate == 0:
         n = ta.i // config.time_validate
         ta.losses.append(np.mean(_losses[-config.time_validate:]))
-        save(ta , config.savedir/"ta/")
+
         self.validate(n)
         self.check_weights_and_save(n)
         if ta.i % (config.time_validate*config.save_every_n) == 0:
@@ -159,6 +159,8 @@ class BaseModel(object):
     self.ta = SimpleNamespace(i=1,losses=[],lr=config.lr,save_count=0,vali_loss=[],vali_scores=[],timings=[])
     self.ta.vali_names = [f.__name__ for f in config.vali_metrics]
     self.ta.best_weights_time = np.zeros(len(config.vali_metrics)+1)
+    # self.ta.vali_scores = self.train_cfig.vali_metrics
+    # self.ta.vali_minmax = self.train_cfig.vali_minmax
     self.predict_and_save_glances(0)
 
   def validate(self,time):
@@ -197,7 +199,7 @@ class BaseModel(object):
     vs = np.array(ta.vali_scores)
     for i in range(vs.shape[1]):
       valiname = ta.vali_names[i]
-      f_max = ta.vali_minmax[i]
+      f_max = self.train_cfig.vali_minmax[i]
       if f_max is None: continue
       if f_max(vs[:,i])==vs[-1,i]:
         ta.best_weights_time[i] = n
