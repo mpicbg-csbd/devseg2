@@ -54,7 +54,7 @@ def cpnet_experiment_modifications(CPNet):
 
 def add_centerpoint_noise(data):
   """
-  v04 only
+  data is List of SimpleNamespace with `pts` attribute
   """
   for d in data:
     # x = ((np.random.rand(*d.pts.shape) - 0.5)*noise_level*2).astype(np.int) 

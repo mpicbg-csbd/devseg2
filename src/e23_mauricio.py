@@ -18,7 +18,7 @@ from scipy.ndimage import zoom
 
 from types import SimpleNamespace
 from skimage.feature  import peak_local_max
-import detector2
+
 
 savedir = savedir_global()
 print("savedir:", savedir)
@@ -52,9 +52,6 @@ def run(pid=0):
   if 1:
     CPNet.dataloader()
     CPNet.train_cfig.time_total = 30_000
-    # T = detector2.train_init(CPNet.train_cfig)
-    # T = detector2.train_continue(CPNet.train_cfig, CPNet.savedir / 'm/best_weights_loss.pt')
-    # detector2.train(T)
     CPNet.train(_continue=1)
 
   CPNet.net.load_state_dict(torch.load(CPNet.savedir / "m/best_weights_loss.pt"))

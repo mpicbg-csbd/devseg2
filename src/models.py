@@ -46,8 +46,6 @@ class TrainerObserver(object):
       # tqdm.write(str(ts[-1]-ts[-2]))
       # tqdm.write(str(float(l.detach().cpu())))
 
-
-
 class Trainer(object):
   def __init__(self):
     self.lr = 1e-4
@@ -67,7 +65,6 @@ class Trainer(object):
       self.opt.zero_grad()
       if observer:
         observer.add(i,y,l,model,sampler,)
-
 
 class BaseModel(object):
 
