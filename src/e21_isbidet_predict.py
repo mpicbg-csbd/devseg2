@@ -6,7 +6,7 @@ from datagen import place_gaussian_at_pts
 # from segtools.render import rgb_max
 # from models import CenterpointModel, SegmentationModel, StructN2V
 # from augmend import Augmend,FlipRot90,Elastic,Rotate,Scale
-from tracking import nn_tracking_on_ltps, random_tracking_on_ltps
+# from tracking import nn_tracking_on_ltps, random_tracking_on_ltps
 from isbi_tools import get_isbi_info, isbi_datasets, isbi_scales
 from segtools.numpy_utils import normalize3, perm2, collapse2, splt, plotgrid
 from segtools.ns2dir import load,save
@@ -27,7 +27,8 @@ from math import floor,ceil
 import re
 from pathlib import Path
 
-# import e24_isbi_datagen
+import warnings
+warnings.simplefilter("once")
 
 try:
     import gputools
@@ -106,7 +107,7 @@ def myrun(pid=0):
   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
   net = _init_unet_params(info.ndim).net
   net = net.to(device)
-  old_weights = Path(f"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v08/pid{pid:03d}/m/best_weights_loss.pt")
+  old_weights = Path(f"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v09/pid{pid:03d}/m/best_weights_loss.pt")
   net.load_state_dict(torch.load(old_weights))
 
   N   = 7
@@ -116,7 +117,12 @@ def myrun(pid=0):
   
   D = info.ndim
   kwargs   = dict(ndim=D,zoom=(1,1,1)[-D:],dims="ZYX"[-D:],nms_footprint=(3,5,5)[-D:],kern=[3,5,5][-D:])
-  ltps = predict_and_eval_centers(net,savetimes,predict_times,info,savedir_local,kwargs)
+  _trainparams = load(Path(f"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v09/pid{pid:03d}/data_specific_params.pkl"))
+  for k,v in _trainparams.__dict__.items(): kwargs[k] = v
+  print(kwargs)
+  with warnings.catch_warnings():
+    warnings.simplefilter("once")
+    ltps = predict_and_eval_centers(net,savetimes,predict_times,info,savedir_local,kwargs)
 
 
 
@@ -129,7 +135,7 @@ def myrun(pid=0):
 
 ## Prediction functions
 
-def _proj(x):
+def _png(x):
   if x.ndim==3:
     x = x.max(0)
   norm = lambda x: (x-x.min())/(x.max()-x.min())
@@ -172,25 +178,27 @@ def predict_and_eval_centers(net,savetimes,predict_times,info,savedir_local,kwar
 
   def _single(i):
     "i is time"
-    print(i)
+    _time = predict_times[i]
     # name   = f"/projects/project-broaddus/rawdata/{info.myname}/{info.isbiname}/{info.dataset}/" + info.rawname.format(time=predict_times[i])
-    raw    = load(name.format(time=predict_times[i]))
+    raw    = load(name.format(time=_time))
     S      = predict_full(net,raw,**kwargs)
-    matching = match(pts_gt[i],S.pts)
+    matching = match(pts_gt[_time],S.pts)
     # fp, fn = find_errors(raw,matching)
     # if savedir_local: save(pts,savedir_local / "predpts/pts{i:04d}.pkl")
-    target = place_gaussian_at_pts(pts_gt[i],raw.shape,kwargs['kern'])
-    mse = np.mean((S.pred-target)**2)
-    scores = dict(f1=matching.f1,precision=matching.precision,recall=matching.recall,mse=mse)
-    return SimpleNamespace(raw=raw,matching=matching,target=target,scores=scores,pts=S.pts,pts_gt=pts_gt[i],pred=S.pred,height=S.height)
+    target = place_gaussian_at_pts(pts_gt[_time],raw.shape,kwargs['kern'])
+    matching.mse  = np.mean((S.pred-target)**2)
+    matching.time = _time
+    matching.pred_height = S.height
+    print(f"time {_time}, f1: {matching.f1}")
+    # scores = dict(f1=matching.f1,precision=matching.precision,recall=matching.recall,mse=mse)
+    return SimpleNamespace(raw=raw,matching=matching,target=target,pred=S.pred,)
 
   def _save_preds(d,i):
     # _best_f1_score = matching.f1
-    print("Saving ", i)
-    save(_proj(d.raw), savedir_local/f"d{i:04d}/raw.png")
-    save(_proj(d.pred), savedir_local/f"d{i:04d}/pred.png")
-    save(_proj(d.target), savedir_local/f"d{i:04d}/target.png")
-    d.matching.time = predict_times[i]
+    # print("Saving ", i)
+    save(_png(d.raw), savedir_local/f"d{i:04d}/raw.png")
+    save(_png(d.pred), savedir_local/f"d{i:04d}/pred.png")
+    save(_png(d.target), savedir_local/f"d{i:04d}/target.png")
     save(d.matching, savedir_local/f"d{i:04d}/matching.pkl")
 
     # save(d.pts, savedir_local/f"d{i:04d}/pts.pkl")
@@ -203,13 +211,11 @@ def predict_and_eval_centers(net,savetimes,predict_times,info,savedir_local,kwar
     # if Path(name.format(time=predict_times[i])).exists(): return None,None,None
     d = _single(i)
     if predict_times[i] in savetimes: _save_preds(d,i)
-    return d.scores,d.pts,d.height
+    return d.matching.pts_yp
 
 
-  scores,ltps,height = map(list,zip(*[_f(i) for i in range(len(predict_times))]))
-  # save(scores, savedir_local/f"scores.pkl")
+  ltps = map(list,zip(*[_f(i) for i in range(len(predict_times))]))
   save(ltps, savedir_local/f"ltps.pkl")
-  # save(height, savedir_local/f"height.pkl")
 
   return ltps
 

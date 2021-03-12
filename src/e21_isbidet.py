@@ -28,7 +28,8 @@ from experiments_common import rchoose, partition, shuffle_and_split, parse_pid,
 import datagen
 from isbi_tools import get_isbi_info, isbi_datasets, isbi_scales
 from segtools.ns2dir import load, save
-from augmend import Augmend,FlipRot90,Elastic,Rotate,Scale
+import augmend
+from augmend import Augmend,FlipRot90,Elastic,Rotate,Scale,IntensityScaleShift,Identity
 from segtools import torch_models
 from tqdm import tqdm
 from segtools.point_matcher import match_unambiguous_nearestNeib
@@ -47,7 +48,7 @@ def myrun_slurm(pids):
   ## NOTE: here we only copy experiment.py file, but THE SAME IS TRUE FOR ALL DEPENDENCIES.
 
   shutil.copy("/projects/project-broaddus/devseg_2/src/e21_isbidet.py", "/projects/project-broaddus/devseg_2/src/e21_isbidet_copy.py")
-  _gpu  = "-p gpu --gres gpu:1 -n 1 -c 4 -t 2:00:00 --mem 128000 "
+  _gpu  = "-p gpu --gres gpu:1 -n 1 -c 4 -t 2:00:00 --mem 128000 "    ## TODO: more cores?
   _cpu  = "-n 1 -t 1:00:00 -c 4 --mem 128000 "
   slurm = 'sbatch -J e21_{pid:03d} {_resources} -o slurm/e21_pid{pid:03d}.out -e slurm/e21_pid{pid:03d}.err --wrap \'python3 -c \"import e21_isbidet_copy as ex; ex.myrun_slurm_entry({pid})\"\' '
   slurm = slurm.replace("{_resources}",_gpu)
@@ -64,6 +65,27 @@ def myrun_slurm_entry(pid=0):
   #     print("FAIL on pids", [p0,p1,p2,p3])
 
 
+def cpnet_data_specialization(info):
+  myname = info.myname
+  p = SimpleNamespace()
+  if myname in ["celegans_isbi","A549","A549-SIM","H157","hampster","Fluo-N3DH-SIM+"]:
+    p.zoom = {3:(1,0.5,0.5), 2:(0.5,0.5)}[info.ndim]
+  if myname=="trib_isbi":
+    p.kern = [3,3,3]
+    p.zoom = (0.5,0.5,0.5)
+  if myname=="MSC":
+    a,b = info.shape
+    p.zoom = {'01':(1/4,1/4), '02':(128/a, 200/b)}[info.dataset]
+    ## '02' rescaling is almost exactly isotropic while still being divisible by 8.
+  if info.isbiname=="DIC-C2DH-HeLa":
+    # p.kern = [7,7]
+    p.zoom = (0.5,0.5)
+  if myname=="fly_isbi":
+    pass
+    # cfig.bg_weight_multiplier=0.0
+    # cfig.weight_decay = False
+  return p
+
 
 def _init_params(ndim):
   P = SimpleNamespace()
@@ -75,6 +97,7 @@ def _init_params(ndim):
     P.zoom   = (1,1,1) #(1,0.5,0.5)
     P.kern   = [2,5,5]
     P.patch  = (16,128,128)
+  P.nms_footprint = P.kern
   P.patch = np.array(P.patch)
   return P
 
@@ -82,10 +105,8 @@ def _init_unet_params(ndim):
   T = SimpleNamespace()
   if ndim==2:
     T.net = torch_models.Unet3(16, [[1],[1]], pool=(2,2),   kernsize=(5,5),   finallayer=torch_models.nn.Sequential)
-    T.nms_footprint = [9,9]
   elif ndim==3:
     T.net = torch_models.Unet3(16, [[1],[1]], pool=(1,2,2), kernsize=(3,5,5), finallayer=torch_models.nn.Sequential)
-    T.nms_footprint = [3,9,9]
   return T
 
 def isbiInfo_to_filenames(info):
@@ -99,9 +120,10 @@ def isbiInfo_to_filenames(info):
   return filenames, pointfiles
 
 class FullDynamicSampler(IterableDataset):
-  def __init__(self,data,train_mode=1,N_samples=1_000,savefile=None):
+  def __init__(self,info,data,train_mode=1,N_samples=1_000,savefile=None):
     super().__init__()
 
+    self.info = info
     self.data = data #[f(a,b) for a,b in self.filenames][self.timeslice]
     # self.ltps = ltps #load(self.pointfiles)[self.timeslice] if self.pointfiles else None
     self.N_samples = N_samples
@@ -114,15 +136,13 @@ class FullDynamicSampler(IterableDataset):
       self.reified_samples = load(savefile)
       print(f"Savefile Loaded with {len(self.reified_samples)} samples...")
     self.data_resized = False
-
-
-  def __iter__(self):
     self.ndim = self.data[0].raw.ndim
     P = _init_params(self.ndim)
     for k,v in P.__dict__.items(): self.__dict__[k] = v
-    self.counter = 0
     self.f_augment = self.augmenter(self.ndim)
+    self.counter = 0
 
+  def __iter__(self):
     while True:
       if self.N_samples and len(self.reified_samples) >= self.N_samples:
         s = self.reified_samples[self.counter % self.N_samples]
@@ -195,58 +215,71 @@ class FullDynamicSampler(IterableDataset):
       aug.add([FlipRot90(axis=(1,2)), FlipRot90(axis=(1,2)),], probability=1)
     else:
       aug.add([FlipRot90(axis=(0,1)), FlipRot90(axis=(0,1)),], probability=1)
+
+    aug.add([augmend.IntensityScaleShift(), augmend.Identity()], probability=1.0)
+
     # aug.add([Rotate(axis=ax, order=1),
     #          Rotate(axis=ax, order=1),],
     #         probability=0.5)
     return aug
+
+def divide_evenly_with_min1(n_samples,n_bins):
+  N = n_samples
+  M = n_bins
+  assert N>=M
+  y = np.linspace(0,N,M+1).astype(np.int)
+  ss = [slice(y[i],y[i+1]) for i in range(M)]
+  return ss
 
 def worker_init_fn(worker_id):
   worker_info = torch.utils.data.get_worker_info()
   dataset = worker_info.dataset  # the dataset copy in this worker process 
   N = len(dataset.data) 
   M = worker_info.num_workers
-  a = ceil(N/M)
-  _id = worker_info.id
-  s = slice(_id*a,(_id+1)*a)
-  # dataset.timeslice = s
+  _id = int(worker_info.id)
+  ss = divide_evenly_with_min1(N,M)
+  s = ss[_id]
+  print(s)
+  # ipdb.set_trace()
+
   dataset.data = dataset.data[s]
   print(f"Hello From Worker {_id}!!!")
   print("Data Shape: ", len(dataset.data))
+
   # _t1 = time()
   # print("Length of data: ", len(dataset.data))
   # dataset.resize_data()
   # print("Initializing Data...", time()-_t1, " sec")
-
   # print(locals())
 
-def compress(sample_list):
+def save_input_glances(sample_list,filename):
   s = SimpleNamespace()
   _s = s.__dict__
   norm = lambda x: (x-x.min())/(x.max()-x.min())
   for i,x in enumerate(sample_list):
-    for k,v in x.__dict__.items():
+    for k in ['x', 'yt', 'w', 'yt_pts',]:
+      v = x.__dict__[k]
+      if v.ndim==3: v = v.max(0)
+      assert v.ndim==2
       if k=='x':
-        _s[f'x{i}']  = (norm(v.max(0))*255).astype(np.uint8)
+        _s[f'x{i}']  = (norm(v)*255).astype(np.uint8)
       if k=='yt':
-        _s[f'yt{i}'] = (norm(v.max(0))*255).astype(np.uint8)
-  return s
+        _s[f'yt{i}'] = (norm(v)*255).astype(np.uint8)
+  save(s,filename)
 
-
-def dataloader(data,savefile=None,N_samples=100,num_workers=0,train_mode=1):
+def dataloader(info,data,savefile=None,N_samples=100,num_workers=0,train_mode=1):
   return DataLoader(
-              dataset=FullDynamicSampler(data,
+              dataset=FullDynamicSampler(info,data,
                 savefile=savefile,
-                N_samples=N_samples,
+                N_samples=int(N_samples),
                 train_mode=train_mode),
               batch_size=None,
               # shuffle=False,
-              num_workers=num_workers,
+              num_workers=int(num_workers),
               #os.cpu_count(),
               worker_init_fn=worker_init_fn,
               # persistent_workers=True, ## doesn't exist in pytorch 1.2
           )
-  
-
 
 def myrun(pid=0):
   """
@@ -284,7 +317,7 @@ def myrun(pid=0):
   """
 
   (p0,p1),pid = parse_pid(pid,[19,2])
-  savedir_local = savedir / f'e21_isbidet/v08/pid{pid:03d}/'
+  savedir_local = savedir / f'e21_isbidet/v09/pid{pid:03d}/'
   (savedir_local / 'm').mkdir(exist_ok=True,parents=True) ## place to save models
   myname, isbiname = isbi_datasets[p0] # v05
   trainset = ["01","02"][p1] # v06
@@ -310,27 +343,36 @@ def myrun(pid=0):
     for i,d in enumerate(imgs): d.pts = ltps[i+info.start]
     return imgs
   data = _builddata()
-  # data = data[::3]
-
-
+  data = data[::2] ## remove test data (odd times)
 
   np.random.seed(0)
   td,vd    = shuffle_and_split(data,valifrac=1/8)
   max_total_samples = len(data)*np.prod(info.shape) / np.prod(P.patch)
-  valiloader  = dataloader(vd,savefile="mydata_train.pkl",
-                            N_samples=min(max_total_samples//8, 500),
-                            num_workers=8,train_mode=0)
-  trainloader = dataloader(td,savefile="mydata_vali.pkl",
-                            N_samples=min(max_total_samples//8*7, 1000),
-                            num_workers=8,train_mode=1)
+
+  ns = min(max_total_samples//8, 500)    # num samples to loop over
+  print(ns)
+  nw = np.clip(len(vd)//7,a_min=0,a_max=16) # num workers
+  valiloader  = dataloader(info,vd,savefile="mydata_train.pkl", N_samples=ns, num_workers=nw, train_mode=0,)
+  ns = min(max_total_samples//8*7, 1000) # num samples to loop over
+  nw = np.clip(len(td)//7,a_min=0,a_max=16)   # num workers
+  trainloader = dataloader(info,td,savefile="mydata_vali.pkl", N_samples=ns, num_workers=nw, train_mode=1,)
+
+  ## specialize data
+
+  # _dsp = cpnet_data_specialization(info) # data-specific params
+  # for k,v in _dsp.__dict__.items():
+  #   trainloader.dataset.__dict__[k] = v
+  #   valiloader.dataset.__dict__[k]  = v
+  _prediction_params = SimpleNamespace(zoom=trainloader.dataset.zoom,nms=trainloader.dataset.nms_footprint,kern=trainloader.dataset.kern)
+  save(_prediction_params,savedir_local/"data_specific_params.pkl")
 
   print("Sizes valiloader: ", max_total_samples//8//4)
   print("Sizes trainloader: ", max_total_samples//8*7//4)
   
   glance_train = [x for x in islice(trainloader,3)]
   glance_vali  = [x for x in islice(valiloader,3)]
-  save(compress(glance_train), savedir_local/'glance_input_train')
-  save(compress(glance_vali), savedir_local/'glance_input_vali')
+  save_input_glances(glance_train,savedir_local/'glance_input_train')
+  save_input_glances(glance_vali, savedir_local/'glance_input_vali')
 
   def mse_loss(net,sample):
     s  = sample
@@ -346,9 +388,10 @@ def myrun(pid=0):
     with torch.no_grad(): y,l = mse_loss(net,s)
     y = y.cpu().numpy()
     l = l.cpu().numpy()
-    nms_footprint = [3,7,7][-info.ndim:]
+    nms_footprint = valiloader.dataset.nms_footprint
     pts   = peak_local_max(y/y.max(),threshold_abs=.2,exclude_border=False,footprint=np.ones(nms_footprint))
-    scale = [4,1,1][-info.ndim:]
+    scale = np.array(info.scale)
+    if info.ndim==3: scale = scale*(0.5,1,1) ## to account for low-resolution and noise along z dimension
     matching = match_unambiguous_nearestNeib(s.yt_pts,pts,dub=100,scale=scale)
     return y, SimpleNamespace(loss=l,f1=matching.f1,height=y.max())
 
@@ -386,11 +429,12 @@ def norm_minmax01(x):
 
 def train(net,f_loss,f_vali,trainloader,valiloader,N_vali=20,N_train=100,N_epochs=3,observer=None,pred_glances=None,savedir=None):
   opt = torch.optim.Adam(net.parameters(), lr = 1e-4)
-  if observer is None: observer = SimpleNamespace()
-  observer.lossmeans = []
+  if observer is None: 
+    observer = SimpleNamespace()
+    observer.lossmeans = []
+    observer.valimeans = dict(loss=[],f1=[],height=[])
   valikeys   = ['loss','f1','height']
   valiinvert = [1,-1,-1] # minimize, maximize, maximize
-  observer.valimeans = dict(loss=[],f1=[],height=[])
   
   _loss_temp = []
   for i,s in tqdm(enumerate(trainloader),total=N_train*N_epochs,ascii=True,):
@@ -428,4 +472,4 @@ def post_train(history,trainloader,valiloader,savedir_local):
 
 
 if __name__=='__main__':
-  myrun([18,0])
+  for i in range(19*2): myrun(i)

@@ -1,23 +1,6 @@
 import numpy as np
 from math import floor,ceil
 
-def cpnet_data_specialization(CPNet,info):
-  myname = info.myname
-  if myname in ["celegans_isbi","A549","A549-SIM","H157","hampster","Fluo-N3DH-SIM+"]:
-    CPNet.zoom = {3:(1,0.5,0.5), 2:(0.5,0.5)}[info.ndim]
-  if myname=="trib_isbi":
-    CPNet.kern = [3,3,3]
-  if myname=="MSC":
-    a,b = info.shape
-    CPNet.zoom = {'01':(1/4,1/4), '02':(128/a, 200/b)}[info.dataset]
-    ## '02' rescaling is almost exactly isotropic while still being divisible by 8.
-  if info.isbiname=="DIC-C2DH-HeLa":
-    CPNet.kern = [7,7]
-    CPNet.zoom = (0.5,0.5)
-  if myname=="fly_isbi":
-    pass
-    # cfig.bg_weight_multiplier=0.0
-    # cfig.weight_decay = False
 
 def _traintimes_cpnet(info):
   t0,t1 = info.start, info.stop
