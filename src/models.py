@@ -127,9 +127,9 @@ class BaseModel(object):
       if ta.i % config.time_validate == 0:
         n = ta.i // config.time_validate
         ta.losses.append(np.mean(_losses[-config.time_validate:]))
-
         self.validate(n)
         self.check_weights_and_save(n)
+        save(ta , self.savedir/"ta/")
         if ta.i % (config.time_validate*config.save_every_n) == 0:
           self.predict_and_save_glances(n)
 
@@ -201,6 +201,8 @@ class BaseModel(object):
       if f_max(vs[:,i])==vs[-1,i]:
         ta.best_weights_time[i] = n
         torch.save(self.net.state_dict(), self.savedir / f'm/best_weights_{valiname}.pt')
+
+
 
   def predict_and_compress(self,sample,time,train=1):
     with torch.no_grad():
@@ -310,11 +312,11 @@ class SegmentationModel(BaseModel):
   def _init_params(self,ndim):
     if ndim==2:
       # self.getnet = lambda : torch_models.Unet3(16, [[1],[1]], pool=(2,2),   kernsize=(5,5),   finallayer=torch_models.nn.Sequential)
-      self.net = torch_models.Unet3(16, [[1],[1]], pool=(2,2),   kernsize=(5,5),   finallayer=torch_models.nn.Sequential).cuda()
+      self.net = torch_models.Unet1(16, [[1],[1]], pool=(2,2),   kernsize=(5,5),   finallayer=torch_models.nn.Sequential).cuda()
       self.zoom  = (1,1) #(0.5,0.5)
       self.patch = (512,512)
     elif ndim==3:
-      self.net = torch_models.Unet3(16, [[1],[1]], pool=(1,2,2), kernsize=(3,5,5), finallayer=torch_models.nn.Sequential).cuda()
+      self.net = torch_models.Unet1(16, [[1],[1]], pool=(1,2,2), kernsize=(3,5,5), finallayer=torch_models.nn.Sequential).cuda()
       self.zoom   = (1,1,1) #(1,0.5,0.5)
       self.patch  = (16,128,128)
     self.patch = np.array(self.patch)

@@ -219,36 +219,7 @@ def predict_and_eval_centers(net,savetimes,predict_times,info,savedir_local,kwar
 
   return ltps
 
-"""
 
-  # net = CPNet.getnet().cuda()
-  # CPNet = CPNetISBI2(savedir_local / "cpnet", info)
-  # CPNet.net.load_state_dict(torch.load(CPNet.savedir / "m/best_weights_loss.pt"))
-
-  SEGnet = SEGnetISBI(savedir_local / "segment", info)
-  SEGnet.net.load_state_dict(torch.load(SEGnet.savedir / "m/best_weights_loss.pt"))
-  predict_and_eval_seg(SEGnet,info)
-
-  N   = 7
-  gap = floor((info.stop-info.start)/N)
-  predict_times = range(info.start,info.stop,gap)
-  savetimes = predict_times
-  # L    = SimpleNamespace(info=info,CPNet=CPNet,savetimes=savetimes,predict_times=predict_times,)
-  # L.SEGnet = SEGnet
-  # ltps = predict_and_eval_centers(L)
-
-  # L.predict_times = range(info.start,info.stop,gap)
-  # L.savetimes = predict_times
-  # segs = predict_segments(L)
-
-
-  # ltps = load(cfig.savedir / f"ltps_{info.dataset}.pkl")
-  # tb   = tracking.nn_tracking_on_ltps(ltps,scale=info.scale) # random_tracking_on_ltps(ltps)
-  # scores = tracking.eval_tb_isbi(tb,info,savedir=cfig.savedir)
-  # ipdb.set_trace()
-
-## Program start here
-"""
 
 if __name__ == '__main__':
   for i in range(19*2): myrun(i)
