@@ -209,6 +209,8 @@ class SEGnetISBI(models.SegmentationModel):
     s = SimpleNamespace(x=x,yt=yt,w=w,lab=l)
     return s
 
+
+
 cmap = np.random.rand(256,3).clip(min=0.1)
 cmap[0] = (0,0,0)
 cmap = matplotlib.colors.ListedColormap(cmap)
