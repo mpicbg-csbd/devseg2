@@ -1,56 +1,15 @@
-# from segtools.ns2dir import load,save,flatten_sn,toarray
-# from segtools import torch_models
-# import torch
-# from torch import nn
-# from segtools.numpy_utils import normalize3, perm2, collapse2, splt
+"""
+Train CPNet on all ISBI datasets.
+Build the training data ahead-of-time (AOT) as opposed to concurrently while training (just-in-time appraoch).
+Also, use models.CenterpointModel for training, as opposed to custom `train()` method.
+"""
 
-# from segtools import point_matcher
-# from subprocess import run, Popen
-# import shutil
-# import json
-
-# import tracking
-# import denoiser, denoise_utils
-# import detector #, detect_utils
-# import detector2
-
-# from isbi_tools import get_isbi_info, isbi_datasets, isbi_scales
-# from glob import glob
-# import os
-# import re
-
-# from scipy.ndimage.morphology import binary_dilation
-# from skimage.util import view_as_windows
-# from expand_labels_scikit import expand_labels
-# from scipy.ndimage.morphology import distance_transform_edt
-# from scipy.ndimage import label,zoom
-
-
-# from datagen import * 
-# mantrack2pts, place_gaussian_at_pts, normalize3, sample_flat, sample_content, sample_iterate, shape2slicelist, augment, weights
-# from segtools.point_tools import trim_images_from_pts2
-
-
-# import sys
-# import itertools
-# import warnings
-# import os,shutil
-# from time import time
-# from  pathlib  import Path
-
-# import tifffile
-# import skimage.io    as io
-# from scipy.ndimage        import zoom, label
-# from skimage.segmentation import find_boundaries
-# from scipy.ndimage        import convolve
-
-# from segtools import torch_models
 
 from experiments_common import rchoose, partition, shuffle_and_split, parse_pid, iterdims, savedir_global
 import datagen as dgen
 
 from segtools.render import rgb_max
-from models import CenterpointModel, SegmentationModel, StructN2V
+from models import CenterpointModel
 from augmend import Augmend,FlipRot90,Elastic,Rotate,Scale
 from tracking import nn_tracking_on_ltps, random_tracking_on_ltps
 from isbi_tools import get_isbi_info, isbi_datasets, isbi_scales
@@ -71,7 +30,7 @@ from math import floor,ceil
 import re
 
 from e21_common import *
-
+import shutil
 
 try:
     import gputools
@@ -91,10 +50,10 @@ def myrun_slurm(pids):
   ## copy the experiments file to a safe name that you WONT EDIT. If you edit the code while jobs are waiting in the SLURM queue it could cause inconsistencies.
   ## NOTE: here we only copy experiment.py file, but THE SAME IS TRUE FOR ALL DEPENDENCIES.
 
-  shutil.copy("/projects/project-broaddus/devseg_2/src/e24_isbidet_AOT.py", "/projects/project-broaddus/devseg_2/src/e24_isbidet_AOT_copy.py")
+  shutil.copy("/projects/project-broaddus/devseg_2/src/e24_isbidet_AOT.py", "/projects/project-broaddus/devseg_2/src/temp/e24_isbidet_AOT_copy.py")
   _gpu  = "-p gpu --gres gpu:1 -n 1 -c 1 -t 6:00:00 --mem 128000 "
   _cpu  = "-n 1 -t 1:00:00 -c 4 --mem 128000 "
-  slurm = 'sbatch -J e24_{pid:03d} {_resources} -o slurm/e24_pid{pid:03d}.out -e slurm/e24_pid{pid:03d}.err --wrap \'python3 -c \"import e24_isbidet_AOT_copy as ex; ex.myrun_slurm_entry({pid})\"\' '
+  slurm = 'sbatch -J e24_{pid:03d} {_resources} -o slurm/e24_pid{pid:03d}.out -e slurm/e24_pid{pid:03d}.err --wrap \'python3 -c \"import temp.e24_isbidet_AOT_copy as ex; ex.myrun_slurm_entry({pid})\"\' '
   slurm = slurm.replace("{_resources}",_gpu)
   for pid in pids: Popen(slurm.format(pid=pid),shell=True)
 
@@ -143,7 +102,7 @@ def myrun(pid=0):
   # filenames  = [(n_raw.format(time=i),n_lab.format(time=i)) for i in range(info.start,info.stop)]
   # pointfiles = f"/projects/project-broaddus/rawdata/{info.myname}/traj/{info.isbiname}/{info.dataset}_traj.pkl"
 
-  data = build_and_save_training_data(info)
+  data = build_training_data(info)
   save(data, savedir_local/'data.pkl')
 
   if 1:
@@ -178,11 +137,26 @@ def myrun(pid=0):
 
 
 
+def init_params(ndim):
+  P = SimpleNamespace()
+  if ndim==2:
+    P.zoom  = (1,1) #(0.5,0.5)
+    P.kern  = [5,5]
+    P.patch = (512,512)
+  elif ndim==3:
+    P.zoom   = (1,1,1) #(1,0.5,0.5)
+    P.kern   = [2,5,5]
+    P.patch  = (16,128,128)
+  P.nms_footprint = P.kern
+  P.patch = np.array(P.patch)
+  return P
+
 
 
 def build_training_data(info,max_size_in_MB=2_000):
   params = init_params(info.ndim)
-  params = merge(params,cpnet_data_specialization(info))
+  _params = cpnet_data_specialization(info)
+  for k in params.__dict__.keys(): params.__dict__[k] = _params.__dict__[k]
 
   def _f():
     a = info.stop-info.start     ## N images

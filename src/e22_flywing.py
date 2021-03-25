@@ -1,3 +1,8 @@
+"""
+Detect and Track cells in Suzanne Eaton's flywing data, which we got from Alex Dibrov.
+Dection uses CPNet and results go in to detection chapter of my thesis.
+"""
+
 from experiments_common import *
 from scipy.ndimage import label
 
