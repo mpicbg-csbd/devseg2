@@ -5,6 +5,7 @@ from segtools import scores_dense
 import numpy as np
 from numpy import r_,s_
 import torch
+import torch.nn.functional as F
 import denoise_utils
 from enum import Enum,IntEnum
 from types import SimpleNamespace
@@ -80,7 +81,6 @@ class BaseModel(object):
     cfig.save_every_n = 10
     cfig.lr = 4e-4
     cfig.savedir = self.savedir
-    cfig.predict_and_compress = self.predict_and_compress
     self.train_cfig = cfig
 
   def train(self,_continue=1):
@@ -109,7 +109,7 @@ class BaseModel(object):
       # s = next(sampler)
       y,loss = self.loss(self.net,s) #config.datagen.sample(ta.i,train_mode=1))
       loss.backward()
-      y = y.detach().cpu().numpy()
+      # y = y.detach().cpu().numpy()
 
       if ta.i%5==0:
         self.opt.step()
@@ -131,7 +131,9 @@ class BaseModel(object):
         self.check_weights_and_save(n)
         save(ta , self.savedir/"ta/")
         if ta.i % (config.time_validate*config.save_every_n) == 0:
-          self.predict_and_save_glances(n)
+          for x in self.td: self.predict_and_save_glances(x,n,train=1)
+          for x in self.vd: self.predict_and_save_glances(x,n,train=0)
+
 
   def _setup_dirs(self):
     if self.savedir.exists(): shutil.rmtree(self.savedir)
@@ -158,7 +160,9 @@ class BaseModel(object):
     self.ta.best_weights_time = np.zeros(len(config.vali_metrics)+1)
     # self.ta.vali_scores = self.train_cfig.vali_metrics
     # self.ta.vali_minmax = self.train_cfig.vali_minmax
-    self.predict_and_save_glances(0)
+    for x in self.td: self.predict_and_save_glances(x,0,train=1)
+    for x in self.vd: self.predict_and_save_glances(x,0,train=0)
+
 
   def validate(self,time):
     
@@ -203,8 +207,7 @@ class BaseModel(object):
         torch.save(self.net.state_dict(), self.savedir / f'm/best_weights_{valiname}.pt')
 
 
-
-  def predict_and_compress(self,sample,time,train=1):
+  def predict_and_save_glances(self,sample,time,train=1):
     with torch.no_grad():
       y,l = self.train_cfig.loss(self.net,sample)
     y = y.cpu().numpy()
@@ -214,14 +217,6 @@ class BaseModel(object):
     _dir = "glance_predict_td" if train else "glance_predict_vd"
     save(y.astype(np.float16),self.savedir / _dir / f"yp/a_{time:02d}.npy")
 
-  def predict_and_save_glances(self,time):
-    for x in self.td: self.predict_and_compress(x,time,train=1)
-    for x in self.vd: self.predict_and_compress(x,time,train=0)
-
-    # tds = [self.predict_and_compress(x) for x in self.td]
-    # vds = [self.predict_and_compress(x) for x in self.vd]
-    # save(tds,self.savedir / f"glance_predict_td/a{time}.pkl")
-    # save(vds,self.savedir / f"glance_predict_vd/a{time}.pkl")
 
 class CenterpointModel(BaseModel):
 
@@ -233,7 +228,6 @@ class CenterpointModel(BaseModel):
     def height(y,sample): return y.max()
     self.train_cfig.vali_metrics = [height, self.point_match]
     self.train_cfig.vali_minmax  = [None, np.max]
-    self.train_cfig.loss = self.mse_loss
 
   def _init_params(self,ndim):
     if ndim==2:
@@ -271,7 +265,7 @@ class CenterpointModel(BaseModel):
     scale = [4,1,1][-self.ndim:]
     return match_unambiguous_nearestNeib(yt_pts,pts,dub=dub,scale=scale)
 
-  def predict_and_compress(self,sample,time,train=1):
+  def predict_and_save_glances(self,sample,time,train=1):
     with torch.no_grad():
       y,l = self.train_cfig.loss(self.net,sample)
     y = y.cpu().numpy()
@@ -284,7 +278,6 @@ class CenterpointModel(BaseModel):
     _dir = "glance_predict_td" if train else "glance_predict_vd"
     save(y.astype(np.float16),self.savedir / _dir / f"yp/a_{time:02d}.npy")
     save(pts,self.savedir / _dir / f"pts/a_{time:02d}.npy")
-
 
   def predict_full(self,raw,dims="YX"):
     assert raw.ndim == self.ndim
@@ -303,23 +296,43 @@ class SegmentationModel(BaseModel):
   def __init__(self, savedir):
     super().__init__(savedir)
 
-    self.loss = self.mse_loss
-    def height(y,sample): return y.max()
-    self.train_cfig.vali_metrics = [height,self.seg]
-    self.train_cfig.vali_minmax  = [None,np.max]
-    self.train_cfig.loss = self.mse_loss
+    self.loss = self.cross_entropy_loss
+    def height1(y,sample): return y[1].max()
+    def height2(y,sample): return y[2].max()
+    self.train_cfig.vali_metrics = [height1,height2,self.seg]
+    self.train_cfig.vali_minmax  = [None,None,np.max]
 
   def _init_params(self,ndim):
     if ndim==2:
       # self.getnet = lambda : torch_models.Unet3(16, [[1],[1]], pool=(2,2),   kernsize=(5,5),   finallayer=torch_models.nn.Sequential)
-      self.net = torch_models.Unet1(16, [[1],[1]], pool=(2,2),   kernsize=(5,5),   finallayer=torch_models.nn.Sequential).cuda()
+      self.net = torch_models.Unet2(16, [[1],[3]], pool=(2,2),   kernsize=(5,5),   finallayer=lambda: torch_models.nn.Sequential()).cuda()
       self.zoom  = (1,1) #(0.5,0.5)
       self.patch = (512,512)
     elif ndim==3:
-      self.net = torch_models.Unet1(16, [[1],[1]], pool=(1,2,2), kernsize=(3,5,5), finallayer=torch_models.nn.Sequential).cuda()
-      self.zoom   = (1,1,1) #(1,0.5,0.5)
-      self.patch  = (16,128,128)
+      self.net   = torch_models.Unet2(16, [[1],[3]], pool=(1,2,2), kernsize=(3,5,5), finallayer=lambda: torch_models.nn.Sequential()).cuda()
+      self.zoom  = (1,1,1) #(1,0.5,0.5)
+      self.patch = (16,128,128)
     self.patch = np.array(self.patch)
+
+  def cross_entropy_loss(self,net,sample):
+    s  = sample
+    x  = torch.from_numpy(s.x).float().cuda()
+    yt = torch.from_numpy(s.yt).long().cuda() ## must have shape (N,[Z],Y,X)
+    w  = torch.from_numpy(s.w).float().cuda()
+    _classweights = torch.from_numpy(self.ce_weights * [1,1,1]).float().cuda()
+    
+    y  = net(x[None,None]) ## don't remove batch or class. has shape [N,C,[Z],Y,X]
+
+    loss = F.cross_entropy(y,yt[None],reduction='none',weight=_classweights)
+    # ipdb.set_trace()
+    loss = (w*loss)
+    lossmean = loss.mean()
+    # y = y[0] #torch.softmaxy[0]
+    y = torch.softmax(y[0].detach().cpu(),dim=0)
+
+    # ipdb.set_trace()
+    # loss = torch.abs((w*(y-yt)**2)).mean() #+ weight*torch.abs((y-global_avg)**2).mean()
+    return y,lossmean
 
   def mse_loss(self,net,sample):
     s  = sample
@@ -330,47 +343,169 @@ class SegmentationModel(BaseModel):
     loss = torch.abs((w*(y-yt)**2)).mean() #+ weight*torch.abs((y-global_avg)**2).mean()
     return y,loss
 
-  @DeprecationWarning
-  def sample(self,time,train_mode=True):
-    N = len(self.data)
-    Nvali  = ceil(N/8)
-    Ntrain = N-Nvali
-    n0,n1 = (0,Ntrain) if train_mode else (Ntrain,None)
-    _data = self.data[n0:n1]
-    for _ in range(10):
-      _n = np.random.choice(r_[:len(_data)])
-      d  = _data[_n]
-      # _patch = (np.array(d.raw.shape)-P.patch).clip(min=0)
+  def predict_and_save_glances(self,sample,time,train=1):
+    with torch.no_grad():
+      y,l = self.loss(self.net,sample)
+    y = y.cpu().numpy()
+    l = l.cpu().numpy()
 
-      x  = d.raw[ss].copy()
-      yt = d.target[ss].copy()
-      w  = d.weights[ss].copy()
-      lab = d.lab[ss].copy()
-      # ipdb.set_trace()
-      s  = SimpleNamespace(x=x,yt=yt,w=w,ss=ss,pt=pt,lab=lab)
-      if s.yt.sum() > 20: break
-    s.x,s.yt = augment(s.x,s.yt)
-    # print(s.pt,s.ss)
-    return s
+    if self.ndim==3+1: ## classes
+      y = y.max(1)
+
+    y = torch.softmax(torch.from_numpy(y),dim=0).numpy()
+    def norm(x): return (x-x.min())/(x.max()-x.min())
+    y = (norm(y)*255).astype(np.int)
+
+    _dir = "glance_predict_td" if train else "glance_predict_vd"
+    save(y,self.savedir / _dir / f"yp/yp_{time:02d}.png")
 
   def predict_full(self,raw,dims="YX"):
     raw  = normalize3(raw,2,99.4,clip=False)
     x    = zoom(raw,self.zoom,order=1)
-    pred = torch_models.predict_raw(self.net,x,dims=dims).astype(np.float32)
+    pred = torch_models.predict_keepchan(self.net,x,dims=dims,outchan=3).astype(np.float32)
+    # ipdb.set_trace()
+    # pred = np.exp(pred) ## OVERFLOW ERROR!
+    # pred = pred / pred.sum(0)
+    pred = torch.softmax(torch.from_numpy(pred),dim=0).numpy()
+
+    height = pred[1].max()
+    # pred = pred / pred.max() ##
+    pred = zoom(pred, 1/np.array((1,)+self.zoom), order=1)
+    seg  = label(pred[1]>0.5)[0]
+    # seg  = label(pred>0.5)[0]
+    return SimpleNamespace(raw=raw,pred=pred,seg=seg,height=height)
+
+  def predict_full_mse(self,raw,dims="YX"):
+    raw  = normalize3(raw,2,99.4,clip=False)
+    x    = zoom(raw,self.zoom,order=1)
+    pred = torch_models.predict_raw(self.net,x,dims=dims,outchan=3).astype(np.float32)
     height = pred.max()
     pred = pred / pred.max() ## 
     pred = zoom(pred, 1/np.array(self.zoom), order=1)
     seg  = label(pred>0.5)[0]
     return SimpleNamespace(raw=raw,pred=pred,seg=seg,height=height)
 
-  def seg(self,y,sample):
+  def seg_mse(self,y,sample):
     lab = label(y>0.5)[0]
+    score = scores_dense.seg(sample.lab,lab)
+    return score
+
+  def seg(self,y,sample):
+    lab = label(y[1]>0.5)[0]
     score = scores_dense.seg(sample.lab,lab)
     return score
 
   def seg_score(self,lab_gt,lab):
     score = scores_dense.seg(lab_gt,lab)
     return score
+
+
+class MSEModel(BaseModel):
+
+  def __init__(self, savedir):
+    super().__init__(savedir)
+
+    self.loss = self.mse_loss
+    def height(y,sample): return y.max()
+    self.train_cfig.vali_metrics = [height,self.seg]
+    self.train_cfig.vali_minmax  = [None,np.max]
+
+  def _init_params(self,ndim):
+    if ndim==2:
+      self.net = torch_models.Unet2(16, [[1],[3]], pool=(2,2),   kernsize=(5,5),   finallayer=lambda: torch_models.nn.Sequential()).cuda()
+      self.zoom  = (1,1) #(0.5,0.5)
+      self.patch = (512,512)
+    elif ndim==3:
+      self.net   = torch_models.Unet2(16, [[1],[3]], pool=(1,2,2), kernsize=(3,5,5), finallayer=lambda: torch_models.nn.Sequential()).cuda()
+      self.zoom  = (1,1,1) #(1,0.5,0.5)
+      self.patch = (16,128,128)
+    self.patch = np.array(self.patch)
+
+  def cross_entropy_loss(self,net,sample):
+    s  = sample
+    x  = torch.from_numpy(s.x).float().cuda()
+    yt = torch.from_numpy(s.yt).long().cuda() ## must have shape (N,[Z],Y,X)
+    w  = torch.from_numpy(s.w).float().cuda()
+    _classweights = torch.from_numpy(self.ce_weights * [1,1,1]).float().cuda()
+    
+    y  = net(x[None,None]) ## don't remove batch or class. has shape [N,C,[Z],Y,X]
+
+    loss = F.cross_entropy(y,yt[None],reduction='none',weight=_classweights)
+    # ipdb.set_trace()
+    loss = (w*loss)
+    lossmean = loss.mean()
+    # y = y[0] #torch.softmaxy[0]
+    y = torch.softmax(y[0].detach().cpu(),dim=0)
+
+    # ipdb.set_trace()
+    # loss = torch.abs((w*(y-yt)**2)).mean() #+ weight*torch.abs((y-global_avg)**2).mean()
+    return y,lossmean
+
+  def mse_loss(self,net,sample):
+    s  = sample
+    x  = torch.from_numpy(s.x).float().cuda()
+    yt = torch.from_numpy(s.yt).float().cuda()
+    w  = torch.from_numpy(s.w).float().cuda()
+    y  = net(x[None,None])[0,0]
+    loss = torch.abs((w*(y-yt)**2)).mean() #+ weight*torch.abs((y-global_avg)**2).mean()
+    return y,loss
+
+  def predict_and_save_glances(self,sample,time,train=1):
+    with torch.no_grad():
+      y,l = self.loss(self.net,sample)
+    y = y.cpu().numpy()
+    l = l.cpu().numpy()
+
+    if self.ndim==3:
+      y = y.max(1)
+
+    # y = torch.softmax(torch.from_numpy(y),dim=0).numpy()
+    def norm(x): return (x-x.min())/(x.max()-x.min())
+    y = (norm(y)*255).astype(np.int)
+
+    _dir = "glance_predict_td" if train else "glance_predict_vd"
+    save(y,self.savedir / _dir / f"yp/yp_{time:02d}.png")
+
+  def predict_full(self,raw,dims="YX"):
+    raw  = normalize3(raw,2,99.4,clip=False)
+    x    = zoom(raw,self.zoom,order=1)
+    pred = torch_models.predict_keepchan(self.net,x,dims=dims,outchan=3).astype(np.float32)
+    # ipdb.set_trace()
+    # pred = np.exp(pred) ## OVERFLOW ERROR!
+    # pred = pred / pred.sum(0)
+    pred = torch.softmax(torch.from_numpy(pred),dim=0).numpy()
+
+    height = pred[1].max()
+    # pred = pred / pred.max() ##
+    pred = zoom(pred, 1/np.array((1,)+self.zoom), order=1)
+    seg  = label(pred[1]>0.5)[0]
+    # seg  = label(pred>0.5)[0]
+    return SimpleNamespace(raw=raw,pred=pred,seg=seg,height=height)
+
+  def predict_full_mse(self,raw,dims="YX"):
+    raw  = normalize3(raw,2,99.4,clip=False)
+    x    = zoom(raw,self.zoom,order=1)
+    pred = torch_models.predict_raw(self.net,x,dims=dims,outchan=3).astype(np.float32)
+    height = pred.max()
+    pred = pred / pred.max() ## 
+    pred = zoom(pred, 1/np.array(self.zoom), order=1)
+    seg  = label(pred>0.5)[0]
+    return SimpleNamespace(raw=raw,pred=pred,seg=seg,height=height)
+
+  def seg_mse(self,y,sample):
+    lab = label(y>0.5)[0]
+    score = scores_dense.seg(sample.lab,lab)
+    return score
+
+  def seg(self,y,sample):
+    lab = label(y[1]>0.5)[0]
+    score = scores_dense.seg(sample.lab,lab)
+    return score
+
+  def seg_score(self,lab_gt,lab):
+    score = scores_dense.seg(lab_gt,lab)
+    return score
+
 
 class StructN2V(BaseModel):
 
@@ -386,7 +521,6 @@ class StructN2V(BaseModel):
     def height(y,sample): return y.max()
     self.train_cfig.vali_metrics = [height]
     self.train_cfig.vali_minmax  = [None]
-    self.train_cfig.loss = self.mse_loss
 
     self._init_params(ndim)
 
