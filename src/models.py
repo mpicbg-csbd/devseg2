@@ -30,6 +30,7 @@ from tqdm import tqdm
 
 
 
+
 class TrainerObserver(object):
   def __init__(self,):
     self.savedir = None
@@ -75,10 +76,10 @@ class BaseModel(object):
     # self._init_params(ndim)
     # self.extern  = extern
     cfig = SimpleNamespace()
-    cfig.time_validate = 100
+    cfig.time_validate = 200
     cfig.time_total = 10_000 # if info.ndim==3 else 15_000 ## # about 12k / hour? 200/min = 5mins/ 1k = 12k/hr on 3D data (10x faster on 2D?)
-    cfig.n_vali_samples = 10
-    cfig.save_every_n = 10
+    cfig.n_vali_samples = 20
+    cfig.save_every_n = 5
     cfig.lr = 4e-4
     cfig.savedir = self.savedir
     self.train_cfig = cfig
@@ -349,12 +350,13 @@ class SegmentationModel(BaseModel):
     y = y.cpu().numpy()
     l = l.cpu().numpy()
 
-    if self.ndim==3+1: ## classes
-      y = y.max(1)
+    if self.ndim==3:
+      y = y.max(1) ## over z dims
 
     y = torch.softmax(torch.from_numpy(y),dim=0).numpy()
     def norm(x): return (x-x.min())/(x.max()-x.min())
     y = (norm(y)*255).astype(np.int)
+    y = y.transpose([1,2,0])
 
     _dir = "glance_predict_td" if train else "glance_predict_vd"
     save(y,self.savedir / _dir / f"yp/yp_{time:02d}.png")
@@ -362,7 +364,8 @@ class SegmentationModel(BaseModel):
   def predict_full(self,raw,dims="YX"):
     raw  = normalize3(raw,2,99.4,clip=False)
     x    = zoom(raw,self.zoom,order=1)
-    pred = torch_models.predict_keepchan(self.net,x,dims=dims,outchan=3).astype(np.float32)
+    # pred = torch_models.predict_keepchan(self.net,x,dims=dims,outchan=3).astype(np.float32)
+    pred = torch_models.apply_net_tiled_nobounds(self.net,x[None],outchan=3).astype(np.float32)
     # ipdb.set_trace()
     # pred = np.exp(pred) ## OVERFLOW ERROR!
     # pred = pred / pred.sum(0)
@@ -400,15 +403,25 @@ class SegmentationModel(BaseModel):
     return score
 
 
-class MSEModel(BaseModel):
+class SegmentationModel2(BaseModel):
 
-  def __init__(self, savedir):
+  def __init__(self, savedir, modeltype='mse'):
     super().__init__(savedir)
 
-    self.loss = self.mse_loss
-    def height(y,sample): return y.max()
-    self.train_cfig.vali_metrics = [height,self.seg]
-    self.train_cfig.vali_minmax  = [None,np.max]
+    self.modeltype=modeltype
+
+    if modeltype=='ce':
+      self.loss = self.cross_entropy_loss
+      def height1(y,sample): return y[1].max()
+      def height2(y,sample): return y[2].max()
+      self.train_cfig.vali_metrics = [height1,height2,self.seg]
+      self.train_cfig.vali_minmax  = [None,None,np.max]
+
+    if modeltype=='mse':
+      self.loss = self.mse_loss
+      def height(y,sample): return y.max()
+      self.train_cfig.vali_metrics = [height,self.seg]
+      self.train_cfig.vali_minmax  = [None,np.max]
 
   def _init_params(self,ndim):
     if ndim==2:
@@ -457,9 +470,8 @@ class MSEModel(BaseModel):
     l = l.cpu().numpy()
 
     if self.ndim==3:
-      y = y.max(1)
+      y = torch.softmax(torch.from_numpy(y),dim=-3).numpy()
 
-    # y = torch.softmax(torch.from_numpy(y),dim=0).numpy()
     def norm(x): return (x-x.min())/(x.max()-x.min())
     y = (norm(y)*255).astype(np.int)
 
@@ -467,12 +479,19 @@ class MSEModel(BaseModel):
     save(y,self.savedir / _dir / f"yp/yp_{time:02d}.png")
 
   def predict_full(self,raw,dims="YX"):
+    if modeltype=='ce':
+      return self.predict_full_ce(raw,dims=dims)
+    if modeltype=='mse':
+      return self.predict_full_mse(raw,dims=dims)
+
+  def predict_full_ce(self,raw,dims="YX"):
     raw  = normalize3(raw,2,99.4,clip=False)
     x    = zoom(raw,self.zoom,order=1)
     pred = torch_models.predict_keepchan(self.net,x,dims=dims,outchan=3).astype(np.float32)
     # ipdb.set_trace()
     # pred = np.exp(pred) ## OVERFLOW ERROR!
     # pred = pred / pred.sum(0)
+
     pred = torch.softmax(torch.from_numpy(pred),dim=0).numpy()
 
     height = pred[1].max()
@@ -492,12 +511,18 @@ class MSEModel(BaseModel):
     seg  = label(pred>0.5)[0]
     return SimpleNamespace(raw=raw,pred=pred,seg=seg,height=height)
 
+  def seg(self,y,sample):
+    if modeltype=='ce':
+      return self.seg_ce(y,sample)
+    if modeltype=='mse':
+      return self.seg_mse(y,sample)
+
   def seg_mse(self,y,sample):
     lab = label(y>0.5)[0]
     score = scores_dense.seg(sample.lab,lab)
     return score
 
-  def seg(self,y,sample):
+  def seg_ce(self,y,sample):
     lab = label(y[1]>0.5)[0]
     score = scores_dense.seg(sample.lab,lab)
     return score

@@ -17,7 +17,8 @@ import models
 
 from skimage.feature  import peak_local_max
 from scipy.ndimage import zoom
-from skimage.segmentation import find_boundaries
+from skimage.segmentation import find_boundaries, watershed
+
 import numpy as np
 import torch
 from torch.utils.data import IterableDataset, DataLoader
@@ -58,7 +59,7 @@ def myrun_slurm(pids):
   for pid in pids: Popen(slurm.format(pid=pid),shell=True)
 
 def myrun_slurm_entry(pid=0):
-  myrun(pid)
+  train(pid)
 
   # (p0,p1),pid = parse_pid(pid,[2,19,9])
   # myrun([p0,p1,p2])
@@ -67,8 +68,7 @@ def myrun_slurm_entry(pid=0):
   #   except:
   #     print("FAIL on pids", [p0,p1,p2,p3])
 
-
-def myrun(pid=0):
+def pid2params(pid):
   (p0,p1),pid = parse_pid(pid,[19,2])
   savedir_local = savedir / f'e25_isbi_segment/v01/pid{pid:03d}/'
   (savedir_local / 'm').mkdir(exist_ok=True,parents=True) ## place to save models
@@ -77,33 +77,23 @@ def myrun(pid=0):
   info = get_isbi_info(myname,isbiname,trainset)
   # P = _init_params(info.ndim)
   print(json.dumps(info.__dict__,sort_keys=True, indent=2, default=str), flush=True)
+  return SimpleNamespace(**locals())
 
-  print("Running e25 with savedir: \n", savedir_local, flush=True)
 
-  if 0:
-    SEGnet = SEGnetISBI(savedir_local, info)
-    # save(dg.data[0].target.astype(np.float32), SEGnet.savedir / 'target_t_120.tif')  
-    SEGnet.train_cfig.time_total = 30_000
-    # SEGnet.net.load_state_dict(torch.load(SEGnet.savedir / "m/best_weights_latest.pt"))
-    SEGnet.train(_continue=1)
+def train(pid=0):
+  P = pid2params(pid)
+  print("Training e25 with savedir: \n", P.savedir_local, flush=True)
 
-  SEGnet = SEGnetISBI(savedir_local, info)
-  SEGnet.net.load_state_dict(torch.load(SEGnet.savedir / "m/best_weights_seg.pt"))
-  segscores = predict_and_eval_seg(SEGnet,info)
-
-  # N = 7
-  # gap = floor((info.stop-info.start)/N)
-  # predict_times = range(info.start,info.stop,gap)
-  # savetimes = predict_times
-
-  # L    = SimpleNamespace(info=info,SEGnet=SEGnet,savetimes=savetimes,predict_times=predict_times,)
-  # L.predict_times = range(info.start,info.stop,gap)
-  # L.savetimes = predict_times
-  # segs = predict_segments(L)
+  SEGnet = SEGnetISBI(P.savedir_local, P.info)
+  # save(dg.data[0].target.astype(np.float32), SEGnet.savedir / 'target_t_120.tif')  
+  SEGnet.train_cfig.time_total = 30_000
+  # SEGnet.net.load_state_dict(torch.load(SEGnet.savedir / "m/best_weights_latest.pt"))
+  SEGnet.train(_continue=1)
 
 
 
-## SEGNet 
+
+## SEGNet training & model
 
 def segdata(info):
   labnames = sorted(glob(f"/projects/project-broaddus/rawdata/{info.myname}/{info.isbiname}/{info.dataset}_GT/SEG/*.tif"))
@@ -116,28 +106,6 @@ def segdata(info):
     return SimpleNamespace(raw=n_raw,lab=n_lab,time=_time,zpos=_zpos)
   return [f(x) for x in labnames]
 
-def combine_segscores():
-  def f(pid):
-    try:
-      d = list(load(f"/projects/project-broaddus/devseg_2/expr/e25_isbi_segment/v01/pid{pid:03d}/pred_all_seg/segscores.pkl"))
-    except:
-      d = None
-    return d
-  scores = [f(pid) for pid in range(19*2)]
-
-  S = SimpleNamespace()
-  S.scores = scores
-  S.means = [np.mean(x) for x in scores if x is not None]
-  S.stds  = [np.std(x) for x in scores if x is not None]
-  S.min  = [np.min(x) for x in scores if x is not None]
-  S.max  = [np.max(x) for x in scores if x is not None]
-
-  # (p0,p1),pid = parse_pid(pid,[19,2])
-  S.data = [isbi_datasets[i//2] for i in range(19*2) if scores[i]is not None]
-  S.pids = [i for i in range(19*2) if scores[i] is not None]
-  return S
-
-
 class SEGnetISBI(models.SegmentationModel):
 
   def __init__(self,savedir,info):
@@ -147,8 +115,9 @@ class SEGnetISBI(models.SegmentationModel):
     self.train_cfig.sample = self.sample
     self.info = info
     self.ndim = info.ndim
-    self.aug = self.augmenter()
+    self.aug  = self.augmenter()
     # TODO: cpnet_data_specialization(CPNet,info) ## specialization before dataloader!
+
     self.dataloader()
 
   # def _init_params(self,ndim):
@@ -165,24 +134,25 @@ class SEGnetISBI(models.SegmentationModel):
 
   def augmenter(self):
     aug = Augmend()
-    ax = {2:(-2,-1), 3:(-2,-1)}[self.ndim]
+    ax  = {2:(-2,-1), 3:(-2,-1)}[self.ndim]
     # ax_target = {2:(0,1), 3:(1,2)}[self.ndim]
     aug.add([FlipRot90(axis=ax),
              FlipRot90(axis=ax),
              FlipRot90(axis=ax),
              FlipRot90(axis=ax),],
-            probability=0.5)
-    aug.add([Elastic(axis=ax, amount=5, order=1),
-             Elastic(axis=ax, amount=5, order=1),
-             Elastic(axis=ax, amount=5, order=1),
-             Elastic(axis=ax, amount=5, order=0),],
-            probability=0.5)
+            probability=1.0)
+    # aug.add([Elastic(axis=ax, amount=5, order=1),
+    #          Elastic(axis=ax, amount=5, order=1),
+    #          Elastic(axis=ax, amount=5, order=1),
+    #          Elastic(axis=ax, amount=5, order=0),],
+    #         probability=0.5)
     aug.add([IntensityScaleShift(), Identity(), Identity(), Identity()], probability=1.0)
-
     return aug
 
   def dataloader(self):
     _segdata = segdata(self.info)
+    print(_segdata)
+    assert False
     def norm(x): 
       p0,p1 = np.percentile(x,[2,99.4])
       return (x-p0)/(p1-p0)
@@ -199,6 +169,7 @@ class SEGnetISBI(models.SegmentationModel):
 
       z = s.zpos
       weights = np.ones(raw.shape)
+
       if z is not None:
         weights = np.zeros(raw.shape)
         weights[z] = 1
@@ -207,7 +178,7 @@ class SEGnetISBI(models.SegmentationModel):
         lab = lab2.astype(np.uint16)
         bounds = np.zeros(raw.shape)
         bounds[z] = _bounds.copy()
-        _bounds = bounds
+        _bounds = bounds.astype(np.bool)
 
       pts = datagen.mantrack2pts(lab)
 
@@ -272,6 +243,9 @@ class SEGnetISBI(models.SegmentationModel):
     s = SimpleNamespace(x=x,yt=yt,w=w,lab=l)
     return s
 
+
+## utils
+
 cmap = np.random.rand(256,3).clip(min=0.1)
 cmap[0] = (0,0,0)
 cmap = matplotlib.colors.ListedColormap(cmap)
@@ -294,8 +268,6 @@ def _png(x):
   x = (x*255).astype(np.uint8)
   return x
 
-
-
 def divide_evenly_with_min1(n_samples,n_bins):
   N = n_samples
   M = n_bins
@@ -304,12 +276,23 @@ def divide_evenly_with_min1(n_samples,n_bins):
   ss = [slice(y[i],y[i+1]) for i in range(M)]
   return ss
 
-def predict_and_eval_seg(SEGnet,info):
+
+
+
+
+## normal classify + threshold method
+
+def predict_and_eval_seg(pid):
+
+  P = pid2params(pid)
+  SEGnet = SEGnetISBI(P.savedir_local, P.info)
+  SEGnet.net.load_state_dict(torch.load(SEGnet.savedir / "m/best_weights_seg.pt"))
+  info = P.info
+
   savedir = SEGnet.savedir / "pred_all_seg"
   if savedir.exists():
     shutil.rmtree(savedir)
     savedir.mkdir()
-  info = info
   dims = "ZYX" if info.ndim==3 else "YX"
   _segdata = segdata(info)
   def _save_ids():
@@ -317,6 +300,7 @@ def predict_and_eval_seg(SEGnet,info):
     return np.linspace(0,N-1,min(5,N)).astype(np.int)
   save_ids = _save_ids()
   print(save_ids)
+  count = {s:i for i,s in enumerate(save_ids)}
 
   # ipdb.set_trace()
 
@@ -334,57 +318,210 @@ def predict_and_eval_seg(SEGnet,info):
     return res
 
   def _save_preds(d,i):
-    save(_png(d.raw), savedir/f"d{i:04d}/raw.png")
+    save(_png(d.raw), savedir/f"d{count[i]:02d}/raw.png")
     # ipdb.set_trace()
-    save(_png(d.pred[0]), savedir/f"d{i:04d}/pred0.png")
-    save(_png(d.pred[1]), savedir/f"d{i:04d}/pred1.png")
-    save(_png(d.pred[2]), savedir/f"d{i:04d}/pred2.png")
-    save(_png(d.seg), savedir/f"d{i:04d}/seg.png")
-    save(_png(d.lab_gt), savedir/f"d{i:04d}/lab_gt.png")
+    save(_png(d.pred[0]), savedir/f"d{count[i]:02d}/pred_bg.png")
+    save(_png(d.pred[1]), savedir/f"d{count[i]:02d}/pred_fg.png")
+    save(_png(d.pred[2]), savedir/f"d{count[i]:02d}/pred_boundary.png")
+    save(_png(d.seg), savedir/f"d{count[i]:02d}/seg.png")
+    save(_png(d.lab_gt), savedir/f"d{count[i]:02d}/lab_gt.png")
 
-  def _f(i): ## i is time
+
+  def _f(i): ## i is index
     d = _single(i)
     if i in save_ids: _save_preds(d,i)
     return [d.segscore]
 
-  segscores = list(map(list,zip(*[_f(i) for i in range(len(_segdata))])))
+  # segscores = list(map(list,zip(*[_f(i) for i in range(len(_segdata))])))
+  segscores = list(map(list,zip(*[_f(i) for i,_ in enumerate(_segdata)])))
   save(segscores, savedir/"segscores.pkl")
   return segscores
 
 
-def predict_segments(L):
-  # gtpts = load(f"/projects/project-broaddus/rawdata/{info.myname}/traj/{info.isbiname}/{info.dataset}_traj.pkl")
-  savedir = L.SEGnet.savedir / "pred_all_01"
-  info = L.info
+
+## our method combining CPNet & pix class
+
+def _init_cpnet_params(ndim):
+  T = SimpleNamespace()
+  if ndim==2:
+    T.net = torch_models.Unet3(16, [[1],[1]], pool=(2,2),   kernsize=(5,5),   finallayer=torch_models.nn.Sequential)
+  elif ndim==3:
+    T.net = torch_models.Unet3(16, [[1],[1]], pool=(1,2,2), kernsize=(3,5,5), finallayer=torch_models.nn.Sequential)
+  return T
+
+def norm01(x,p0,p1):
+  p0,p1 = np.percentile(x,[p0,p1])
+  x = (x-p0)/(p1-p0)
+  return x
+
+def pred_cpnet(raw,net,params):
+  p = params
+  dims = "ZYX" if len(p.zoom)==3 else "YX"
+  raw = norm01(raw,2,99.4,)
+  x   = zoom(raw,p.zoom,order=1)
+  # pred = torch_models.predict_raw(net,x,dims=dims).astype(np.float32)
+  pred = torch_models.apply_net_tiled_nobounds(net,x[None],outchan=1,)[0]
+  height = pred.max()
+  pred = pred / pred.max() ## 
+  pts = peak_local_max(pred,threshold_abs=.2,exclude_border=False,footprint=np.ones(p.nms))
+  pts = (pts/p.zoom).astype(np.int)
+  pred = zoom(pred, 1/np.array(p.zoom), order=1)
+  markers = np.zeros(raw.shape)
+  markers[tuple(pts.T)] = np.arange(len(pts))+1  
+  return SimpleNamespace(pred=pred,height=height,pts=pts,markers=markers)
+
+# # def get3Ddatasts():
+# id2D = [0,1,2,3,8,9,10,16,17,]
+# id3D = [4,5,6,7,11,12,13,14,15,18,]# [5,6,7,8,12,13,14,15,16,19,]
+# pids = [8,9,10,11,12,13,14,15,22,23,24,25,26,27,28,29,30,31,] #36,37,]
+
+def predict_and_eval_all2d():
+  # for i,d in enumerate(isbi_datasets):
+  #   predict_and_eval_seg_w_CPNET(2*i)
+  #   predict_and_eval_seg_w_CPNET(2*i+1)
+  for i in range(24,19*2):
+    predict_and_eval_seg_w_CPNET(i)
+
+def predict_and_eval_seg_w_CPNET(pid):
+  P = pid2params(pid)
+
+  SEGnet = SEGnetISBI(P.savedir_local, P.info)
+  SEGnet.net.load_state_dict(torch.load(SEGnet.savedir / "m/best_weights_seg.pt"))
+  cpnet  = _init_cpnet_params(P.info.ndim).net
+  cpnet.load_state_dict(torch.load(f"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v08/pid{pid:03d}/m/best_weights_loss.pt"))
+  cpnet.cuda()
+  cpnet_params = load(f"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v09/pid{pid:03d}/data_specific_params.pkl")
+
+  savedir = SEGnet.savedir / "pred_all_seg_cpnet"
+  if savedir.exists():
+    shutil.rmtree(savedir)
+    savedir.mkdir()
+  info = P.info
   dims = "ZYX" if info.ndim==3 else "YX"
 
+  _segdata = [segdata(info)[1]] #[::2] ## just one test image
+  N = len(_segdata)
+  save_ids = np.linspace(0,N-1,min(5,N)).astype(np.int)
+  count = {s:i for i,s in enumerate(save_ids)}
+
+  # _segdata_test = segdata(info)[1::2]
+  # N = len(_segdata_test)
+  # save_ids_test = np.linspace(0,N-1,min(5,N)).astype(np.int)
+  # count_test = {s:i for i,s in enumerate(save_ids_test)}
+
+
+  # ipdb.set_trace()
+
   def _single(i):
-    "i is time"
-    print(i)
-    name = f"/projects/project-broaddus/rawdata/{info.myname}/{info.isbiname}/{info.dataset}/" + info.rawname.format(time=i)
-    raw  = load(name)
-    res  = L.SEGnet.predict_full(raw,dims)
+    s = _segdata[i]
+    print(s.time, s.zpos)
+    raw     = load(s.raw).astype(np.float)
+    lab_gt  = load(s.lab)
+
+    ## do the easy one
+    res_segnet = SEGnet.predict_full(raw,dims)
+    seg_simple = res_segnet.seg[s.zpos] if s.zpos is not None else res_segnet.seg
+    segscore_simple = SEGnet.seg_score(lab_gt,seg_simple)
+    print(segscore_simple)
+
+    ## now add cpnet predictions
+    res_cpnet = pred_cpnet(raw,cpnet,cpnet_params)
+    seg_nd  = watershed(-res_segnet.pred[1],markers=res_cpnet.markers,mask=res_segnet.pred[1]>0.5)
+    seg_cpnet = seg_nd[s.zpos] if s.zpos is not None else seg_nd
+    segscore_cpnet = SEGnet.seg_score(lab_gt,seg_cpnet)
+    print(segscore_cpnet)
+
+    res = SimpleNamespace(raw=raw,lab_gt=lab_gt,seg_cpnet=seg_cpnet,segscore_cpnet=segscore_cpnet,pred_cpnet=res_cpnet.pred,pred_segnet=res_segnet.pred[1],seg_simple=seg_simple,segscore_simple=segscore_simple)
     return res
 
   def _save_preds(d,i):
-    save(_png(d.raw), savedir/f"d{i:04d}/raw.png")
-    save(_png(d.pred), savedir/f"d{i:04d}/pred.png")
-    save(_png(d.seg), savedir/f"d{i:04d}/seg.png")
+    # ipdb.set_trace()
+    save(_png(d.raw), savedir/f"d{count[i]:02d}/raw.png")
+    save(_png(d.pred_cpnet), savedir/f"d{count[i]:02d}/pred_cpnet.png")
+    save(_png(d.pred_segnet), savedir/f"d{count[i]:02d}/pred_segnet.png")
+    save(_png(d.seg_cpnet), savedir/f"d{count[i]:02d}/seg_cpnet.png")
+    save(_png(d.seg_simple), savedir/f"d{count[i]:02d}/seg_simple.png")
+    save(_png(d.lab_gt), savedir/f"d{count[i]:02d}/lab_gt.png")
+
 
   def _f(i): ## i is time
     d = _single(i)
-    if i in L.savetimes: _save_preds(d,i)
-    return d.seg
+    if i in save_ids: _save_preds(d,i)
+    return [d.segscore_simple, d.segscore_cpnet]
 
-  segs = map(list,zip(*[_f(i) for i in L.predict_times]))
-  return segs
+  res = np.array([_f(i) for i in range(len(_segdata))])
+  segscore_simple, segscore_cpnet = res.T
+  save(segscore_simple, savedir/"segscore_simple.pkl")
+  save(segscore_cpnet, savedir/"segscore_cpnet.pkl")
+  # return segscore_simple
+
+
+## analysis
+
+def combine_segscores():
+  def f(pid):
+    try:
+      d = list(load(f"/projects/project-broaddus/devseg_2/expr/e25_isbi_segment/v01/pid{pid:03d}/pred_all_seg/segscores.pkl"))
+    except:
+      d = None
+    return d
+  scores = [f(pid) for pid in range(19*2)]
+
+  S = SimpleNamespace()
+  S.scores = scores
+  S.means  = [np.mean(x) for x in scores if x is not None]
+  S.stds   = [np.std(x) for x in scores if x is not None]
+  S.min    = [np.min(x) for x in scores if x is not None]
+  S.max    = [np.max(x) for x in scores if x is not None]
+  S.test_scores = [np.nanmean(x[1::2]) for x in scores if x is not None]
+  S.trainVali_scores = [np.nanmean(x[0::2]) for x in scores if x is not None]
+
+  # (p0,p1),pid = parse_pid(pid,[19,2])
+  S.data = [isbi_datasets[i//2] for i in range(19*2) if scores[i]is not None]
+  S.pids = [i for i in range(19*2) if scores[i] is not None]
+  return S
+
+
+
+## dep
+
+
+# def predict_segments(L):
+#   # gtpts = load(f"/projects/project-broaddus/rawdata/{info.myname}/traj/{info.isbiname}/{info.dataset}_traj.pkl")
+#   savedir = L.SEGnet.savedir / "pred_all_01"
+#   info = L.info
+#   dims = "ZYX" if info.ndim==3 else "YX"
+
+#   def _single(i):
+#     "i is time"
+#     print(i)
+#     name = f"/projects/project-broaddus/rawdata/{info.myname}/{info.isbiname}/{info.dataset}/" + info.rawname.format(time=i)
+#     raw  = load(name)
+#     res  = L.SEGnet.predict_full(raw,dims)
+#     return res
+
+#   def _save_preds(d,i):
+#     save(_png(d.raw), savedir/f"d{count[i]:02d}/raw.png")
+#     save(_png(d.pred), savedir/f"d{count[i]:02d}/pred.png")
+#     save(_png(d.seg), savedir/f"d{count[i]:02d}/seg.png")
+
+
+#   def _f(i): ## i is time
+#     d = _single(i)
+#     if i in L.savetimes: _save_preds(d,i)
+#     return d.seg
+
+#   segs = map(list,zip(*[_f(i) for i in L.predict_times]))
+#   return segs
+
 
 
 if __name__=='__main__':
-  for i in range(25,19*2): 
-    try: 
-      myrun(i)
-    except:
-      print("Error in pid ",i)
+  predict_and_eval_all2d()
+  # for i in range(25,19*2): 
+  #   try: 
+  #     myrun(i)
+  #   except:
+  #     print("Error in pid ",i)
 
 
