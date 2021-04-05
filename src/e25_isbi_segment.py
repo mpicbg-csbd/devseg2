@@ -70,7 +70,7 @@ def myrun_slurm_entry(pid=0):
 
 def pid2params(pid):
   (p0,p1),pid = parse_pid(pid,[19,2])
-  savedir_local = savedir / f'e25_isbi_segment/v01/pid{pid:03d}/'
+  savedir_local = savedir / f'e25_isbi_segment/v02/pid{pid:03d}/'
   (savedir_local / 'm').mkdir(exist_ok=True,parents=True) ## place to save models
   myname, isbiname = isbi_datasets[p0] # v05
   trainset = ["01","02"][p1] # v06
@@ -78,6 +78,29 @@ def pid2params(pid):
   # P = _init_params(info.ndim)
   print(json.dumps(info.__dict__,sort_keys=True, indent=2, default=str), flush=True)
   return SimpleNamespace(**locals())
+
+
+def segnet_data_specialization(info):
+  myname = info.myname
+  p = SimpleNamespace()
+  if myname in ["celegans_isbi","A549","A549-SIM","H157","hampster","Fluo-N3DH-SIM+"]:
+    p.zoom = {3:(1,0.5,0.5), 2:(0.5,0.5)}[info.ndim]
+  if myname=="trib_isbi":
+    p.kern = [3,3,3]
+    p.zoom = (0.5,0.5,0.5)
+  if myname=="MSC":
+    a,b = info.shape
+    p.zoom = {'01':(1/4,1/4), '02':(128/a, 200/b)}[info.dataset]
+    ## '02' rescaling is almost exactly isotropic while still being divisible by 8.
+  if info.isbiname=="DIC-C2DH-HeLa":
+    # p.kern = [7,7]
+    p.zoom = (0.5,0.5)
+  if myname=="fly_isbi":
+    pass
+    # cfig.bg_weight_multiplier=0.0
+    # cfig.weight_decay = False
+  return p
+
 
 
 def train(pid=0):
@@ -151,8 +174,7 @@ class SEGnetISBI(models.SegmentationModel):
 
   def dataloader(self):
     _segdata = segdata(self.info)
-    print(_segdata)
-    assert False
+
     def norm(x): 
       p0,p1 = np.percentile(x,[2,99.4])
       return (x-p0)/(p1-p0)
@@ -220,9 +242,10 @@ class SEGnetISBI(models.SegmentationModel):
 
     data = self.data_train if train_mode else self.data_vali
     d    = data[np.random.choice(len(data))] ## choose time
-    pt   = d.pts[np.random.choice(d.pts.shape[0])] ## choose point
+    # pt   = d.pts[np.random.choice(d.pts.shape[0])] ## choose point
+    pt   = np.random.rand(d.raw.ndim)*(d.raw.shape-self.patch)
     ss   = datagen.jitter_center_inbounds(pt,self.patch,d.raw.shape,jitter=0.1)
-    
+    # ipdb.set_trace()
     # _all = (slice(None),) + ss
     x  = d.raw[ss].copy()
     yt = d.target[ss].copy()
@@ -386,9 +409,9 @@ def predict_and_eval_seg_w_CPNET(pid):
   P = pid2params(pid)
 
   SEGnet = SEGnetISBI(P.savedir_local, P.info)
-  SEGnet.net.load_state_dict(torch.load(SEGnet.savedir / "m/best_weights_seg.pt"))
+  SEGnet.net.load_state_dict(torch.load(SEGnet.savedir / "m/best_weights_latest.pt"))
   cpnet  = _init_cpnet_params(P.info.ndim).net
-  cpnet.load_state_dict(torch.load(f"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v08/pid{pid:03d}/m/best_weights_loss.pt"))
+  cpnet.load_state_dict(torch.load(f"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v04/pid{pid:03d}/m/best_weights_loss.pt"))
   cpnet.cuda()
   cpnet_params = load(f"/projects/project-broaddus/devseg_2/expr/e21_isbidet/v09/pid{pid:03d}/data_specific_params.pkl")
 
@@ -457,6 +480,36 @@ def predict_and_eval_seg_w_CPNET(pid):
 
 
 ## analysis
+
+
+def save_example_annotations():
+
+  def f(i):
+    i = i % len(_segdata)
+    s = _segdata[i]
+    lab = load(s.lab)
+    raw = load(s.raw)
+
+    if s.zpos is not None:
+      rawslice = raw[s.zpos].astype(np.float16)
+      save(_png(rawslice), P.savedir_local / f"rawtraindata/rawslice{i}.png")
+    
+    if lab.ndim==3:
+      lab = lab.max(0)
+    if raw.ndim==3:
+      raw = raw.max(0)
+    
+    raw = raw.astype(np.float16)
+    
+    save(_png(lab), P.savedir_local / f"rawtraindata/lab{i}.png")
+    save(_png(raw), P.savedir_local / f"rawtraindata/raw{i}.png")
+
+  for i in range(19*2):
+    P = pid2params(i)
+    _segdata = segdata(P.info)
+    f(0)
+    f(-1)
+
 
 def combine_segscores():
   def f(pid):

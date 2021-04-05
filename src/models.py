@@ -176,7 +176,7 @@ class BaseModel(object):
       return res
 
     allscores = np.stack([f() for _ in range(self.train_cfig.n_vali_samples)])  
-    allscores = allscores.mean(0) ## mean over samples
+    allscores = np.nanmean(allscores,0) ## mean over samples
     ta = self.ta
     ta.vali_loss.append(allscores[0])
     ta.vali_scores.append(allscores[1:])
@@ -394,7 +394,9 @@ class SegmentationModel(BaseModel):
     return score
 
   def seg(self,y,sample):
+    # ipdb.set_trace()
     lab = label(y[1]>0.5)[0]
+    if sample.lab.max()==0: return np.nan
     score = scores_dense.seg(sample.lab,lab)
     return score
 
