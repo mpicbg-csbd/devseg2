@@ -159,7 +159,7 @@ def e18_isbidet():
   # res  = res.transpose([0,2,1,3]).reshape([4*2,19,2])[[0,1,2,4,5]]
   # save(res,"../expr/e19_tracking/v02/res.npy")
 
-  return res
+  # return res
 
 def e19_tracking():
   """
@@ -185,17 +185,17 @@ def e19_tracking():
     idx = tuple(params) + (p4,)
     res[idx] = float(m2.group(2))
     
+  return res
   # redo = np.array(np.where((res==[-1,-1]).sum(-1)!=0))
   # res  = res.transpose([0,2,1,3]).reshape([4*2,19,2])[[0,1,2,4,5]]
-  save(res,"../expr/e19_tracking/v06/res.npy")
-
-  return res #,redo
+  # save(res,"../expr/e19_tracking/v06/res.npy")
+  # return res #,redo
 
 def e19_showerrors():
   """
   v02.
   """
-  for name in sorted(glob("../expr/e19_tracking/v02/*/*TRA.txt")):
+  for name in sorted(glob("../expr/e19_tracking/v04/*/*TRA.txt")):
     ps,pid = _parse_pid(int(Path(name).parts[-2][3:]),[4,19,2,2,])
     print(Path(name).parts[-2:], ps, end='\t',flush=True)
     run(f"cat {name}",shell=1)
@@ -210,9 +210,6 @@ def e19_showerrors():
       # print(pid,(p0,p1,p2,p3),_ds,p4)
       print(m.groups())
       run(f"cat {name}",shell=1)
-
-
-
 
 
 def e21_collect_scores():

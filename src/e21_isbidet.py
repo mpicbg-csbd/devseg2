@@ -47,18 +47,18 @@ def myrun_slurm(pids):
   ## copy the experiments file to a safe name that you WONT EDIT. If you edit the code while jobs are waiting in the SLURM queue it could cause inconsistencies.
   ## NOTE: here we only copy experiment.py file, but THE SAME IS TRUE FOR ALL DEPENDENCIES.
 
-  shutil.copy("/projects/project-broaddus/devseg_2/src/e21_isbidet.py", "/projects/project-broaddus/devseg_2/src/e21_isbidet_copy.py")
+  shutil.copy("/projects/project-broaddus/devseg_2/src/e21_isbidet.py", "/projects/project-broaddus/devseg_2/src/temp/e21_isbidet_copy.py")
   _gpu  = "-p gpu --gres gpu:1 -n 1 -c 4 -t 2:00:00 --mem 128000 "    ## TODO: more cores?
   _cpu  = "-n 1 -t 1:00:00 -c 4 --mem 128000 "
-  slurm = 'sbatch -J e21_{pid:03d} {_resources} -o slurm/e21_pid{pid:03d}.out -e slurm/e21_pid{pid:03d}.err --wrap \'python3 -c \"import e21_isbidet_copy as ex; ex.myrun_slurm_entry({pid})\"\' '
+  slurm = 'sbatch -J e21_{pid:03d} {_resources} -o slurm/e21_pid{pid:03d}.out -e slurm/e21_pid{pid:03d}.err --wrap \'python3 -c \"import temp.e21_isbidet_copy as ex; ex.myrun_slurm_entry({pid})\"\' '
   slurm = slurm.replace("{_resources}",_gpu)
   for pid in pids: Popen(slurm.format(pid=pid),shell=True)
 
 def myrun_slurm_entry(pid=0):
-  myrun(pid)
+  load_and_train(pid)
 
   # (p0,p1),pid = parse_pid(pid,[2,19,9])
-  # myrun([p0,p1,p2])
+  # load_and_train([p0,p1,p2])
   # for p2,p3 in iterdims([2,5]):
   #   try:
   #   except:
@@ -281,7 +281,7 @@ def dataloader(info,data,savefile=None,N_samples=100,num_workers=0,train_mode=1)
               # persistent_workers=True, ## doesn't exist in pytorch 1.2
           )
 
-def myrun(pid=0):
+def load_and_train(pid=0):
   """
   v01 : refactor of e18. make traindata AOT.
     add `_train` 0 = predict only, 1 = normal init, 2 = continue
@@ -423,7 +423,6 @@ def myrun(pid=0):
   return history
 
 
-
 def norm_minmax01(x):
   return (x-x.min())/(x.max()-x.min())
 
@@ -472,4 +471,4 @@ def post_train(history,trainloader,valiloader,savedir_local):
 
 
 if __name__=='__main__':
-  for i in range(19*2): myrun(i)
+  for i in range(19*2): load_and_train(i)
