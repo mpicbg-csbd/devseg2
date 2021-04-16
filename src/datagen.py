@@ -7,6 +7,10 @@ from skimage.measure      import regionprops
 from segtools.math_utils import conv_at_pts4, conv_at_pts_multikern
 from segtools.point_tools import trim_images_from_pts2, patches_from_centerpoints
 
+from pykdtree.kdtree import KDTree as pyKDTree
+
+from numba import jit
+
 ## manipulate labels and targets
 from expand_labels_scikit import expand_labels
 from scipy.ndimage.morphology import distance_transform_edt
@@ -97,6 +101,157 @@ def find_points_within_patches(centerpoints, allpts, _patchsize):
   pts = [[allpts[n] for n in ns if n<len(allpts) and _test(centerpoints[i],allpts[n])] for i,ns in enumerate(inds)]
   return pts
 
+def find_points_within_patches2(points, patches):
+  def ptinpatch(p,patch):
+    return np.all([p[i] in range(patch[i].start,patch[i].stop) for i in range(len(patch))])
+
+  res = np.zeros((len(points),len(patches)))
+  for i in range(len(points)):
+    for j in range(len(patches)):
+      res[i,j] = ptinpatch(points[i],patches[j])
+
+  return res
+
+
+
+def find_points_within_patches3(points,patches):
+  _patches = np.array([[(x.start,x.stop) for x in s] for s in patches])
+  return jit_find_points_within_patches3(points,_patches)
+
+
+@jit(nopython=True)
+def jit_find_points_within_patches3(points, patches):
+  "points in NxD; patches in MxDx2"
+
+  N = points.shape[0]
+  M = patches.shape[0]
+  D = points.shape[1]
+
+  assert D==patches.shape[1]
+
+  res = np.ones((N,M))
+  for i in range(N):
+    p = points[i]
+    for j in range(M):
+      ss = patches[j]
+      for k in range(D):
+        x = ss[k,0] <= p[k] < ss[k,1]
+        res[i,j] *= x
+
+  return res
+
+
+def test_findinpoints():
+  points = np.random.randint(0, 100,  size=(100,1))
+  points = np.r_[5:100:10].reshape([10,1])
+  patches = [[slice(a,b)] for a,b in np.random.randint(0, 100, size=(20,2))]
+  # patches = np.random.randint(0,100,size=(20,1,2))
+  # patches = np.r_[0:100:10,10:101:10].reshape([2,10]).T.reshape([10,1,2])
+  # ipdb.set_trace()
+  res = find_points_within_patches3(points, patches)
+
+
+
+
+
+def tile1d(end,length,border):
+  """
+  TODO: enfore divisibility constraints
+  The input array and target container are the same size.
+  """
+  inner = length-2*border
+  
+  input_start  = np.r_[0:end-length:inner, end-length]
+  input_start[0] = 0
+  input_end = input_start+length
+  input_end[-1] = end
+  
+  target_start = input_start+border
+  target_start[0] = 0
+  target_end   = input_start+length-border
+  target_end[-1] = end #input_start[-1]+length
+
+  relative_inner_start = [border]*len(input_start)
+  relative_inner_start[0] = 0
+  relative_inner_end   = [length-border]*len(input_start)
+  relative_inner_end[-1] = length ## == None?
+
+  _input     = tuple([slice(a,b) for a,b in zip(input_start,input_end)])
+  _container = tuple([slice(a,b) for a,b in zip(target_start,target_end)])
+  _patch     = tuple([slice(a,b) for a,b in zip(relative_inner_start,relative_inner_end)])
+  res = np.array([_input,_container,_patch,]).T
+  res = [SimpleNamespace(a=x[0],b=x[1],c=x[2]) for x in res]
+  return res
+
+def tile1d_predict(end,length,border,divisible=8):
+  """
+  The input array and target container are the same size.
+  Returns a,b,c (input, container, local-patch-coords).
+  For use in lines like:
+  `container[b] = f(img[a])[c]`
+  Ensures that img[a] has shape divisible by 8 in each dim with length > 8.
+  """
+  inner = length-2*border
+  
+  ## enforce roughly equally sized "main" region with max of "length"
+  n_patches = ceil(end/(length+2*border))
+  n_patches = max(n_patches,2)
+
+  DD = divisible
+
+  if length > end:
+    n_patches=1
+    length=end ## but only used in calculating n_patches
+  if end <= DD:
+    n_patches=1
+    length=end ## but only used in calculating n_patches
+
+  borderpoints  = np.linspace(0,end,n_patches+1).astype(np.int)
+  target_starts = borderpoints[:-1]
+  target_ends   = borderpoints[1:]
+
+  input_starts = target_starts - border; input_starts[0]=0  ## no extra context on image border
+  input_ends = target_ends + border; input_ends[-1]=end     ## no extra context on image border
+
+  if n_patches > 1:
+    ## variably sized "context" regions to ensure total input size % DD == 0.  
+    _dw = input_ends-input_starts
+    deltas  = np.ceil(_dw/DD)*DD - _dw
+    input_starts[1:-1] -= np.floor(deltas/2).astype(int)[1:-1]
+    input_ends[1:-1]   += np.ceil(deltas/2).astype(int)[1:-1]
+    input_ends[0] += deltas[0]
+    input_starts[-1] -= deltas[-1]  
+    assert np.all((input_ends - input_starts)%DD==0)
+
+  # ipdb.set_trace()
+
+  relative_inner_start = target_starts - input_starts
+  relative_inner_end   = target_ends  -  input_starts
+  
+  _input     = tuple([slice(a,b) for a,b in zip(input_starts,input_ends)])
+  _container = tuple([slice(a,b) for a,b in zip(target_starts,target_ends)])
+  _patch     = tuple([slice(a,b) for a,b in zip(relative_inner_start,relative_inner_end)])
+  res = np.array([_input,_container,_patch,]).T
+  res = [SimpleNamespace(a=x[0],b=x[1],c=x[2]) for x in res]
+  return res
+
+def tile_multidim(img_shape,patch_shape,border_shape=None,f_singledim=tile1d_predict):
+  "generates all the patch coords for iterating over large dims.  ## list of coords. each coords is Dx4. "
+  if border_shape is None: border_shape = (0,)*len(img_shape)
+  r = [f_singledim(a,b,c) for a,b,c in zip(img_shape,patch_shape,border_shape)] ## D x many x 3
+  D = len(r) ## dimension
+  # r = np.array(product())
+  r = np.array(np.meshgrid(*r)).reshape([D,-1]).T ## should be an array D x len(a) x len(b)
+  def f(s): # tuple of simple namespaces
+    a = tuple([x.a for x in s])
+    b = tuple([x.b for x in s])
+    c = tuple([x.c for x in s])
+    return SimpleNamespace(a=a,b=b,c=c) ## input, container, patch
+  r = [f(s) for s in r]
+  return r
+
+
+
 def find_errors(img, matching, _patchsize = (33,33)):
   # ipdb.set_trace()
 
@@ -113,7 +268,6 @@ def find_errors(img, matching, _patchsize = (33,33)):
   fn = [SimpleNamespace(pt=pts[i],patch=patches[i],yp=yp_in[i],gt=[pts[i]] + gt_in[i]) for i in range(pts.shape[0])]
 
   return fp, fn
-
 
 def shape2slicelist(imgshape,patchsize,divisible=(1,4,4)):
   D  = len(patchsize)

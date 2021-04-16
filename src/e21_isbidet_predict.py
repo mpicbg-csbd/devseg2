@@ -161,13 +161,10 @@ def predict_full(net,raw,**params):
 
 
 
-
 def match(yt_pts,pts,dub=100,scale=[4,1,1]):
   ndim = pts.shape[1]
   scale = [4,1,1][-ndim:]
   return match_unambiguous_nearestNeib(yt_pts,pts,dub=dub,scale=scale)
-
-
 
 
 def predict_and_eval_centers(net,savetimes,predict_times,info,savedir_local,kwargs):

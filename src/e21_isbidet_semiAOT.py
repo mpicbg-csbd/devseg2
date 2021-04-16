@@ -17,7 +17,7 @@ class CPNetISBI2(CenterpointModel):
     self.dataloader()
     self.timings.append(time())
 
-  def augmenter(self):    
+  def augmenter(self):
     aug = Augmend()
     ax = {2:(0,1), 3:(1,2)}[self.ndim]
     if self.ndim==3:

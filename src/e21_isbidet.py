@@ -1,3 +1,7 @@
+"""
+Train CP-Net to detect cells and nuclei in one of the 19*2 ISBI CTC datasets.
+"""
+
 from time import time
 _start_time = time()
 
@@ -12,7 +16,6 @@ from pathlib import Path
 import ipdb
 
 import shutil
-
 from skimage.feature  import peak_local_max
 from scipy.ndimage import zoom
 import numpy as np
@@ -36,7 +39,6 @@ from segtools.point_matcher import match_unambiguous_nearestNeib
 from segtools.point_tools import trim_images_from_pts2
 
 
-
 savedir = savedir_global()
 print("savedir:", savedir)
 
@@ -55,15 +57,103 @@ def myrun_slurm(pids):
   for pid in pids: Popen(slurm.format(pid=pid),shell=True)
 
 def myrun_slurm_entry(pid=0):
-  load_and_train(pid)
+  load_trainingdata(pid)
 
   # (p0,p1),pid = parse_pid(pid,[2,19,9])
-  # load_and_train([p0,p1,p2])
+  # load_trainingdata([p0,p1,p2])
   # for p2,p3 in iterdims([2,5]):
   #   try:
   #   except:
   #     print("FAIL on pids", [p0,p1,p2,p3])
 
+def _init_unet_params(ndim):
+  T = SimpleNamespace()
+  if ndim==2:
+    T.net = torch_models.Unet3(16, [[1],[1]], pool=(2,2),   kernsize=(5,5),   finallayer=torch_models.nn.Sequential)
+  elif ndim==3:
+    T.net = torch_models.Unet3(16, [[1],[1]], pool=(1,2,2), kernsize=(3,5,5), finallayer=torch_models.nn.Sequential)
+  return T
+
+
+# def isbiInfo_to_filenames2(info):
+#   n_raw  = f"/projects/project-broaddus/rawdata/{info.myname}/{info.isbiname}/{info.dataset}/" + info.rawname
+#   n_lab  = f"/projects/project-broaddus/rawdata/{info.myname}/{info.isbiname}/{info.dataset}_GT/TRA/" + info.man_track
+#   # if info.index in [6,11,12,13,14,15,18]:
+#   n_raw = n_raw[:-4].replace("rawdata","rawdata/zarr") + ".zarr"
+#   n_lab = n_lab[:-4].replace("rawdata","rawdata/zarr") + ".zarr"
+#   filenames_raw = {i:(n_raw.format(time=i),n_lab.format(time=i)) for i in range(info.start,info.stop)}
+#   filename_ltps = f"/projects/project-broaddus/rawdata/{info.myname}/traj/{info.isbiname}/{info.dataset}_traj.pkl"
+#   return filenames_raw, filename_ltps
+
+# def dataset_description(info):
+#   filenames_raw, filename_ltps = isbiInfo_to_filenames2(info)
+#   ltps = load(filename_ltps)
+#   def f(i):
+#     slicelist = 
+#   slices = []
+
+
+
+
+## useful for turning images into pngs
+import matplotlib
+cmap = np.random.rand(256,3).clip(min=0.1)
+cmap[0] = (0,0,0)
+cmap = matplotlib.colors.ListedColormap(cmap)
+def colorseg(seg):
+  m = seg!=0
+  seg[m] %= 254 ## we need to save a color for black==0
+  seg[m] += 1
+  rgb = cmap(seg)
+  return rgb
+def _png(x):
+  if x.ndim==3:
+    x = x.max(0)
+  if 'int' in str(x.dtype):
+    x = colorseg(x)
+  else:
+    norm = lambda x: (x-x.min())/(x.max()-x.min())
+    x = norm(x)
+  x = (x*255).astype(np.uint8)
+  return x
+
+def norm_minmax01(x):
+  mx = x.max()
+  mn = x.min()
+  if mx==mn: 
+    return x-mx
+  else: 
+    return (x-mn)/(mx-mn)
+
+def save_input_glances(sample_list,filename):
+  s = SimpleNamespace()
+  _s = s.__dict__
+  for i,x in enumerate(sample_list):
+    for k in ['x', 'yt', 'w',]: # 'yt_pts',]:
+      v = x.__dict__[k]
+      if v.ndim==3: v = v.max(0)
+      assert v.ndim==2
+      if k=='x':
+        _s[f'x{i}']  = (norm_minmax01(v)*255).astype(np.uint8)
+      if k=='yt':
+        _s[f'yt{i}'] = (norm_minmax01(v)*255).astype(np.uint8)
+  save(s,filename)
+
+def pid2params(pid):
+  (p0,p1),pid = parse_pid(pid,[19,2])
+  # savedir_local = savedir / f'e25_isbi_segment/v02/pid{pid:03d}/'
+  savedir_local = savedir / f'e21_isbidet/v09/pid{pid:03d}/'
+  myname, isbiname = isbi_datasets[p0] # v05
+  trainset = ["01","02"][p1] # v06
+  info = get_isbi_info(myname,isbiname,trainset)
+  print(json.dumps(info.__dict__,sort_keys=True, indent=2, default=str), flush=True)
+  return SimpleNamespace(**locals())
+
+
+
+## Functions below are necessary for generating training data... 
+## seems like too much work. 
+## 200 lines???? that's just too much...
 
 def cpnet_data_specialization(info):
   myname = info.myname
@@ -81,13 +171,14 @@ def cpnet_data_specialization(info):
     # p.kern = [7,7]
     p.zoom = (0.5,0.5)
   if myname=="fly_isbi":
-    pass
+    p.sparsity = 2
     # cfig.bg_weight_multiplier=0.0
     # cfig.weight_decay = False
+  if "trib" in myname:
+    p.sparsity = 1
   return p
 
-
-def _init_params(ndim):
+def _method_params(ndim):
   P = SimpleNamespace()
   if ndim==2:
     P.zoom  = (1,1) #(0.5,0.5)
@@ -101,30 +192,27 @@ def _init_params(ndim):
   P.patch = np.array(P.patch)
   return P
 
-def _init_unet_params(ndim):
-  T = SimpleNamespace()
-  if ndim==2:
-    T.net = torch_models.Unet3(16, [[1],[1]], pool=(2,2),   kernsize=(5,5),   finallayer=torch_models.nn.Sequential)
-  elif ndim==3:
-    T.net = torch_models.Unet3(16, [[1],[1]], pool=(1,2,2), kernsize=(3,5,5), finallayer=torch_models.nn.Sequential)
-  return T
-
 def isbiInfo_to_filenames(info):
   n_raw  = f"/projects/project-broaddus/rawdata/{info.myname}/{info.isbiname}/{info.dataset}/" + info.rawname
   n_lab  = f"/projects/project-broaddus/rawdata/{info.myname}/{info.isbiname}/{info.dataset}_GT/TRA/" + info.man_track
   # if info.index in [6,11,12,13,14,15,18]:
   n_raw = n_raw[:-4].replace("rawdata","rawdata/zarr") + ".zarr"
   n_lab = n_lab[:-4].replace("rawdata","rawdata/zarr") + ".zarr"
-  filenames  = [(n_raw.format(time=i),n_lab.format(time=i)) for i in range(info.start,info.stop)]
-  pointfiles = f"/projects/project-broaddus/rawdata/{info.myname}/traj/{info.isbiname}/{info.dataset}_traj.pkl"
-  return filenames, pointfiles
+  filenames_raw = [(n_raw.format(time=i),n_lab.format(time=i)) for i in range(info.start,info.stop)]
+  filename_ltps = f"/projects/project-broaddus/rawdata/{info.myname}/traj/{info.isbiname}/{info.dataset}_traj.pkl"
+  return filenames_raw, filename_ltps
 
 class FullDynamicSampler(IterableDataset):
   def __init__(self,info,data,train_mode=1,N_samples=1_000,savefile=None):
     super().__init__()
 
     self.info = info
+    self.sparse = True if info.isbiname in ["Fluo-N3DL-DRO", "Fluo-N3DL-TRIC", "Fluo-N3DL-TRIF",] else False
+
+    # if len(data)>30:
+
     self.data = data #[f(a,b) for a,b in self.filenames][self.timeslice]
+
     # self.ltps = ltps #load(self.pointfiles)[self.timeslice] if self.pointfiles else None
     self.N_samples = N_samples
     # self.timeslice  = slice(0,len(data))
@@ -132,19 +220,23 @@ class FullDynamicSampler(IterableDataset):
     self.savefile   = savefile
     if savefile is None or not Path(savefile).exists():
       self.reified_samples = []
+      self.savedyet = False
     else:
       self.reified_samples = load(savefile)
+      self.savedyet = True
       print(f"Savefile Loaded with {len(self.reified_samples)} samples...")
     self.data_resized = False
     self.ndim = self.data[0].raw.ndim
-    P = _init_params(self.ndim)
+    P = _method_params(self.ndim)
     for k,v in P.__dict__.items(): self.__dict__[k] = v
     self.f_augment = self.augmenter(self.ndim)
     self.counter = 0
 
   def __iter__(self):
     while True:
+
       if self.N_samples and len(self.reified_samples) >= self.N_samples:
+        if self.savedyet == False: save(self.reified_samples,self.savefile)
         s = self.reified_samples[self.counter % self.N_samples]
         if self.counter % self.N_samples == -1 % self.N_samples:
           np.random.shuffle(self.reified_samples)
@@ -170,7 +262,6 @@ class FullDynamicSampler(IterableDataset):
       self.data = [resize(d) for d in self.data]
     self.data_resized = True
 
-
   def sample(self,time):
     # while 1: 
     d = rchoose(self.data) #[self.timeslice])
@@ -179,9 +270,15 @@ class FullDynamicSampler(IterableDataset):
     # t = ((time//40)*3)%len(self.data)
     # d   = self.data[t]
 
-    pts = d.pts
-    pt  = rchoose(pts)
+    # ipdb.set_trace()
+
     _patchsize  = (self.patch / self.zoom).astype(int)
+    if self.sparse:
+      pt  = rchoose(d.pts)
+    else:
+      pt  = np.random.rand(self.ndim)*(d.raw.shape - _patchsize)
+    
+    if time%100==0: print(pt, d.raw.shape, _patchsize,flush=True)
     ss  = datagen.jitter_center_inbounds(pt,_patchsize,d.raw.shape,jitter=0.1)
 
     raw,lab = d.raw[ss].copy(), d.lab[ss].copy()
@@ -194,10 +291,17 @@ class FullDynamicSampler(IterableDataset):
     raw = zoom(raw,self.zoom,order=1)
     # raw = gputools.scale(raw,self.zoom,interpolation='linear')
     # p2,p99 = np.percentile(raw[::4,::4,::4],[2,99.4]) ## for speed
-    pts     = datagen.mantrack2pts(lab)
-    pts     = (np.array(pts) * self.zoom).astype(np.int)
-    target  = datagen.place_gaussian_at_pts(pts,raw.shape,self.kern)
-    weights = np.ones_like(target)
+    pts       = np.array(datagen.mantrack2pts(lab)).astype(np.int)
+    if len(pts)>0:
+      pts     = (pts * self.zoom).astype(np.int)
+      target  = datagen.place_gaussian_at_pts(pts,raw.shape,self.kern)
+    else:
+      target  = np.zeros(raw.shape)
+    
+    if self.sparse:
+      weights = weights__decaying_bg_multiplier(target,0,thresh=np.exp(-0.5*(1/3)**2),decayTime=None,bg_weight_multiplier=0.0)
+    else:
+      weights = np.ones_like(target)
 
     return SimpleNamespace(x=raw,yt=target,w=weights,yt_pts=pts,zdim=0)
 
@@ -226,46 +330,10 @@ class FullDynamicSampler(IterableDataset):
 def divide_evenly_with_min1(n_samples,n_bins):
   N = n_samples
   M = n_bins
-  assert N>=M
+  assert N>=M, f"The problem is N {N}, M {M}..."
   y = np.linspace(0,N,M+1).astype(np.int)
   ss = [slice(y[i],y[i+1]) for i in range(M)]
   return ss
-
-def worker_init_fn(worker_id):
-  worker_info = torch.utils.data.get_worker_info()
-  dataset = worker_info.dataset  # the dataset copy in this worker process 
-  N = len(dataset.data) 
-  M = worker_info.num_workers
-  _id = int(worker_info.id)
-  ss = divide_evenly_with_min1(N,M)
-  s = ss[_id]
-  print(s)
-  # ipdb.set_trace()
-
-  dataset.data = dataset.data[s]
-  print(f"Hello From Worker {_id}!!!")
-  print("Data Shape: ", len(dataset.data))
-
-  # _t1 = time()
-  # print("Length of data: ", len(dataset.data))
-  # dataset.resize_data()
-  # print("Initializing Data...", time()-_t1, " sec")
-  # print(locals())
-
-def save_input_glances(sample_list,filename):
-  s = SimpleNamespace()
-  _s = s.__dict__
-  norm = lambda x: (x-x.min())/(x.max()-x.min())
-  for i,x in enumerate(sample_list):
-    for k in ['x', 'yt', 'w', 'yt_pts',]:
-      v = x.__dict__[k]
-      if v.ndim==3: v = v.max(0)
-      assert v.ndim==2
-      if k=='x':
-        _s[f'x{i}']  = (norm(v)*255).astype(np.uint8)
-      if k=='yt':
-        _s[f'yt{i}'] = (norm(v)*255).astype(np.uint8)
-  save(s,filename)
 
 def dataloader(info,data,savefile=None,N_samples=100,num_workers=0,train_mode=1):
   return DataLoader(
@@ -281,7 +349,28 @@ def dataloader(info,data,savefile=None,N_samples=100,num_workers=0,train_mode=1)
               # persistent_workers=True, ## doesn't exist in pytorch 1.2
           )
 
-def load_and_train(pid=0):
+def worker_init_fn(worker_id):
+  worker_info = torch.utils.data.get_worker_info()
+  dataset = worker_info.dataset  # the dataset copy in this worker process 
+  N = len(dataset.data) 
+  M = worker_info.num_workers
+  _id = int(worker_info.id)
+  print('l360',_id,N,M)
+  ss = divide_evenly_with_min1(N,M)
+  s = ss[_id]
+  # print(s)
+  # ipdb.set_trace()
+  dataset.data = dataset.data[s]
+  print(f"Worker {_id}, start {s.start}, stop {s.stop}")
+  # print("Data Shape: ", len(dataset.data))
+
+  # _t1 = time()
+  # print("Length of data: ", len(dataset.data))
+  # dataset.resize_data()
+  # print("Initializing Data...", time()-_t1, " sec")
+  # print(locals())
+
+def myrun(pid=0):
   """
   v01 : refactor of e18. make traindata AOT.
     add `_train` 0 = predict only, 1 = normal init, 2 = continue
@@ -314,22 +403,21 @@ def load_and_train(pid=0):
   v09 : total system refactor
     p0 : dataset in 0..18
     p1 : acquisition in 0,1    
+  v10 : train on entire acquisition: test on 2nd acquisition.
+    p0 : dataset in 0..18
+    p1 : acquisition in 0,1
   """
-
-  (p0,p1),pid = parse_pid(pid,[19,2])
-  savedir_local = savedir / f'e21_isbidet/v09/pid{pid:03d}/'
-  (savedir_local / 'm').mkdir(exist_ok=True,parents=True) ## place to save models
-  myname, isbiname = isbi_datasets[p0] # v05
-  trainset = ["01","02"][p1] # v06
-  info = get_isbi_info(myname,isbiname,trainset)
-  P = _init_params(info.ndim)
-  print(json.dumps(info.__dict__,sort_keys=True, indent=2, default=str), flush=True)
-
+  P = pid2params(pid)
+  info = P.info
+  T = _method_params(info.ndim)
+  (P.savedir_local / 'm').mkdir(exist_ok=True,parents=True) ## place to save models
   """
   EVERYTHING BELOW THIS POINT IS LIKE A WORKSPACE THAT CHANGES RAPIDLY & USES FUNCTIONS DEFINED ABOVE.
   """
 
-  print("Running e21 with savedir: \n", savedir_local, flush=True)
+  tic = time()
+
+  print("Running e21 with savedir: \n", P.savedir_local, flush=True)
 
   ## lazy load ZARR files
   def _builddata():
@@ -343,36 +431,76 @@ def load_and_train(pid=0):
     for i,d in enumerate(imgs): d.pts = ltps[i+info.start]
     return imgs
   data = _builddata()
-  data = data[::2] ## remove test data (odd times)
-
   np.random.seed(0)
-  td,vd    = shuffle_and_split(data,valifrac=1/8)
-  max_total_samples = len(data)*np.prod(info.shape) / np.prod(P.patch)
 
-  ns = min(max_total_samples//8, 500)    # num samples to loop over
-  print(ns)
-  nw = np.clip(len(vd)//7,a_min=0,a_max=16) # num workers
-  valiloader  = dataloader(info,vd,savefile="mydata_train.pkl", N_samples=ns, num_workers=nw, train_mode=0,)
-  ns = min(max_total_samples//8*7, 1000) # num samples to loop over
-  nw = np.clip(len(td)//7,a_min=0,a_max=16)   # num workers
-  trainloader = dataloader(info,td,savefile="mydata_vali.pkl", N_samples=ns, num_workers=nw, train_mode=1,)
+  ## in this form data can be shuffled and permuted. or stripped to leave out test data.
+  N = max(6,len(data)//20); gap=len(data)//N
+  data = data[::gap]
+  ## heuristics to determine train/vali split and the number of patches to save / iterate over.
+  td,vd = shuffle_and_split(data,valifrac=1/8)
+  print('Line440',len(td),len(vd))
 
-  ## specialize data
+  nw = floor(len(vd)/4)
+  valiloader  = dataloader(info,vd,savefile="mydata_train.pkl", N_samples=200, num_workers=0, train_mode=0,)
+  nw = floor(len(td)/4)
+  trainloader = dataloader(info,td,savefile="mydata_vali.pkl", N_samples=1000, num_workers=0, train_mode=1,)
 
-  # _dsp = cpnet_data_specialization(info) # data-specific params
-  # for k,v in _dsp.__dict__.items():
-  #   trainloader.dataset.__dict__[k] = v
-  #   valiloader.dataset.__dict__[k]  = v
+  # max_total_samples = ceil(len(data)*np.prod(info.shape) / np.prod(T.patch))
+  # ns = min(max_total_samples//8, 500)    # num samples to loop over
+  # nw = np.clip(len(vd)//7,a_min=0,a_max=16) # num workers
+  # nw = 2
+  # print(f"Vali: ns {ns}, nw {nw}")  
+  
+  # ns = min(max_total_samples//8*7, 1000) # num samples to loop over
+  # nw = np.clip(len(td)//7,a_min=0,a_max=16)   # num workers
+  # nw = 2
+  # print(f"Train: ns {ns}, nw {nw}")
+
+
+  _dsp = cpnet_data_specialization(info) # data-specific params
+
+  for k,v in _dsp.__dict__.items():
+    trainloader.dataset.__dict__[k] = v
+    valiloader.dataset.__dict__[k]  = v
   _prediction_params = SimpleNamespace(zoom=trainloader.dataset.zoom,nms=trainloader.dataset.nms_footprint,kern=trainloader.dataset.kern)
-  save(_prediction_params,savedir_local/"data_specific_params.pkl")
-
-  print("Sizes valiloader: ", max_total_samples//8//4)
-  print("Sizes trainloader: ", max_total_samples//8*7//4)
+  save(_prediction_params, P.savedir_local/"data_specific_params.pkl")
   
   glance_train = [x for x in islice(trainloader,3)]
   glance_vali  = [x for x in islice(valiloader,3)]
-  save_input_glances(glance_train,savedir_local/'glance_input_train')
-  save_input_glances(glance_vali, savedir_local/'glance_input_vali')
+  save(glance_train, P.savedir_local/'glance_train.pkl')
+  save(glance_vali,  P.savedir_local/'glance_vali.pkl')
+
+  save_input_glances(glance_train,P.savedir_local/'glance_input_train')
+  save_input_glances(glance_vali, P.savedir_local/'glance_input_vali')
+
+  # save(trainloader.dataset, P.savedir_local/'trainloader.pkl')
+  # save(valiloader.dataset, P.savedir_local/'valiloader.pkl')
+
+  # P = pid2params(pid)
+  # info = P.info
+  # T = _method_params(info.ndim)
+  # (P.savedir_local / 'm').mkdir(exist_ok=True,parents=True) ## place to save models
+
+  ## load data from disk
+  if False:
+    trainloader  = dataloader(load(P.savedir_local/'trainloader.pkl'))
+    valiloader   = dataloader(load(P.savedir_local/'valiloader.pkl'))
+    glance_train = load(P.savedir_local/'glance_input_train')
+    glance_vali  = load(P.savedir_local/'glance_input_vali')
+
+
+  toc = time()
+  print("TIME dataloader:", toc-tic)
+
+  train(P,trainloader,valiloader,glance_train,glance_vali,)
+
+
+
+
+def train(params,trainloader,valiloader,glance_train,glance_vali,):
+
+  tic = time()
+  P = params
 
   def mse_loss(net,sample):
     s  = sample
@@ -390,10 +518,11 @@ def load_and_train(pid=0):
     l = l.cpu().numpy()
     nms_footprint = valiloader.dataset.nms_footprint
     pts   = peak_local_max(y/y.max(),threshold_abs=.2,exclude_border=False,footprint=np.ones(nms_footprint))
-    scale = np.array(info.scale)
-    if info.ndim==3: scale = scale*(0.5,1,1) ## to account for low-resolution and noise along z dimension
+    scale = np.array(P.info.scale)
+    if P.info.ndim==3: scale = scale*(0.5,1,1) ## to account for low-resolution and noise along z dimension
     matching = match_unambiguous_nearestNeib(s.yt_pts,pts,dub=100,scale=scale)
-    return y, SimpleNamespace(loss=l,f1=matching.f1,height=y.max())
+    # return y, SimpleNamespace(loss=l,f1=matching.f1,height=y.max())
+    return y, (l,matching.f1,y.max())
 
   def pred_glances(net,time):
     for i,s in enumerate(glance_train):
@@ -402,7 +531,7 @@ def load_and_train(pid=0):
       l = l.cpu().numpy()
       if y.ndim==3: y = y.max(0)
       y = (norm_minmax01(y)*255).astype(np.uint8)
-      save(y,savedir_local/f'glance_output_train/a{time}_{i}.png')
+      save(y,P.savedir_local/f'glance_output_train/a{time}_{i}.png')
 
     for i,s in enumerate(glance_vali):
       with torch.no_grad(): y,l = mse_loss(net,s)
@@ -410,57 +539,93 @@ def load_and_train(pid=0):
       l = l.cpu().numpy()
       if y.ndim==3: y = y.max(0)
       y = (norm_minmax01(y)*255).astype(np.uint8)
-      save(y,savedir_local/f'glance_output_vali/a{time}_{i}.png')
+      save(y,P.savedir_local/f'glance_output_vali/a{time}_{i}.png')
 
   ## loss and network
   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-  net = _init_unet_params(info.ndim).net
+  net = _init_unet_params(P.info.ndim).net
   net = net.to(device)
+  # net.load_state_dict(torch.load(P.savedir_local / f'm/best_weights_latest.pt'))
 
-  history = train(net,mse_loss,validate,trainloader,valiloader,N_vali=10,N_train=100,N_epochs=100,observer=None,pred_glances=pred_glances,savedir=savedir_local)
-  post_train(history,trainloader,valiloader,savedir_local)
+  toc = time()
+  print("TIME init model:", toc-tic)
+  history = train_net(net,mse_loss,validate,trainloader,valiloader,N_vali=10,N_train=100,N_epochs=100,observer=None,pred_glances=pred_glances,savedir=P.savedir_local)
+  post_train(history,trainloader,valiloader,P.savedir_local)
   ## Training
   return history
+
+
+
 
 
 def norm_minmax01(x):
   return (x-x.min())/(x.max()-x.min())
 
-def train(net,f_loss,f_vali,trainloader,valiloader,N_vali=20,N_train=100,N_epochs=3,observer=None,pred_glances=None,savedir=None):
+def train_net(net,f_loss,f_vali,trainloader,valiloader,N_vali=20,N_train=100,N_epochs=3,observer=None,pred_glances=None,savedir=None):
   opt = torch.optim.Adam(net.parameters(), lr = 1e-4)
   if observer is None: 
     observer = SimpleNamespace()
     observer.lossmeans = []
-    observer.valimeans = dict(loss=[],f1=[],height=[])
+    observer.valimeans = []
+
+  tic = time()
+
+  trainloader = iter(trainloader)
+  valiloader = iter(valiloader)
+
+  for i in range(N_epochs):
+    loss = backprop_n_samples_into_net(net,opt,f_loss,trainloader,N_train)
+    observer.lossmeans.append(loss)
+    vali = validate_me_baby(net,f_vali,valiloader,N_vali)
+    observer.valimeans.append(vali)
+    save(observer,savedir / "history.pkl")
+    pred_glances(net,i)
+    save_best_weights(net,vali,savedir)
+    
+    dt  = time() - tic
+    tic = time()
+    print(f"epoch {i}/{N_epochs}, loss={observer.lossmeans[-1]:4f}, dt={dt:4f}, rate={N_train/dt:5f} samples/s", end='\r',flush=True)
+
+  return observer
+
+def save_best_weights(net,_vali,savedir):
+  torch.save(net.state_dict(), savedir / f'm/best_weights_latest.pt')
+
   valikeys   = ['loss','f1','height']
   valiinvert = [1,-1,-1] # minimize, maximize, maximize
-  
-  _loss_temp = []
-  for i,s in tqdm(enumerate(trainloader),total=N_train*N_epochs,ascii=True,):
-    if i==N_train*N_epochs: break
+  valis = np.array(_vali).reshape([-1,3])*valiinvert
+
+  for i,k in enumerate(valikeys):
+    if np.nanmin(valis[:,i])==valis[-1,i]:
+      torch.save(net.state_dict(), savedir / f'm/best_weights_{k}.pt')
+
+
+def validate_me_baby(net,f_vali,valiloader,nsamples):
+  valis = []
+  # for j,vs in tqdm(enumerate(valiloader),total=N_vali,ascii=True):
+  for i in range(nsamples):
+    s = next(valiloader)
+    valis.append(f_vali(net,s)[1])
+  return np.nanmean(valis,0)
+
+def backprop_n_samples_into_net(net,opt,f_loss,trainloader,nsamples):
+  _losses = []
+  tic = time()
+  print()
+  for i in range(nsamples):
+    s = next(trainloader)
     y,l = f_loss(net,s)
     l.backward()
     opt.step()
     opt.zero_grad()
-    _loss_temp.append(float(l.detach().cpu()))
+    _losses.append(float(l.detach().cpu()))
+    dt = time()-tic; tic = time()
+    print(f"it {i}/{nsamples}, dt {dt:5f}, max {float(y.max()):5f}", end='\r',flush=True)
+  print("\033[F",end='')
+  return np.mean(_losses)
 
-    if i%N_train==N_train-1:
-      valis = []
-      for j,vs in tqdm(enumerate(valiloader),total=N_vali,ascii=True):
-        if j==N_vali: break
-        valis.append(f_vali(net,vs)[1])
-      if pred_glances and (i//N_train)%3==0: pred_glances(net,i//N_train)
-      current_valimeans = {k:np.mean([sn.__dict__[k] for sn in valis]) for k in valikeys}
-      torch.save(net.state_dict(), savedir / f'm/best_weights_latest.pt')
-      for i,k in enumerate(valikeys):
-        if len(observer.valimeans[k])==0 or current_valimeans[k]*valiinvert[i] < np.min(observer.valimeans[k]*np.array(valiinvert[i])):
-          torch.save(net.state_dict(), savedir / f'm/best_weights_{k}.pt')
-        observer.valimeans[k].append(current_valimeans[k])
-      observer.lossmeans.append(np.mean(_loss_temp))
-      save(observer,savedir / "history.pkl")
-      _loss_temp = []
 
-  return observer
+
 
 def post_train(history,trainloader,valiloader,savedir_local):
   ## Post-Training
@@ -471,4 +636,4 @@ def post_train(history,trainloader,valiloader,savedir_local):
 
 
 if __name__=='__main__':
-  for i in range(19*2): load_and_train(i)
+  for i in range(19*2): load_trainingdata(i)

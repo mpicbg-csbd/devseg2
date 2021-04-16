@@ -65,7 +65,11 @@ def get_isbi_info(myname,isbiname,dataset):
   d.timebounds = [re.search(r'man_track(\d+)\.tif',str(x)).group(1) for x in trackfiles]
   d.timebounds = [d.timebounds[0],d.timebounds[-1]]
   d.ndigits    = len(d.timebounds[0])
-  d.shape = load(trackfiles[0]).shape
+  # d.shape = load(trackfiles[0]).shape
+
+  n_raw = str(trackfiles[0])[:-4].replace("rawdata","rawdata/zarr") + ".zarr"
+  d.shape = load(n_raw).shape
+  
   d.start,d.stop  = int(d.timebounds[0]), int(d.timebounds[-1])+1
   # stop  = 5
   d.ndim = 2 if '2D' in isbiname else 3

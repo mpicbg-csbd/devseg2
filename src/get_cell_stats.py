@@ -37,6 +37,10 @@ def run(pid=0):
   # P = _init_params(info.ndim)
   print(json.dumps(info.__dict__,sort_keys=True, indent=2, default=str), flush=True)
   seginfo = segdata(info)
+  
   save(seginfo, savedir_local / f"seginfo-{isbiname}-{trainset}.pkl")
+
+
+
   # for x in seginfo:
   #   print(x.rp.boxdims.mean(0),x.rp.centroid.mean(0))
