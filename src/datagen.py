@@ -183,13 +183,66 @@ def tile1d(end,length,border):
   res = [SimpleNamespace(a=x[0],b=x[1],c=x[2]) for x in res]
   return res
 
-def tile1d_predict(end,length,border,divisible=8):
+
+def tile1d_random(sz_container,sz_outer,sz_inner):
   """
   The input array and target container are the same size.
   Returns a,b,c (input, container, local-patch-coords).
   For use in lines like:
   `container[b] = f(img[a])[c]`
-  Ensures that img[a] has shape divisible by 8 in each dim with length > 8.
+  Ensures that img[a] has shape divisible by 8 in each dim with sz_outer > 8.
+  """
+  # inner = sz_outer-2*sz_inner
+  
+  ## enforce roughly equally sized "main" region with max of "sz_outer"
+  n_patches = floor(sz_container/sz_outer)
+  assert n_patches >= 1
+
+  borderpoints  = np.linspace(0,sz_container,n_patches+1).astype(np.int)
+  outer_starts  = borderpoints[:-1]
+  outer_ends    = borderpoints[1:]
+
+  sz_outer = outer_ends - outer_starts
+  inner_starts = np.random.randint(outer_starts, high=outer_ends-sz_inner)
+  inner_ends = inner_starts+sz_inner
+
+  relative_inner_start = inner_starts - outer_starts
+  relative_inner_end   = inner_ends - outer_starts
+
+  _outer     = tuple([slice(a,b) for a,b in zip(outer_starts,outer_ends)])
+  _inner     = tuple([slice(a,b) for a,b in zip(inner_starts,inner_ends)])
+  _inner_rel = tuple([slice(a,b) for a,b in zip(relative_inner_start,relative_inner_end)])
+  res = np.array([_outer,_inner,_inner_rel,]).T
+  res = [SimpleNamespace(outer=x[0],inner=x[1],inner_rel=x[2]) for x in res]
+
+  # ipdb.set_trace()
+  return res
+
+def tileND_random(img_shape,outer_shape,inner_shape,):
+  "generates all the patch coords for iterating over large dims.  ## list of coords. each coords is Dx4. "
+  # if inner_shape is None: inner_shape = (0,)*len(img_shape)
+  r = [tile1d_random(a,b,c) for a,b,c in zip(img_shape,outer_shape,inner_shape)] ## D x many x 3
+  D = len(r) ## dimension
+  # r = np.array(product())
+  r = np.array(np.meshgrid(*r)).reshape([D,-1]).T ## should be an array D x len(a) x len(b)
+  def f(s): # tuple of simple namespaces
+    res = SimpleNamespace()
+    keys = s[0].__dict__.keys()
+    for k in keys:
+      res.__dict__[k] = tuple([x.__dict__[k] for x in s])
+    return res
+  r = [f(s) for s in r]
+  return r
+
+
+
+def tile1d_predict(end,length,border,divisible=8):
+  """
+  The input array and target container are the same size.
+  Returns a,b,c (input, container, local-patch-coords).
+  For use in lines like:
+  `container[inner] = f(img[outer])[inner_rel]`
+  Ensures that img[outer] has shape divisible by 8 in each dim with length > 8.
   """
   inner = length-2*border
   
@@ -232,7 +285,7 @@ def tile1d_predict(end,length,border,divisible=8):
   _container = tuple([slice(a,b) for a,b in zip(target_starts,target_ends)])
   _patch     = tuple([slice(a,b) for a,b in zip(relative_inner_start,relative_inner_end)])
   res = np.array([_input,_container,_patch,]).T
-  res = [SimpleNamespace(a=x[0],b=x[1],c=x[2]) for x in res]
+  res = [SimpleNamespace(outer=x[0],inner=x[1],inner_rel=x[2]) for x in res]
   return res
 
 def tile_multidim(img_shape,patch_shape,border_shape=None,f_singledim=tile1d_predict):
@@ -243,10 +296,10 @@ def tile_multidim(img_shape,patch_shape,border_shape=None,f_singledim=tile1d_pre
   # r = np.array(product())
   r = np.array(np.meshgrid(*r)).reshape([D,-1]).T ## should be an array D x len(a) x len(b)
   def f(s): # tuple of simple namespaces
-    a = tuple([x.a for x in s])
-    b = tuple([x.b for x in s])
-    c = tuple([x.c for x in s])
-    return SimpleNamespace(a=a,b=b,c=c) ## input, container, patch
+    a = tuple([x.outer for x in s])
+    b = tuple([x.inner for x in s])
+    c = tuple([x.inner_rel for x in s])
+    return SimpleNamespace(outer=a,inner=b,inner_rel=c) ## input, container, patch
   r = [f(s) for s in r]
   return r
 

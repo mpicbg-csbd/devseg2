@@ -135,6 +135,10 @@ def norm_affine01(x,lo,hi):
   else: 
     return (x-lo)/(hi-lo)
 
+def norm_percentile01(x,p0,p1):
+  lo,hi = np.percentile(x,[p0,p1])
+  return norm_affine01(x,lo,hi)
+
 def take_n_evenly_spaced_items(item_list,N):
   M = len(item_list)
   # assert N<=M
@@ -150,6 +154,27 @@ def divide_evenly_with_min1(n_samples,n_bins):
   y = np.linspace(0,N,M+1).astype(np.int)
   ss = [slice(y[i],y[i+1]) for i in range(M)]
   return ss
+
+def bytes2string(nbytes):
+  if nbytes < 10**3:  return f"{nbytes} B"
+  if nbytes < 10**6:  return f"{nbytes/10**3} KB"
+  if nbytes < 10**9:  return f"{nbytes/10**6} MB"
+  if nbytes < 10**12: return f"{nbytes/10**9} GB"
+
+def file_size(root):
+  "works for files or directories (recursive)"
+  root = Path(root)
+  # ipdb.set_trace()
+  if root.is_dir():
+    # https://stackoverflow.com/questions/1392413/calculating-a-directorys-size-using-python/1392549
+    return sum(f.stat().st_size for f in root.glob('**/*') if f.is_file())
+  else:
+    # https://stackoverflow.com/questions/2104080/how-can-i-check-file-size-in-python
+    return os.stat(fname).st_size
+
+def strDiskSizePatchFrame(df):
+  _totsize = (2+1+2) * df['shape'].apply(np.prod).sum()
+  return bytes2string(_totsize)
 
 
 ## stable. job-specific utility funcs.
@@ -264,7 +289,7 @@ def cpnet_data_specialization(info):
 
 
 
-## Unstable. Heavy lifting funcs.
+## Create Dataset Version 1.0. 
 
 def filenames2garlist(filenames):
   "takes list tuples [(raw-name, lab-name)] "
@@ -459,7 +484,9 @@ def build_trainingdata(pid=0):
   """)
   return res
 
-## Create Dataframe of Virtual Samples, then fill them in.
+
+
+## WIP. Create Dataframe of Virtual Samples, then fill them in.
 
 def build_trainingdata2(pid=0):
   P = pid2params(pid)
@@ -474,104 +501,161 @@ def build_trainingdata2(pid=0):
   _params = cpnet_data_specialization(info)
   for k in _params.__dict__.keys(): params.__dict__[k] = _params.__dict__[k]  
 
-
   image_names,ltps_name = isbiInfo_to_filenames(info)
   raw_names,lab_names = zip(*image_names)
   ltps  = load(ltps_name)
-  times = ltps.keys() if type(ltps) is dict else np.range(len(ltps))
+  times = ltps.keys() if type(ltps) is dict else np.arange(len(ltps))
   ltps  = [ltps[k] for k in times]
   imgFrame = DataFrame(dict(rawname=raw_names,labname=lab_names,pts=ltps,time=times))
   imgFrame['times2'] = imgFrame.rawname.apply(lambda x: int(re.search(r'(\d+)\.(tif|zar)', x).group(1)))
   N = len(image_names)
   imgFrame['shape']  = [info.shape] * N
 
-  imgFrame = imgFrame.iloc[::5]
+  ## subsample images to manage data size
+  ## PARAM
+  # imgFrame = imgFrame.iloc[::15]
 
   df = pandas.concat([virtualPatches(x, params) for x in imgFrame.iloc])
+  df['shape'] = df['ss_main'].apply(lambda ss: tuple(s.stop-s.start for s in ss))
+  df['npts']  = df['pts'].apply(len)
+  df['ss_startPt'] = df['ss_main'].apply(lambda ss: tuple(s.start for s in ss))
+
+  df['ptsRel'] = df['pts'] - df['ss_startPt']
+
+
+  print(f"""
+  Working on {info.isbiname} / {info.dataset}.
+  imgsize {imgFrame['shape'][0]}
+  
+  {df['shape'].describe()}
+  """)
+
+  N = len(df)
+  print(f"Full Size {N} -- {strDiskSizePatchFrame(df)}")
+
+  df = df[df.npts>0]
+  N = len(df)
+  print(f"Obj Only Size {N} -- {strDiskSizePatchFrame(df)}")
+
+  idx = np.linspace(0,len(df)-1, 100)
+  df  = df.iloc[idx]
+  N = len(df)
+  print(f"Subsampled Size {N} -- {strDiskSizePatchFrame(df)}")
+
+  df = df.sample(n=10)
+
+  # 
+  #  Now below we begin actually loading the data. This is the time consuming part.
+  # 
 
   tic = time()
-  
-  if params.sparse:
-    addRawLab(df,imgFrame,None)
-    df['target'] = df.apply(lambda x: dgen.place_gaussian_at_pts(x.pts,x.raw.shape,params.kern), axis=1)
-  else:
-    addRawLab(df,imgFrame,kern=params.kern)
-  
-  ## TODO: group by time and normalize ? or just during training ? 
-  
-  df['shape'] = df['lab'].apply(lambda x : x.shape)
+  params.imgNorm = not params.sparse
+  df = addRawLabTarget(df,imgFrame,params)
 
-  df['raw'] = df['raw'].apply(np.float16)
-  df['target'] = df['target'].apply(np.float16)
-  df['lab'] = df['lab'].apply(np.uint8)
+  df['raw']    = df['raw'].apply(   lambda x: zoom(x,params.zoom,order=1).astype(np.float16))
+  df['target'] = df['target'].apply(lambda x: zoom(x,params.zoom,order=1).astype(np.float16))
+  df['lab']    = df['lab'].apply(   lambda x: zoom(x,params.zoom,order=0).astype(np.uint8))
+
+  print("Done creating samples. Now save to disk.")
+
+  print("TIME: ", time()-tic)
 
   df.to_pickle(P.savedir_local / 'patchFrame.pkl')
-  print(df.describe())
   imgFrame.to_pickle(P.savedir_local / 'imgFrame.pkl')
+  idxs = np.linspace(0,len(df)-1,10).astype(int) ## evenly sample items
+  save(samples2pngSN(df.iloc[idxs].iloc), P.savedir_local / 'sample_pngs')
 
+def addRawLabTarget(patchFrame,imgFrame,params):
+  """
+  Load images from disk and crop out patch data.
+  """
 
+  def f(df):
+    time = df.name
+    imfr = imgFrame.loc[time]
 
+    raw = load(imfr['rawname'])
+    if params.imgNorm: raw = norm_percentile01(raw,2,99.4)
+    df['raw'] = [raw[ss].copy() for ss in df.ss_main]
+    if not params.imgNorm:
+      norm = lambda x: norm_percentile01(x,2,99.4)
+      df['raw'] = df['raw'].apply(norm)
 
+    lab = load(imfr['labname'])
+    df['lab'] = [lab[ss].copy() for ss in df.ss_main]
 
-def addRawLab(patchFrame,imgFrame,kern=None):
-  patchFrame['raw'] = None
-  patchFrame['lab'] = None
-  patchFrame['target'] = None
-  for row in imgFrame.iloc:
-    m = patchFrame['time']==row['time']
-    if not np.any(m): continue
-    print(row['time'])
+    if np.prod(raw.shape) < 2 * df['shape'].apply(np.prod).sum():
+      target = dgen.place_gaussian_at_pts(imfr['pts'], lab.shape, kern)
+      df['target'] = [target[ss].copy() for ss in df.ss_main]
+    else:
+      df['target'] = [dgen.place_gaussian_at_pts(x.ptsRel,x.raw.shape,params.kern) for x in df.iloc]
 
-    raw = load(row['rawname'])
-    patchFrame.loc[m,'raw'] = [raw[ss] for ss in patchFrame.loc[m,'outer']]
-    
-    lab = load(row['labname'])
-    patchFrame.loc[m,'lab'] = [lab[ss] for ss in patchFrame.loc[m,'outer']]
-    
-    if kern:
-      target = dgen.place_gaussian_at_pts(row['pts'],row['shape'],kern)
-      patchFrame.loc[m,'target'] = [target[ss] for ss in patchFrame.loc[m,'outer']]
+    return df
 
+  patchFrame = patchFrame.groupby('time').apply(f)
+  return patchFrame
 
+def get_slices2(pts, imshape, params):
 
-def get_slices1(pts, imshape, params):
-  ## subsample dataset. no overlapping patches.
-  patchsize = (np.array(params.patch) // params.zoom).astype(int)  
-  DD = int(8 // params.zoom[-1])
-  _ftile  = lambda end,length,border : dgen.tile1d_predict(end,length,border,divisible=DD) #tile1d_predict(end,length,border,divisible=8)
-  borders = (2,10,10)[-len(imshape):]
-  slices  = dgen.tile_multidim(imshape, patchsize, borders, f_singledim=_ftile) #, (4,10,10)[-raw.ndim:])
-  slices  = [SimpleNamespace(outer=x.a,inner=x.b,inner_rel=x.c) for x in slices]
-  return slices
+  patchsize = (np.array(params.patch) // params.zoom).astype(int)
+  slices  = dgen.tileND_random(imshape, (patchsize*1.1).astype(int), patchsize) #, (4,10,10)[-raw.ndim:])
+  # ipdb.set_trace()
+
+  return slices , 'inner'
 
 def virtualPatches(imgFrameRow, params):
   ifr = imgFrameRow
-  slices = get_slices1(ifr.pts,ifr['shape'],params)
-  res = dgen.find_points_within_patches3(ifr.pts, [x.inner for x in slices])
-  pts_per_slice = [ifr.pts[np.argwhere(res[:,i])[:,0]] for i in range(len(slices))]
+  slices, ss_main = get_slices2(ifr.pts,ifr['shape'],params)
+    
   df = DataFrame(
     dict(
       outer=[x.outer for x in slices],
       inner=[x.inner for x in slices],
       inner_rel=[x.inner_rel for x in slices],
-      pts=pts_per_slice)
+      )
     )
+  df['ss_main'] = df[ss_main] ## varies depending on get_slices()
   df['time'] = ifr.time
+
+  res = dgen.find_points_within_patches3(ifr.pts, df['ss_main'])
+  df['pts'] = [ifr.pts[np.argwhere(res[:,i])[:,0]] for i in range(len(slices))]
+  
   return df
 
 
+# def get_slices1(pts, imshape, params):
+#   ## subsample dataset. no overlapping patches.
+#   patchsize = (np.array(params.patch) // params.zoom).astype(int)  
+#   DD = int(8 // params.zoom[-1])
+#   _ftile  = lambda end,length,border : dgen.tile1d_predict(end,length,border,divisible=DD) #tile1d_predict(end,length,border,divisible=8)
+#   borders = (2,10,10)[-len(imshape):]
+#   slices  = dgen.tile_multidim(imshape, patchsize, borders, f_singledim=_ftile) #, (4,10,10)[-raw.ndim:])
+#   # slices  = [SimpleNamespace(outer=x.outer,inner=x.inner,inner_rel=x.inner_rel) for x in slices]
+#   return slices , 'outer'
 
 
-def filenames2garlist(filenames):
-  "takes list tuples [(raw-name, lab-name)] "
-  def f(a,b):
-    raw  = load(a)
-    lab  = load(b)
-    time = int(re.search(r'(\d+)\.(tif|zar)', a).group(1))
-    return SimpleNamespace(raw=raw,lab=lab,n_raw=a,n_lab=b,time=time)
-  garlist = [f(*x) for x in filenames]
-  return garlist
-  
+# def addRawLab(patchFrame,imgFrame,kern=None):
+#   patchFrame['raw'] = None
+#   patchFrame['lab'] = None
+#   patchFrame['target'] = None
+#   for row in imgFrame.iloc:
+#     m = patchFrame['time']==row['time']
+#     if not np.any(m): continue
+#     print(row['time'])
+
+#     ipdb.set_trace()
+
+#     raw = load(row['rawname'])
+#     patchFrame.loc[m,'raw'] = np.array([raw[ss] for ss in patchFrame.loc[m,'ss_main']], dtype=np.object)
+    
+#     lab = load(row['labname'])
+#     patchFrame.loc[m,'lab'] = np.array([lab[ss] for ss in patchFrame.loc[m,'ss_main']], dtype=np.object)
+    
+#     if kern:
+#       target = dgen.place_gaussian_at_pts(row['pts'],row['shape'],kern)
+#       patchFrame.loc[m,'target'] = np.array([target[ss] for ss in patchFrame.loc[m,'ss_main']], dtype=np.object)
+
+
 ## Experimental. Highly Unstable.
 
 def get_dataset_balance():
@@ -624,22 +708,8 @@ def get_all_dataset_sizes():
   # print(sorted(sizes) / sizes.min())
   return res
 
-def bytes2string(nbytes):
-  if nbytes < 10**3:  return f"{nbytes} B"
-  if nbytes < 10**6:  return f"{nbytes/10**3} KB"
-  if nbytes < 10**9:  return f"{nbytes/10**6} MB"
-  if nbytes < 10**12: return f"{nbytes/10**9} GB"
 
-def file_size(root):
-  "works for files or directories (recursive)"
-  root = Path(root)
-  # ipdb.set_trace()
-  if root.is_dir():
-    # https://stackoverflow.com/questions/1392413/calculating-a-directorys-size-using-python/1392549
-    return sum(f.stat().st_size for f in root.glob('**/*') if f.is_file())
-  else:
-    # https://stackoverflow.com/questions/2104080/how-can-i-check-file-size-in-python
-    return os.stat(fname).st_size
+
 
 def get_all_fullsamples_sizes():
   def f(pid):

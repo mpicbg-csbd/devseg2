@@ -303,7 +303,7 @@ def train(pid=0):
   net.load_state_dict(torch.load(savedir_local / f'm/best_weights_latest.pt'))
   history = load(savedir_local / 'history.pkl')
 
-  history = train_net(net,mse_loss,validate,trainloader,valiloader,N_vali=len(valiloader),N_train=len(trainloader),N_epochs=40,history=None,pred_glances=pred_glances,savedir=savedir_local)
+  history = train_net(net,mse_loss,validate,trainloader,valiloader,N_vali=len(valiloader),N_train=len(trainloader),N_epochs=20,history=history,pred_glances=pred_glances,savedir=savedir_local)
 
   toc = time()
   print("TRAIN TIME:", toc-tic)
