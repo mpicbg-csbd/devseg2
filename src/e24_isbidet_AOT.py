@@ -176,6 +176,21 @@ def strDiskSizePatchFrame(df):
   _totsize = (2+1+2) * df['shape'].apply(np.prod).sum()
   return bytes2string(_totsize)
 
+def myzoom(img,scale):
+  img=img[...]
+  _dt = img.dtype
+  if img.ndim==2 and 'int' in str(_dt):
+    img = zoom(img,scale,order=0).astype(_dt)
+  if img.ndim==2 and 'float' in str(_dt):
+    img = zoom(img,scale,order=1).astype(_dt)
+  if img.ndim==3 and 'int' in str(_dt):
+    img = gputools.scale(img,scale,interpolation='nearest').astype(_dt)
+  if img.ndim==3 and 'float' in str(_dt):
+    img = gputools.scale(img,scale,interpolation='linear').astype(_dt)
+  return img
+
+
+
 
 ## stable. job-specific utility funcs.
 
@@ -214,6 +229,7 @@ def isbiInfo_to_filenames(info):
   # if info.index in [6,11,12,13,14,15,18]:
   n_raw = n_raw[:-4].replace("rawdata","rawdata/zarr") + ".zarr"
   n_lab = n_lab[:-4].replace("rawdata","rawdata/zarr") + ".zarr"
+
   filenames_raw = [(n_raw.format(time=i),n_lab.format(time=i)) for i in range(info.start,info.stop)]
   filename_ltps = f"/projects/project-broaddus/rawdata/{info.myname}/traj/{info.isbiname}/{info.dataset}_traj.pkl"
   return filenames_raw, filename_ltps
@@ -243,6 +259,7 @@ def norm_samples_raw(fullsamples):
 
 
 
+
 ## infrequent updates. parameter memory.
 
 def init_params(ndim):
@@ -259,15 +276,15 @@ def init_params(ndim):
   P.patch = np.array(P.patch)
   return P
 
-def cpnet_data_specialization(info):
+def cpnet_ISBIdata_specialization(info):
   isbiname = info.isbiname
   p = SimpleNamespace()
 
-  if isbiname in ["Fluo-N3DH-CE", "Fluo-C3DH-A549", "Fluo-C3DH-A549-SIM", "Fluo-N3DH-CHO", "Fluo-N3DH-SIM+", ]:
-    p.zoom = {3:(1,0.5,0.5), 2:(0.5,0.5)}[info.ndim]
+  if isbiname in ["Fluo-N3DH-CE", "Fluo-C3DH-A549", "Fluo-C3DH-A549-SIM", "Fluo-N3DH-CHO", "Fluo-N3DH-SIM+"]:
+    p.zoom  = {3:(1,0.5,0.5), 2:(0.5,0.5)}[info.ndim]
   if isbiname=="Fluo-N3DL-TRIF":
-    p.kern = [3,3,3]
-    p.zoom = (0.5,0.5,0.5)
+    p.kern  = [3,3,3]
+    p.zoom  = (0.5,0.5,0.5)
     p.patch = (64,64,64)
   if isbiname=="Fluo-C3DH-H157":
     p.zoom = (1/4,1/8,1/8)
@@ -283,7 +300,11 @@ def cpnet_data_specialization(info):
     # p.kern = [1,3,3]
     # cfig.bg_weight_multiplier=0.0
     # cfig.weight_decay = False
-  p.sparse  = True if info.isbiname in ["Fluo-N3DL-DRO", "Fluo-N3DL-TRIC", "Fluo-N3DL-TRIF",] else False
+  
+  ## Sparsely Annotated datasets get: loss masking, patch-wise normalization and target creation (for speed), 
+  p.sparse = True if info.isbiname in ["Fluo-N3DL-DRO", "Fluo-N3DL-TRIC", "Fluo-N3DL-TRIF",] else False
+  ## Big datasets get patch-wise normalization and target creation, but no loss masking
+  p.toobig = True if info.isbiname in ["Fluo-C3DH-H157", "Fluo-N3DL-TRIF"] else False
   return p
 
 
@@ -422,7 +443,7 @@ def build_trainingdata(pid=0):
 
   ## initial patch shit
   params  = init_params(info.ndim)
-  _params = cpnet_data_specialization(info)
+  _params = cpnet_ISBIdata_specialization(info)
   for k in _params.__dict__.keys(): params.__dict__[k] = _params.__dict__[k]
 
   ## automatic patch sizing
@@ -485,7 +506,6 @@ def build_trainingdata(pid=0):
   return res
 
 
-
 ## WIP. Create Dataframe of Virtual Samples, then fill them in.
 
 def build_trainingdata2(pid=0):
@@ -498,11 +518,12 @@ def build_trainingdata2(pid=0):
     """)
 
   params  = init_params(info.ndim)
-  _params = cpnet_data_specialization(info)
+  _params = cpnet_ISBIdata_specialization(info)
   for k in _params.__dict__.keys(): params.__dict__[k] = _params.__dict__[k]  
 
   image_names,ltps_name = isbiInfo_to_filenames(info)
   raw_names,lab_names = zip(*image_names)
+  
   ltps  = load(ltps_name)
   times = ltps.keys() if type(ltps) is dict else np.arange(len(ltps))
   ltps  = [ltps[k] for k in times]
@@ -515,105 +536,105 @@ def build_trainingdata2(pid=0):
   ## PARAM
   # imgFrame = imgFrame.iloc[::15]
 
+  # ipdb.set_trace()
+
+  earlyZoom = not params.sparse
+
+  if earlyZoom:
+    f = lambda x: (x*np.array(params.zoom)).astype(np.uint32)
+    imgFrame['shape'] = imgFrame['shape'].apply(f)
+    imgFrame['pts'] = imgFrame['pts'].apply(f)
+
   df = pandas.concat([virtualPatches(x, params) for x in imgFrame.iloc])
   df['shape'] = df['ss_main'].apply(lambda ss: tuple(s.stop-s.start for s in ss))
   df['npts']  = df['pts'].apply(len)
   df['ss_startPt'] = df['ss_main'].apply(lambda ss: tuple(s.start for s in ss))
-
   df['ptsRel'] = df['pts'] - df['ss_startPt']
 
+  if not earlyZoom: print("!!!All Sizes Before Rescaling")
+
+  if params.sparse: df = df[df.npts>0]
 
   print(f"""
-  Working on {info.isbiname} / {info.dataset}.
-  imgsize {imgFrame['shape'][0]}
-  
-  {df['shape'].describe()}
+  orig img shape   -- {info.shape}
+  zoom factor      -- {params.zoom}
+  new  img shape   -- {imgFrame['shape'][0]}
+  orig patch shape -- {params.patch}
   """)
+  describe_virtual_samples(df)
 
-  N = len(df)
-  print(f"Full Size {N} -- {strDiskSizePatchFrame(df)}")
 
-  df = df[df.npts>0]
-  N = len(df)
-  print(f"Obj Only Size {N} -- {strDiskSizePatchFrame(df)}")
+  ipdb.set_trace()
 
-  idx = np.linspace(0,len(df)-1, 100)
-  df  = df.iloc[idx]
-  N = len(df)
-  print(f"Subsampled Size {N} -- {strDiskSizePatchFrame(df)}")
-
-  df = df.sample(n=10)
-
-  # 
-  #  Now below we begin actually loading the data. This is the time consuming part.
-  # 
 
   tic = time()
-  params.imgNorm = not params.sparse
-  df = addRawLabTarget(df,imgFrame,params)
+  f = lambda timegroup : processOneTimepoint(timegroup.name, timegroup, imgFrame, params)
+  df = df.groupby('time').apply(f)
 
-  df['raw']    = df['raw'].apply(   lambda x: zoom(x,params.zoom,order=1).astype(np.float16))
-  df['target'] = df['target'].apply(lambda x: zoom(x,params.zoom,order=1).astype(np.float16))
-  df['lab']    = df['lab'].apply(   lambda x: zoom(x,params.zoom,order=0).astype(np.uint8))
-
-  print("Done creating samples. Now save to disk.")
-
-  print("TIME: ", time()-tic)
+  print("PATCH CREATION TIME: ", time()-tic)
+  print("Done creating samples. Now save to disk...")
 
   df.to_pickle(P.savedir_local / 'patchFrame.pkl')
   imgFrame.to_pickle(P.savedir_local / 'imgFrame.pkl')
   idxs = np.linspace(0,len(df)-1,10).astype(int) ## evenly sample items
   save(samples2pngSN(df.iloc[idxs].iloc), P.savedir_local / 'sample_pngs')
 
-def addRawLabTarget(patchFrame,imgFrame,params):
+
+def processOneTimepoint(time,patchFrame,imgFrame,params):
   """
   Load images from disk and crop out patch data.
   """
+  print(f"Processing {time} ...",end="\r")
+  df = patchFrame
+  imfr = imgFrame.loc[time]
 
-  def f(df):
-    time = df.name
-    imfr = imgFrame.loc[time]
+  raw = load(imfr['rawname'])
+  lab = load(imfr['labname'])
 
-    raw = load(imfr['rawname'])
-    if params.imgNorm: raw = norm_percentile01(raw,2,99.4)
-    df['raw'] = [raw[ss].copy() for ss in df.ss_main]
-    if not params.imgNorm:
-      norm = lambda x: norm_percentile01(x,2,99.4)
-      df['raw'] = df['raw'].apply(norm)
-
-    lab = load(imfr['labname'])
+  if not params.sparse:
+    raw = myzoom(raw,params.zoom)
+    lab = myzoom(lab,params.zoom)
+    raw = norm_percentile01(raw,2,99.4)
+    target = dgen.place_gaussian_at_pts(imfr['pts'], raw.shape, params.kern)
+    df['raw']    = [raw[ss].copy().astype(np.float16) for ss in df.ss_main]
+    df['lab']    = [lab[ss].copy().astype(np.float16) for ss in df.ss_main]
+    df['target'] = [target[ss].copy().astype(np.uint8) for ss in df.ss_main]
+  else:
+    _raw = [raw[ss].copy() for ss in df.ss_main]
+    p0,p1 = np.percentile(np.array([r.flatten() for r in _raw]), 2,99.4) ## combine all pixels for stats
+    norm = lambda x: norm_affine01(x,p0,p1)
+    df['raw'] = [norm(r) for r in _raw]
     df['lab'] = [lab[ss].copy() for ss in df.ss_main]
+    df['target'] = [dgen.place_gaussian_at_pts(x.ptsRel,x.raw.shape,params.kern) for x in df.iloc]
+    df['raw']    = df['raw'].apply(   lambda x: myzoom(x,params.zoom).astype(np.float16))
+    df['target'] = df['target'].apply(lambda x: myzoom(x,params.zoom).astype(np.float16))
+    df['lab']    = df['lab'].apply(   lambda x: myzoom(x,params.zoom).astype(np.uint8))
 
-    if np.prod(raw.shape) < 2 * df['shape'].apply(np.prod).sum():
-      target = dgen.place_gaussian_at_pts(imfr['pts'], lab.shape, kern)
-      df['target'] = [target[ss].copy() for ss in df.ss_main]
-    else:
-      df['target'] = [dgen.place_gaussian_at_pts(x.ptsRel,x.raw.shape,params.kern) for x in df.iloc]
+  return df
 
-    return df
 
-  patchFrame = patchFrame.groupby('time').apply(f)
-  return patchFrame
+def conform_szPatch(sz_img,sz_patch,divisible=8):
+  """
+  Ensure that patch size and box size are smaller than image and that patch_size is divisible by 8
+  """
+  sz_patch = np.minimum(sz_patch, sz_img).astype(int)
+  sz_patch = (np.floor(sz_patch/divisible)*divisible).astype(int)
+  sz_box   = np.minimum(sz_patch*1.2, sz_img).astype(int)
+  return sz_patch,sz_box
 
-def get_slices2(pts, imshape, params):
+def get_slices2(pts, sz_img, patch):
 
-  patchsize = (np.array(params.patch) // params.zoom).astype(int)
-  slices  = dgen.tileND_random(imshape, (patchsize*1.1).astype(int), patchsize) #, (4,10,10)[-raw.ndim:])
-  # ipdb.set_trace()
+  sz_patch,sz_box = conform_szPatch(sz_img, patch, divisible=(1,8,8)[-len(sz_img):])
+  slices  = dgen.tileND_random(sz_img, sz_box, sz_patch) #, (4,10,10)[-raw.ndim:])
 
   return slices , 'inner'
 
 def virtualPatches(imgFrameRow, params):
   ifr = imgFrameRow
-  slices, ss_main = get_slices2(ifr.pts,ifr['shape'],params)
-    
-  df = DataFrame(
-    dict(
-      outer=[x.outer for x in slices],
-      inner=[x.inner for x in slices],
-      inner_rel=[x.inner_rel for x in slices],
-      )
-    )
+
+  slices, ss_main = get_slices2(ifr['pts'], ifr['shape'], params.patch)
+
+  df = DataFrame([x.__dict__ for x in slices])
   df['ss_main'] = df[ss_main] ## varies depending on get_slices()
   df['time'] = ifr.time
 
@@ -622,38 +643,37 @@ def virtualPatches(imgFrameRow, params):
   
   return df
 
+def describe_virtual_samples(df):
+  sizes  = Counter(df['shape'])
+  counts = Counter(df['npts'])
 
-# def get_slices1(pts, imshape, params):
-#   ## subsample dataset. no overlapping patches.
-#   patchsize = (np.array(params.patch) // params.zoom).astype(int)  
-#   DD = int(8 // params.zoom[-1])
-#   _ftile  = lambda end,length,border : dgen.tile1d_predict(end,length,border,divisible=DD) #tile1d_predict(end,length,border,divisible=8)
-#   borders = (2,10,10)[-len(imshape):]
-#   slices  = dgen.tile_multidim(imshape, patchsize, borders, f_singledim=_ftile) #, (4,10,10)[-raw.ndim:])
-#   # slices  = [SimpleNamespace(outer=x.outer,inner=x.inner,inner_rel=x.inner_rel) for x in slices]
-#   return slices , 'outer'
+  sortedcounts = sorted(counts.keys())
+  ellipsis = "..." if len(sortedcounts) >= 10 else ""
+  sortedcounts = sortedcounts[:10]
+
+  r1 = ("{:>6}"*len(sortedcounts)).format(*[str(k) for k in sortedcounts])
+  r2 = ("{:>6}"*len(sortedcounts)).format(*[str(counts[k]) for k in sortedcounts])
+
+  print(f"""
+  Contains {len(df)} samples with {df.npts.sum()} total objects from {len(df['time'].unique())} timepoints
+  Patch Sizes --  {sizes}
+  --- Object Counts per Patch ---
+  N objects: {r1} {ellipsis} 
+  N patches: {r2} {ellipsis} 
+  Total size: {strDiskSizePatchFrame(df)}
+  """)
 
 
-# def addRawLab(patchFrame,imgFrame,kern=None):
-#   patchFrame['raw'] = None
-#   patchFrame['lab'] = None
-#   patchFrame['target'] = None
-#   for row in imgFrame.iloc:
-#     m = patchFrame['time']==row['time']
-#     if not np.any(m): continue
-#     print(row['time'])
+def get_slices1(pts, imshape, params):
+  ## subsample dataset. no overlapping patches.
+  patchsize = (np.array(params.patch) // params.zoom).astype(int)  
+  DD = int(8 // params.zoom[-1])
+  _ftile  = lambda end,length,border : dgen.tile1d_predict(end,length,border,divisible=DD) #tile1d_predict(end,length,border,divisible=8)
+  borders = (2,10,10)[-len(imshape):]
+  slices  = dgen.tile_multidim(imshape, patchsize, borders, f_singledim=_ftile) #, (4,10,10)[-raw.ndim:])
+  # slices  = [SimpleNamespace(outer=x.outer,inner=x.inner,inner_rel=x.inner_rel) for x in slices]
+  return slices , 'outer'
 
-#     ipdb.set_trace()
-
-#     raw = load(row['rawname'])
-#     patchFrame.loc[m,'raw'] = np.array([raw[ss] for ss in patchFrame.loc[m,'ss_main']], dtype=np.object)
-    
-#     lab = load(row['labname'])
-#     patchFrame.loc[m,'lab'] = np.array([lab[ss] for ss in patchFrame.loc[m,'ss_main']], dtype=np.object)
-    
-#     if kern:
-#       target = dgen.place_gaussian_at_pts(row['pts'],row['shape'],kern)
-#       patchFrame.loc[m,'target'] = np.array([target[ss] for ss in patchFrame.loc[m,'ss_main']], dtype=np.object)
 
 
 ## Experimental. Highly Unstable.
@@ -671,6 +691,7 @@ def get_dataset_balance():
     sample object Counts: 0:{counts[0]} nonzero:{sum(counts)-counts[0]}
     """)
 
+@DeprecationWarning
 def get_all_dataset_sizes():
   def f(pid):
     _params = pid2params(pid)
@@ -709,50 +730,39 @@ def get_all_dataset_sizes():
   return res
 
 
+def describe_all_fullsamples():
+  for pid in range(19*2): describe_fullsamples_from_pid(pid)
 
+def describe_fullsamples_from_pid(pid):
+  _params = pid2params(pid)
+  myname = _params.info.myname
+  isbiname = _params.info.isbiname
+  dataset = _params.info.dataset
+  ltps = load(f"/projects/project-broaddus/rawdata/{myname}/traj/{isbiname}/{dataset}_traj.pkl")
+  if type(ltps) is dict: ltps = list(ltps.values())
+  npts = [len(x) for x in ltps]
 
-def get_all_fullsamples_sizes():
-  def f(pid):
-    _params = pid2params(pid)
-    myname = _params.info.myname
-    isbiname = _params.info.isbiname
-    dataset = _params.info.dataset
-    ltps = load(f"/projects/project-broaddus/rawdata/{myname}/traj/{isbiname}/{dataset}_traj.pkl")
-    if type(ltps) is dict: ltps = list(ltps.values())
-    npts = [len(x) for x in ltps]
+  fname = _params.savedir_local / "fullsamples2"
+  fullsamples = load(fname)
+  print(f'    Pid {pid} Isbiname {isbiname} / {dataset}')
+  describe_samples(fullsamples.samples)
 
+def describe_samples(samples):
+  sizes  = Counter([x.raw.shape for x in samples])
+  counts = Counter([s.pts.shape[0] for s in samples])
 
-    fname = _params.savedir_local / "fullsamples2"
-    fullsamples = load(fname)
-    sizes  = Counter([x.raw.shape for x in fullsamples.samples])
-    counts = Counter([s.pts.shape[0] for s in fullsamples.samples])
+  sortedcounts = sorted(counts.keys())[:10]
+  r1 = ("{:>6}"*len(sortedcounts)).format(*[str(k) for k in sortedcounts])
+  r2 = ("{:>6}"*len(sortedcounts)).format(*[str(counts[k]) for k in sortedcounts])
+  # ipdb.set_trace()
 
-    sortedcounts = sorted(counts.keys())[:10]
-    r1 = ("{:>6}"*len(sortedcounts)).format(*[str(k) for k in sortedcounts])
-    r2 = ("{:>6}"*len(sortedcounts)).format(*[str(counts[k]) for k in sortedcounts])
-    # ipdb.set_trace()
-
-    print(f"""
-    Pid {pid} Isbiname {isbiname} / {dataset}
-    contains {len(fullsamples.samples)} samples with sizes {sizes}
-    --- Object Counts per Patch ---
-    N objects: {r1} ... 
-    N patches: {r2} ... 
-    total size: {bytes2string(file_size(fname))}
-    """)
-
-    # return s
-    # return dict({k:locals()[k] for k in set(locals()) - {'_params','npts'}})
-    # return dict(**locals())
-    # return dict(n_pixels=n_pixels, n_total_objects=n_total_objects, n_pix_per_obj=n_pix_per_obj)
-    # return SimpleNamespace(n_imgs=n_imgs,n_pix_per_img=n_pix_per_img,n_pixels=n_pixels,myname=myname,isbiname=isbiname,dataset=dataset,npts=npts,)
-  for i in range(19*2): f(i)
-  # for i in [18]: f(i)
-  # res = pandas.DataFrame([f(i) for i in range(19*2)])
-  # sizes = np.array([x.n_pix_per_img for x in res])
-  # print(sorted(sizes) / sizes.min())
-  # return res  
-
+  print(f"""
+  contains {len(samples)} samples with sizes {sizes}
+  --- Object Counts per Patch ---
+  N objects: {r1} ... 
+  N patches: {r2} ... 
+  total size: {bytes2string(file_size(fname))}
+  """)
 
 
 

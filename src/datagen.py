@@ -203,7 +203,7 @@ def tile1d_random(sz_container,sz_outer,sz_inner):
   outer_ends    = borderpoints[1:]
 
   sz_outer = outer_ends - outer_starts
-  inner_starts = np.random.randint(outer_starts, high=outer_ends-sz_inner)
+  inner_starts = np.random.randint(outer_starts, high=outer_ends-sz_inner+1)
   inner_ends = inner_starts+sz_inner
 
   relative_inner_start = inner_starts - outer_starts
