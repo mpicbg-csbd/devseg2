@@ -186,7 +186,7 @@ def myzoom(img,scale):
   if img.ndim==3 and 'int' in str(_dt):
     img = gputools.scale(img,scale,interpolation='nearest').astype(_dt)
   if img.ndim==3 and 'float' in str(_dt):
-    img = gputools.scale(img,scale,interpolation='linear').astype(_dt)
+    img = gputools.scale(img.astype(np.float32),scale,interpolation='linear').astype(_dt)
   return img
 
 
@@ -430,6 +430,7 @@ def gar2samples_sampleFirst(gar, nsamples, params):
 
   return [f(ss) for ss in slices]
 
+@DeprecationWarning
 def build_trainingdata(pid=0):
 
   P = pid2params(pid)
@@ -531,52 +532,69 @@ def build_trainingdata2(pid=0):
   imgFrame['times2'] = imgFrame.rawname.apply(lambda x: int(re.search(r'(\d+)\.(tif|zar)', x).group(1)))
   N = len(image_names)
   imgFrame['shape']  = [info.shape] * N
-
-  ## subsample images to manage data size
-  ## PARAM
-  # imgFrame = imgFrame.iloc[::15]
+  imgFrame['npts']   = imgFrame['pts'].apply(len)
 
   # ipdb.set_trace()
 
-  earlyZoom = not params.sparse
+  # imgFrame = imgFrame.iloc[::3]   ## subsample images to manage data size ## MYPARAM
 
-  if earlyZoom:
-    f = lambda x: (x*np.array(params.zoom)).astype(np.uint32)
-    imgFrame['shape'] = imgFrame['shape'].apply(f)
-    imgFrame['pts'] = imgFrame['pts'].apply(f)
+  imgFrame['shape_rescaled'] = imgFrame['shape'].apply(lambda x: tuple((x*np.array(params.zoom)).astype(np.uint32)))
+  imgFrame['zoom_effective'] = imgFrame['shape_rescaled'] / imgFrame['shape'].apply(np.array)
+  def zoom_pts(pts,scale):
+    """
+    rescale pts to be consistent with scipy.ndimage.zoom(img,scale)
+    """
+    # assert type(pts) is np.ndarray
+    pts = pts+0.5                         ## move origin from middle of first bin to left boundary (array index convention)
+    pts = pts * scale                     ## rescale
+    pts = pts-0.5                         ## move origin back to middle of first bin
+    pts = np.round(pts).astype(np.uint32) ## binning
+    return pts
+  
+  imgFrame['pts_rescaled']   = imgFrame.apply(lambda x: zoom_pts(x.pts, x.zoom_effective), axis=1) ## WARNING: consistent img + pts rescaling is nontrivial!
 
-  df = pandas.concat([virtualPatches(x, params) for x in imgFrame.iloc])
+  def vp(time,pts,sz_img):
+    df = virtualPatches(pts, sz_img, params.patch)
+    df['time'] = time
+    return df
+
+  df = pandas.concat([vp(time,pts,sz_img) for time,pts,sz_img in imgFrame[['time','pts_rescaled','shape_rescaled']].iloc])
   df['shape'] = df['ss_main'].apply(lambda ss: tuple(s.stop-s.start for s in ss))
   df['npts']  = df['pts'].apply(len)
   df['ss_startPt'] = df['ss_main'].apply(lambda ss: tuple(s.start for s in ss))
   df['ptsRel'] = df['pts'] - df['ss_startPt']
 
-  if not earlyZoom: print("!!!All Sizes Before Rescaling")
-
-  if params.sparse: df = df[df.npts>0]
+  if params.sparse: df = df[df.npts>0].reset_index()
 
   print(f"""
+  times considered -- {repr(list(imgFrame.times2))[:50]}
   orig img shape   -- {info.shape}
   zoom factor      -- {params.zoom}
-  new  img shape   -- {imgFrame['shape'][0]}
+  new  img shape   -- {Counter(imgFrame['shape_rescaled'])}
   orig patch shape -- {params.patch}
+  actual patch sha -- {Counter(df['shape'])}
+  pixel fraction   -- {df['shape'].apply(np.prod).sum() / (imgFrame['shape_rescaled'].apply(np.prod).sum())}
+  object fraction  -- {df['npts'].sum()} / {imgFrame['npts'].sum()} ({df['npts'].sum() / imgFrame['npts'].sum()})
   """)
   describe_virtual_samples(df)
 
+  # ipdb.set_trace()
+  # return
+  # df = df.sample(n=4)
 
   ipdb.set_trace()
-
 
   tic = time()
   f = lambda timegroup : processOneTimepoint(timegroup.name, timegroup, imgFrame, params)
   df = df.groupby('time').apply(f)
+  print("Total patch creation time: ", time()-tic)
 
-  print("PATCH CREATION TIME: ", time()-tic)
-  print("Done creating samples. Now save to disk...")
+  save(params, P.savedir_local / 'params.pkl')
+  # ipdb.set_trace()
 
   df.to_pickle(P.savedir_local / 'patchFrame.pkl')
   imgFrame.to_pickle(P.savedir_local / 'imgFrame.pkl')
-  idxs = np.linspace(0,len(df)-1,10).astype(int) ## evenly sample items
+  idxs = np.linspace(0,len(df)-1,min(len(df),10)).astype(int) ## evenly sample items
   save(samples2pngSN(df.iloc[idxs].iloc), P.savedir_local / 'sample_pngs')
 
 
@@ -593,22 +611,25 @@ def processOneTimepoint(time,patchFrame,imgFrame,params):
 
   if not params.sparse:
     raw = myzoom(raw,params.zoom)
-    lab = myzoom(lab,params.zoom)
+    lab = myzoom(lab,params.zoom) ## some thin annotations may disappear!
     raw = norm_percentile01(raw,2,99.4)
-    target = dgen.place_gaussian_at_pts(imfr['pts'], raw.shape, params.kern)
+    target = dgen.place_gaussian_at_pts(imfr['pts_rescaled'], raw.shape, params.kern)
     df['raw']    = [raw[ss].copy().astype(np.float16) for ss in df.ss_main]
-    df['lab']    = [lab[ss].copy().astype(np.float16) for ss in df.ss_main]
-    df['target'] = [target[ss].copy().astype(np.uint8) for ss in df.ss_main]
+    df['lab']    = [lab[ss].copy().astype(np.uint8) for ss in df.ss_main]
+    df['target'] = [target[ss].copy().astype(np.float16) for ss in df.ss_main]
   else:
-    _raw = [raw[ss].copy() for ss in df.ss_main]
-    p0,p1 = np.percentile(np.array([r.flatten() for r in _raw]), 2,99.4) ## combine all pixels for stats
+    # border = (6,6,6)
+    ss_rescaled = [tuple(slice(floor(s.start/z),floor(s.stop/z)) for s,z in zip(ss,params.zoom)) for ss in df.ss_main]
+    _raw = [raw[ss].copy() for ss in ss_rescaled]
+    p0,p1 = np.percentile(np.array([r.flatten() for r in _raw]), [2,99.4]) ## combine all pixels for stats
     norm = lambda x: norm_affine01(x,p0,p1)
     df['raw'] = [norm(r) for r in _raw]
-    df['lab'] = [lab[ss].copy() for ss in df.ss_main]
-    df['target'] = [dgen.place_gaussian_at_pts(x.ptsRel,x.raw.shape,params.kern) for x in df.iloc]
+    df['lab'] = [lab[ss].copy() for ss in ss_rescaled]
     df['raw']    = df['raw'].apply(   lambda x: myzoom(x,params.zoom).astype(np.float16))
-    df['target'] = df['target'].apply(lambda x: myzoom(x,params.zoom).astype(np.float16))
     df['lab']    = df['lab'].apply(   lambda x: myzoom(x,params.zoom).astype(np.uint8))
+    # ipdb.set_trace()
+    df['target'] = [dgen.place_gaussian_at_pts(x.ptsRel,x.raw.shape,params.kern).astype(np.float16) for x in df.iloc]
+    # df['target'] = df['target'].apply(lambda x: myzoom(x,params.zoom).astype(np.float16))
 
   return df
 
@@ -622,25 +643,24 @@ def conform_szPatch(sz_img,sz_patch,divisible=8):
   sz_box   = np.minimum(sz_patch*1.2, sz_img).astype(int)
   return sz_patch,sz_box
 
-def get_slices2(pts, sz_img, patch):
+def get_slices2(pts, sz_img, sz_patch):
 
-  sz_patch,sz_box = conform_szPatch(sz_img, patch, divisible=(1,8,8)[-len(sz_img):])
-  slices  = dgen.tileND_random(sz_img, sz_box, sz_patch) #, (4,10,10)[-raw.ndim:])
+  sz_patch_resolved,sz_box = conform_szPatch(sz_img, sz_patch, divisible=(1,8,8)[-len(sz_img):])
+  slices  = dgen.tileND_random(sz_img, sz_box, sz_patch_resolved) #, (4,10,10)[-raw.ndim:])
 
   return slices , 'inner'
 
-def virtualPatches(imgFrameRow, params):
-  ifr = imgFrameRow
-
-  slices, ss_main = get_slices2(ifr['pts'], ifr['shape'], params.patch)
+def virtualPatches(pts, sz_img, sz_patch):
+  slices, ss_main = get_slices2(pts, sz_img, sz_patch)
 
   df = DataFrame([x.__dict__ for x in slices])
   df['ss_main'] = df[ss_main] ## varies depending on get_slices()
-  df['time'] = ifr.time
 
-  res = dgen.find_points_within_patches3(ifr.pts, df['ss_main'])
-  df['pts'] = [ifr.pts[np.argwhere(res[:,i])[:,0]] for i in range(len(slices))]
-  
+  res = dgen.find_points_within_patches3(pts, df['ss_main'])
+  df['pts'] = [pts[np.argwhere(res[:,i])[:,0]] for i in range(len(slices))]
+
+  if pts.shape != df['pts'].iloc[0].shape: ipdb.set_trace()
+
   return df
 
 def describe_virtual_samples(df):
