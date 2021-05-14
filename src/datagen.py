@@ -22,12 +22,12 @@ from skimage.morphology import thin, binary_opening
 
 ## targets
 
-def pts2target_gaussian(list_of_pts,sh,sigmas):
-  target = np.array([place_gaussian_at_pts(pts,sh,sigmas) for pts in list_of_pts])
-  return target
+# def pts2target_gaussian(list_of_pts,sh,sigmas):
+#   target = np.array([place_gaussian_at_pts(pts,sh,sigmas) for pts in list_of_pts])
+#   return target
 
-def pts2target_gaussian_sigmalist(list_of_pts,sh,list_of_sigmas):
-  return np.array([pts2target_gaussian([x],sh,sig)[0] for x,sig in zip(list_of_pts,list_of_sigmas)])
+# def pts2target_gaussian_sigmalist(list_of_pts,sh,list_of_sigmas):
+#   return np.array([pts2target_gaussian([x],sh,sig)[0] for x,sig in zip(list_of_pts,list_of_sigmas)])
 
 
 def mantrack2pts(mantrack): return np.array([r.centroid for r in regionprops(mantrack)],np.int)
@@ -112,12 +112,9 @@ def find_points_within_patches2(points, patches):
 
   return res
 
-
-
 def find_points_within_patches3(points,patches):
   _patches = np.array([[(x.start,x.stop) for x in s] for s in patches])
   return jit_find_points_within_patches3(points,_patches)
-
 
 @jit(nopython=True)
 def jit_find_points_within_patches3(points, patches):
@@ -140,7 +137,6 @@ def jit_find_points_within_patches3(points, patches):
 
   return res
 
-
 def test_findinpoints():
   points = np.random.randint(0, 100,  size=(100,1))
   points = np.r_[5:100:10].reshape([10,1])
@@ -151,7 +147,7 @@ def test_findinpoints():
   res = find_points_within_patches3(points, patches)
 
 
-
+## Tiling for training and prediction
 
 
 def tile1d(end,length,border):
@@ -182,7 +178,6 @@ def tile1d(end,length,border):
   res = np.array([_input,_container,_patch,]).T
   res = [SimpleNamespace(a=x[0],b=x[1],c=x[2]) for x in res]
   return res
-
 
 def tile1d_random(sz_container,sz_outer,sz_inner):
   """
@@ -234,8 +229,6 @@ def tileND_random(img_shape,outer_shape,inner_shape,):
   r = [f(s) for s in r]
   return r
 
-
-
 def tile1d_predict(end,length,border,divisible=8):
   """
   The input array and target container are the same size.
@@ -247,21 +240,27 @@ def tile1d_predict(end,length,border,divisible=8):
   inner = length-2*border
   
   ## enforce roughly equally sized "main" region with max of "length"
-  n_patches = ceil(end/(length+2*border))
-  n_patches = max(n_patches,2)
+  # n_patches = ceil(end/(length+2*border))
+  # n_patches = max(n_patches,2)
 
   DD = divisible
 
-  if length > end:
+  if length >= end and end%DD==0:
     n_patches=1
     length=end ## but only used in calculating n_patches
-  if end <= DD:
-    n_patches=1
-    length=end ## but only used in calculating n_patches
+  else:
+    n_patches = max(ceil(end/(length+2*border)),2)
+
+  # ## should be restricted only to Z-dimension... because no pooling along this dimension.
+  # if end <= DD:
+  #   n_patches=1
+  #   length=end ## but only used in calculating n_patches
 
   borderpoints  = np.linspace(0,end,n_patches+1).astype(np.int)
   target_starts = borderpoints[:-1]
   target_ends   = borderpoints[1:]
+
+  # ipdb.set_trace()
 
   input_starts = target_starts - border; input_starts[0]=0  ## no extra context on image border
   input_ends = target_ends + border; input_ends[-1]=end     ## no extra context on image border
@@ -291,7 +290,8 @@ def tile1d_predict(end,length,border,divisible=8):
 def tile_multidim(img_shape,patch_shape,border_shape=None,f_singledim=tile1d_predict):
   "generates all the patch coords for iterating over large dims.  ## list of coords. each coords is Dx4. "
   if border_shape is None: border_shape = (0,)*len(img_shape)
-  r = [f_singledim(a,b,c) for a,b,c in zip(img_shape,patch_shape,border_shape)] ## D x many x 3
+  divisible = (1,8,8)[-len(border_shape):]
+  r = [f_singledim(a,b,c,d) for a,b,c,d in zip(img_shape,patch_shape,border_shape,divisible)] ## D x many x 3
   D = len(r) ## dimension
   # r = np.array(product())
   r = np.array(np.meshgrid(*r)).reshape([D,-1]).T ## should be an array D x len(a) x len(b)
@@ -304,6 +304,45 @@ def tile_multidim(img_shape,patch_shape,border_shape=None,f_singledim=tile1d_pre
   return r
 
 
+
+def apply_net_tiled_nobounds(f_net,img,outchan=1,patch_shape=(512,512),border_shape=(20,20)):
+  """
+  TODO: generalize this to work with arbitrary function applied to big image over padded tiles.
+  """
+
+  ## Large enough patches for UNet3
+  if img.ndim==4:
+    # print("WARNING: DEFAULT PATCH SIZES")
+    patch_shape  = (32,400,400)
+    border_shape = (6,40,40)
+  if img.ndim==3:
+    # print("WARNING: DEFAULT PATCH SIZES")
+    patch_shape  = (600,600)
+    border_shape = (32,32)
+
+
+  patch_shape  = np.array(patch_shape).clip(max=img.shape[1:])
+  border_shape = np.array(border_shape).clip(max=patch_shape//2-1)
+
+  container = np.zeros((outchan,) + img.shape[1:])
+  count = 0
+  g = tile_multidim(img.shape[1:],patch_shape,border_shape)
+
+  # print(img.shape, patch_shape,border_shape)
+  # print(g)
+
+  for s in g:
+    a = (slice(None),) + s.outer ## add channels
+    b = (slice(None),) + s.inner ## add channels
+    c = (slice(None),) + s.inner_rel ## add channels
+    # print(count); count += 1
+    container[b] = f_net(img[a])[c]
+    # del patch
+  return container
+
+
+
+## Applications of tiling
 
 def find_errors(img, matching, _patchsize = (33,33)):
   # ipdb.set_trace()

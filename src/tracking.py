@@ -28,9 +28,47 @@ import re
 from expand_labels_scikit import expand_labels
 from types import SimpleNamespace
 from subprocess import run
+from collections import defaultdict
 
 COLUMNS = ['label', 'frame', 'centroid-0', 'centroid-1', 'centroid-2']
 
+
+"""
+Names in use:
+
+Fixed Size
+- dub "distance upper bound" the maximum distance allowed between matching points during nearest-neib tracking.
+- scale "voxel scale" [Z]YX dimensions of image voxels. used to rescale points.
+- info "ISBI dataset info" describes image shape, N time points, naming convention, etc
+- kern "rasterized centerpoint kernel" a small ND-Array with a bright gaussian blob, used to rasterize pts into an image for DET/SEG/TRA evaluation.
+
+Centerpoints
+- [gt]pts "[ground truth] centerpoints" NxD arrays with D in [2,3].
+- ltps "list of timepoints" a list of `[gt]pts`
+- list_of_arrays "" list of 2D or 3D images 
+
+- lbep "Label Begin End Parent" The ISBI format used to describe tracking relationships. We use list of tuples?
+- tb "True Branching" A NetworkX 'branching' that describes the relationships between objects over time. May have metadata describing object centerpoint.
+- nap "Napari Tracking Format" Composed of `nap.tracklets,nap.graph,nap.properties`. Tracklets carry pts`, graph describes relationships.
+
+
+---
+
+Typical Usage
+
+info = ...
+ltps = [detect_pts(img) for img in list_of_images]
+tb = nn_tracking_on_ltps(ltps=ltps, scale=(4,1,1), dub=20)
+savedir = "./mydir/"
+eval_tb_isbi(tb,info,savedir)
+
+From this we get DET and TRA both!
+
+
+"""
+
+
+## Utility Funcs
 
 def pad_and_stack_arrays(list_of_arrays, align_pt=None):
   """
@@ -51,22 +89,6 @@ def pad_and_stack_arrays(list_of_arrays, align_pt=None):
   res = np.stack([f(_r) for _r in zip(list_of_arrays,leftpad,rightpad)])
   return res
 
-# def evaluate_isbi(base_dir,detname,pred='01',fullanno=True):
-#   "evalid is a unique ID that prevents us from overwriting DET_log files from different experiments predicting on the same data."
-#   fullanno = '' if fullanno else '0'
-
-#   cmd = dict(
-#     localTRA="/Users/broaddus/Downloads/EvaluationSoftware_1/Mac/TRAMeasure",
-#     remoteDET="/projects/project-broaddus/comparison_methods/EvaluationSoftware/Linux/DETMeasure",
-#   )[cmd]
-
-#   DET_command = f"""
-#   time {cmd} {base_dir} {pred} 3 {fullanno}
-#   cd {base_dir}/{pred}_RES/
-#   mv DET_log.txt {detname}
-#   """
-#   run([DET_command],shell=True)
-
 def draw(tb):
   pos  = nx.multipartite_layout(tb,subset_key='time')
   cmap = matplotlib.colors.ListedColormap(np.random.rand(256,3))
@@ -76,6 +98,9 @@ def draw(tb):
   # plt.scatter(pos)
   # nx.draw(tb,pos=pos,node_size=30,edge_color=cmap(colors))
   nx.draw(tb,pos=pos,node_size=30,node_color=cmap(colors))
+
+
+## Testing
 
 def gen_ltps1():
   res = []
@@ -90,54 +115,22 @@ def gen_ltps1():
 #   ltps = list(ndi.group_by(tracklets[:,1]).split(tracklets[:,2:]))
 #   dists, parents = nn_tracking(ltps)
 
+def check_tb_nap_lpts_consistency(tb,nap,lpts,track_id=None):
+  m = nap.tracklets[:,0]==track_id
+  print(nap.tracklets[m])
+  print(nap.tracklets[m].shape)
+
+  # times = nap.tracklets[m][:,1]
+  # for t in times:
+  #   kdt = pyKDTree(x[i]*scale)
+  #   _dis, _ind = kdt.query(x[i+1]*scale, k=1, distance_upper_bound=dub)
+
+  for n in tb.nodes:
+    if tb.nodes[n]['track']==track_id:
+      print(tb.nodes[n])
 
 
-def nn_tracking_on_ltps(ltps=None, scale=(1,1,1), dub=None):
-  """
-  ltps should be time-ordered list of ndarrays w shape (N,M) with M in [2,3].
-  x[t+1] matches to first nearest neib of x[t].
-  
-  points can be indexed by (time,local index ∈ [0,N_t])
-  """
-
-  x = ltps
-  dists, parents = [],[]
-
-  for i in range(len(x)-1):
-    if len(x[i])==0:
-      dists.append(np.full(len(x[i+1]), -1))
-      parents.append(np.full(len(x[i+1]), -1))
-      continue
-    if len(x[i+1])==0:
-      dists.append([])
-      parents.append([])
-      continue
-      
-    kdt = pyKDTree(x[i]*scale)
-    _dis, _ind = kdt.query(x[i+1]*scale, k=1, distance_upper_bound=dub)
-    dists.append(_dis)
-    parents.append(_ind)
-  tb = _parents2tb(parents,ltps)
-  return tb
-
-
-def filter_starting_tracks(tb,ltps,nap):
-  m=nap.tracklets[:,1]==0
-  gtpts=nap.tracklets[m][:,2:]
-  g0 = filter_starting_tracks_pts(tb,ltps[0],gtpts)
-  return g0
-
-
-def filter_starting_tracks_pts(tb,pts0,gtpts):
-  kdt = pyKDTree(pts0)
-  _dis, _ind = kdt.query(gtpts, k=1, distance_upper_bound=None)
-  roots = set((0,i) for i in _ind)
-  # s0=set.union(*[c for c in nx.weakly_connected_components(tb) if len(set(c)&roots)>0])
-  s0=roots
-  for r in roots: s0 = s0|nx.descendants(tb,r)
-  g0=tb.subgraph(s0)
-  return g0
-
+## Tracking Utility
 
 def _parents2tb(parents,ltps):
   """
@@ -160,6 +153,91 @@ def _parents2tb(parents,ltps):
   _tb_add_track_labels(tb)
   return tb
 
+def filter_starting_tracks_pts(tb,pts0,gtpts):
+  # ipdb.set_trace()
+  kdt = pyKDTree(pts0)
+  _dis, _ind = kdt.query(gtpts, k=1, distance_upper_bound=None)
+  roots = set((0,i) for i in _ind)
+  # s0=set.union(*[c for c in nx.weakly_connected_components(tb) if len(set(c)&roots)>0])
+  s0=roots
+  for r in roots: s0 = s0|nx.descendants(tb,r)
+  g0=tb.subgraph(s0)
+  return g0
+
+def filter_starting_tracks(tb,ltps,nap):
+  m=nap.tracklets[:,1]==0
+  gtpts=nap.tracklets[m][:,2:]
+  g0 = filter_starting_tracks_pts(tb,ltps[0],gtpts)
+  return g0
+
+### in-place updates on tb
+def _tb_add_orig_labels(tb,nap):
+  origlabelmap = dict()
+  tracklets    = nap.tracklets
+  # group by time
+  for _time,sub_tracklets in enumerate(ndi.group_by(tracklets[:,1]).split(tracklets)):
+    for _idx,row in enumerate(sub_tracklets):
+      origlabelmap[(_time,_idx)] = row[0] ## track id
+  for n in tb.nodes:
+    tb.nodes[n]['orig_trackid'] = origlabelmap[n]
+
+### in-place updates on tb
+def _tb_add_track_labels(tb):
+  track_id = 1
+  # source = [n for n in tb.nodes if tb.nodes[n]['time']==0]
+  source = [n for n,d in tb.in_degree if d==0]
+  for s in source:
+    for v in nx.dfs_preorder_nodes(tb,source=s):
+      tb.nodes[v]['track'] = track_id
+      tb.nodes[v]['root']  = s
+      if tb.out_degree[v] != 1: track_id+=1
+    # tb.nodes[s]['root']  = 0
+
+### in-place updates on tb
+def relabel_tracks_from_1(tb):
+  s = set(tb.nodes[n]['track'] for n in tb.nodes)
+  d = {k:v+1 for v,k in enumerate(sorted(s))}
+  for n in tb.nodes:
+    _t = tb.nodes[n]['track']
+    tb.nodes[n]['track'] = d[_t]
+
+
+## Tracking from ltps (produces TrueBranching)
+
+def nn_tracking_on_ltps(ltps=None, scale=(1,1,1), dub=None):
+  """
+  ltps should be time-ordered list of ndarrays w shape (N,M) with M in [2,3].
+  x[t+1] matches to first nearest neib of x[t].
+  
+  points can be indexed by (time,local index ∈ [0,N_t])
+  """
+
+  dists, parents = [],[]
+
+  for i in range(len(ltps)-1):
+    Nparents = len(ltps[i])
+    N = len(ltps[i+1])
+    if Nparents==0:
+      dists.append(np.full(N, -1))
+      parents.append(np.full(N, -1))
+      continue
+    if N==0:
+      dists.append([])
+      parents.append([])
+      continue
+      
+    kdt = pyKDTree(ltps[i]*scale)
+    _dis, _ind = kdt.query(ltps[i+1]*scale, k=1, distance_upper_bound=dub)
+    _ind = _ind.astype(np.int32)
+    # if (_ind==8).sum()>0: ipdb.set_trace()
+    _ind[_ind==Nparents] = -1
+    dists.append(_dis)
+    parents.append(_ind)
+
+  # ipdb.set_trace()
+  tb = _parents2tb(parents,ltps)
+
+  return tb
 
 def random_tracking_on_ltps(ltps,):
   """
@@ -175,6 +253,7 @@ def random_tracking_on_ltps(ltps,):
   return tb
 
 
+## Type Conversions
 
 def nap2lbep(nap):
   tracklets,graph,properties = nap.tracklets,nap.graph,nap.properties
@@ -193,42 +272,6 @@ def nap2lbep(nap):
     lbep[i,3] = x if 'int' in str(type(x)) else x[0]
   lbep = lbep.astype(np.uint)
   return lbep
-
-def _tb_add_orig_labels(tb,nap):
-  origlabelmap = dict()
-  tracklets    = nap.tracklets
-  # group by time
-  for _time,sub_tracklets in enumerate(ndi.group_by(tracklets[:,1]).split(tracklets)):
-    for _idx,row in enumerate(sub_tracklets):
-      origlabelmap[(_time,_idx)] = row[0] ## track id
-  for n in tb.nodes:
-    tb.nodes[n]['orig_trackid'] = origlabelmap[n]
-
-def _tb_add_track_labels(tb):
-  track_id = 1
-  # source = [n for n in tb.nodes if tb.nodes[n]['time']==0]
-  source = [n for n,d in tb.in_degree if d==0]
-  for s in source:
-    for v in nx.dfs_preorder_nodes(tb,source=s):
-      tb.nodes[v]['track'] = track_id
-      tb.nodes[v]['root']  = s
-      if tb.out_degree[v] != 1: track_id+=1
-    # tb.nodes[s]['root']  = 0
-
-
-def check_tb_nap_lpts_consistency(tb,nap,lpts,track_id=None):
-  m = nap.tracklets[:,0]==track_id
-  print(nap.tracklets[m])
-  print(nap.tracklets[m].shape)
-
-  # times = nap.tracklets[m][:,1]
-  # for t in times:
-  #   kdt = pyKDTree(x[i]*scale)
-  #   _dis, _ind = kdt.query(x[i+1]*scale, k=1, distance_upper_bound=dub)
-
-  for n in tb.nodes:
-    if tb.nodes[n]['track']==track_id:
-      print(tb.nodes[n])
 
 def tb2nap(tb,ltps=None):
   trackid = np.array([n + (tb.nodes[n]['track'],) for n in tb.nodes])
@@ -270,8 +313,6 @@ def nap2ltps(nap):
   ltps = list(ndi.group_by(nap.tracklets[:,1]).split(nap.tracklets[:,2:]))
   return ltps
 
-from collections import defaultdict
-
 def tb2lbep(tb):
   times = defaultdict(list)
   trackset = {tb.nodes[n]['track'] for n in tb.nodes}
@@ -293,8 +334,10 @@ def tb2lbep(tb):
   # lbep = lbep[idx]
   return lbep
 
-### Reading/Writing to disk
 
+
+
+## Reading/Writing to disk
 
 def _load_mantrack(path,dset,idx):
   path = Path(path)
@@ -318,15 +361,6 @@ def _load_mantrack(path,dset,idx):
   props = pd.DataFrame(props)
 
   return props
-
-
-def relabel_tracks_from_1(tb):
-  s = set(tb.nodes[n]['track'] for n in tb.nodes)
-  d = {k:v+1 for v,k in enumerate(sorted(s))}
-  for n in tb.nodes:
-    _t = tb.nodes[n]['track']
-    tb.nodes[n]['track'] = d[_t]
-
 
 def load_isbi2nap(path,dset,ntimes,):
   # path = str(path) + '/'
@@ -364,20 +398,23 @@ def load_isbi2nap(path,dset,ntimes,):
   nap.avg_kern = avg_kern
   return nap
 
+
+from datagen import mantrack2pts
+
 def save_isbi_tb(tb,info,_kern=None):
 
   if info.penalize_FP=='0':
-    from datagen import mantrack2pts
-    pts_zero = [tb.nodes[n]['pt'] for n in sorted(tb.nodes) if n[0]==0]
+    # ipdb.set_trace()
+    pts_zero = np.array([tb.nodes[n]['pt'] for n in sorted(tb.nodes) if n[0]==0])
     pts_gt_zero = mantrack2pts(load(info.isbi_dir / (info.dataset+"_GT") / "TRA" / info.man_track.format(time=info.start)))
     tb = filter_starting_tracks_pts(tb,pts_zero,pts_gt_zero)
     relabel_tracks_from_1(tb)
   
+  # ipdb.set_trace()
   nap = tb2nap(tb)
   nap.tracklets[:,1] += info.start
   if not _kern: _kern = np.ones([1,]*info.ndim)
   save_isbi(nap,_kern=_kern,shape=info.shape,savedir=info.isbi_dir/(info.dataset+"_RES"))
-
 
 def eval_tb_isbi(tb,info,savedir):
   save_isbi_tb(tb,info)
@@ -390,6 +427,8 @@ def eval_tb_isbi(tb,info,savedir):
   cat {savedir}/{info.dataset}_TRA.txt
   """
   run(bashcmd,shell=True)
+
+
 
 def save_isbi(nap, _kern=None, shape=(35, 512, 708), savedir="napri2isbi_test/"):
   """
@@ -429,9 +468,11 @@ def save_isbi(nap, _kern=None, shape=(35, 512, 708), savedir="napri2isbi_test/")
     pts    = sub_tracklets[:,2:].astype(np.int)
     kerns  = [_kern * _id for _id in labels]
     stack  = conv_at_pts_multikern(pts,kerns,shape).astype(np.uint16)
-    stack  = expand_labels(stack,55)
+    stack  = expand_labels(stack,25)
     stackset.append(set(np.unique(stack)))
-    save(stack, savedir / tifname.format(time=time))
+    savename = savedir / tifname.format(time=time)
+    # ipdb.set_trace()
+    save(stack, savename)
 
   return lbep, labelset, stackset
 
@@ -515,6 +556,9 @@ def load_and_compare_lsds(Fluodir,ds='01'):
   #   compare_lsds(x,y)
   return d
 
+
+
+
 # def lsd2lbep(lsd):
 #   res = defaultdict(list)
 #   for time,lset in lsd.items():
@@ -528,9 +572,6 @@ if __name__=='__main__':
   print(x)
   tb = nn_tracking_on_ltps(x,scale=(1,1))
   print(tb.edges)
-
-
-
 
 
 

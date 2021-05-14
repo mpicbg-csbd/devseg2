@@ -30,7 +30,6 @@ import torch
 import pandas
 from pandas import DataFrame
 
-
 from subprocess import run, Popen
 from scipy.ndimage import zoom
 import json
@@ -71,18 +70,31 @@ def sample2RawPng(sample):
   pngraw[~m] = (0.25*pngraw+0.75*pnglab)[~m]
   return pngraw
 
-def _png(x):
+def blendRawLab(raw,lab,labcolors=None):
+  pngraw = _png(raw)
+  pnglab = _png(lab,labcolors=labcolors)
+  m = pnglab[:,:,:3]==0
+  m = np.all(m,-1)
+  pngraw[~m] = pnglab[~m]
+  # pngraw[~m] = (0.5*pngraw+0.5*pnglab)[~m]
+  return pngraw
 
-  x = x.copy()
+def _png(x,labcolors=None):
 
   def colorseg(seg):
-    cmap = np.random.rand(256,3).clip(min=0.1)
-    cmap[0] = (0,0,0)
+    if labcolors:
+      cmap = np.array([(0,0,0)] + labcolors*256)[:256]
+    else:
+      cmap = np.random.rand(256,3).clip(min=0.2)
+      cmap[0] = (0,0,0)
+
     cmap = matplotlib.colors.ListedColormap(cmap)
 
     m = seg!=0
-    seg[m] %= 254 ## we need to save a color for black==0
-    seg[m] += 1
+    seg[m] %= 255 ## we need to save a color for black==0
+    # seg[m] += 1
+    seg[seg==0] = 255
+    seg[~m] = 0
     rgb = cmap(seg)
     return rgb
 
@@ -189,6 +201,16 @@ def myzoom(img,scale):
     img = gputools.scale(img.astype(np.float32),scale,interpolation='linear').astype(_dt)
   return img
 
+def zoom_pts(pts,scale):
+  """
+  rescale pts to be consistent with scipy.ndimage.zoom(img,scale)
+  """
+  # assert type(pts) is np.ndarray
+  pts = pts+0.5                         ## move origin from middle of first bin to left boundary (array index convention)
+  pts = pts * scale                     ## rescale
+  pts = pts-0.5                         ## move origin back to middle of first bin
+  pts = np.round(pts).astype(np.uint32) ## binning
+  return pts
 
 
 
@@ -227,8 +249,10 @@ def isbiInfo_to_filenames(info):
   n_raw  = f"/projects/project-broaddus/rawdata/{info.myname}/{info.isbiname}/{info.dataset}/" + info.rawname
   n_lab  = f"/projects/project-broaddus/rawdata/{info.myname}/{info.isbiname}/{info.dataset}_GT/TRA/" + info.man_track
   # if info.index in [6,11,12,13,14,15,18]:
-  n_raw = n_raw[:-4].replace("rawdata","rawdata/zarr") + ".zarr"
-  n_lab = n_lab[:-4].replace("rawdata","rawdata/zarr") + ".zarr"
+
+  ## MYPARAM undo this
+  # n_raw = n_raw[:-4].replace("rawdata","rawdata/zarr") + ".zarr"
+  # n_lab = n_lab[:-4].replace("rawdata","rawdata/zarr") + ".zarr"
 
   filenames_raw = [(n_raw.format(time=i),n_lab.format(time=i)) for i in range(info.start,info.stop)]
   filename_ltps = f"/projects/project-broaddus/rawdata/{info.myname}/traj/{info.isbiname}/{info.dataset}_traj.pkl"
@@ -257,10 +281,49 @@ def norm_samples_raw(fullsamples):
     s.raw = norm_affine01(s.raw,p2,p99)
   return fullsamples
 
+## Advanced printing
+
+def describe_virtual_samples(df):
+  sizes  = Counter(df['shape'])
+  counts = Counter(df['npts'])
+
+  sortedcounts = sorted(counts.keys())
+  ellipsis = "..." if len(sortedcounts) >= 10 else ""
+  sortedcounts = sortedcounts[:10]
+
+  r1 = ("{:>6}"*len(sortedcounts)).format(*[str(k) for k in sortedcounts])
+  r2 = ("{:>6}"*len(sortedcounts)).format(*[str(counts[k]) for k in sortedcounts])
+
+  print(f"""
+  Contains {len(df)} samples with {df.npts.sum()} total objects from {len(df['time'].unique())} timepoints
+  Patch Sizes --  {sizes}
+  --- Object Counts per Patch ---
+  N objects: {r1} {ellipsis} 
+  N patches: {r2} {ellipsis} 
+  Total size: {strDiskSizePatchFrame(df)}
+  """)
+
+def describe_samples(samples):
+  sizes  = Counter([x.raw.shape for x in samples])
+  counts = Counter([s.pts.shape[0] for s in samples])
+
+  sortedcounts = sorted(counts.keys())[:10]
+  r1 = ("{:>6}"*len(sortedcounts)).format(*[str(k) for k in sortedcounts])
+  r2 = ("{:>6}"*len(sortedcounts)).format(*[str(counts[k]) for k in sortedcounts])
+
+  print(f"""
+  contains {len(samples)} samples with sizes {sizes}
+  --- Object Counts per Patch ---
+  N objects: {r1} ... 
+  N patches: {r2} ... 
+  total size: {bytes2string(file_size(fname))}
+  """)
 
 
 
-## infrequent updates. parameter memory.
+
+
+## Unstable. Dataset Parameters.
 
 def init_params(ndim):
   P = SimpleNamespace()
@@ -268,26 +331,49 @@ def init_params(ndim):
     P.zoom  = (1,1) #(0.5,0.5)
     P.kern  = [5,5]
     P.patch = (256,256)
+    P.border = [2,2]
+    P.match_dub = 10
+    P.match_scale = [1,1]
+
   elif ndim==3:
-    P.zoom   = (1,1,1) #(1,0.5,0.5)
-    P.kern   = [2,5,5]
+    P.zoom   = (1,1,1)
+    P.kern   = [3,5,5]
     P.patch  = (16,128,128)
+    P.border = [1,2,2]
+    P.match_dub = 10
+    P.match_scale = [4,1,1]
+
   P.nms_footprint = P.kern
   P.patch = np.array(P.patch)
+
   return P
 
-def cpnet_ISBIdata_specialization(info):
+def cpnet_ISBIdata_specialization(params,info,pid):
   isbiname = info.isbiname
-  p = SimpleNamespace()
+  p = params
 
-  if isbiname in ["Fluo-N3DH-CE", "Fluo-C3DH-A549", "Fluo-C3DH-A549-SIM", "Fluo-N3DH-CHO", "Fluo-N3DH-SIM+"]:
+  p.traintime = 200
+  p.scale = info.scale
+  p.sparse = True if info.isbiname in ["Fluo-N3DL-DRO", "Fluo-N3DL-TRIC", "Fluo-N3DL-TRIF",] else False
+  p.subsample_traintimes = slice(None)
+
+  if isbiname in ["Fluo-N3DH-CE", "Fluo-N3DH-SIM+","PhC-C2DH-U373"]:
     p.zoom  = {3:(1,0.5,0.5), 2:(0.5,0.5)}[info.ndim]
+  if isbiname == "Fluo-N3DH-CHO":
+    p.zoom   = (1,0.5,0.5)
+    p.border = (0,2,2)
   if isbiname=="Fluo-N3DL-TRIF":
     p.kern  = [3,3,3]
-    p.zoom  = (0.5,0.5,0.5)
+    # p.zoom  = (0.5,0.5,0.5) ## MYPARAM undo this
     p.patch = (64,64,64)
+    p.match_scale = [1,1,1]
   if isbiname=="Fluo-C3DH-H157":
     p.zoom = (1/4,1/8,1/8)
+    p.kern = (1,3,3)
+    p.match_dub = 30 ## in full size space
+  if isbiname in ["Fluo-C3DH-A549", "Fluo-C3DH-A549-SIM"]:
+    # p.zoom = (1,1/4,1/4)
+    p.zoom = (1,1/2,1/2)
   if isbiname=="Fluo-C2DL-MSC":
     a,b = info.shape
     p.zoom = {'01':(1/4,1/4), '02':(128/a, 200/b)}[info.dataset]
@@ -296,232 +382,69 @@ def cpnet_ISBIdata_specialization(info):
     # p.kern = [7,7]
     p.zoom = (0.5,0.5)
   if isbiname=="Fluo-N3DL-DRO":
-    pass
-    # p.kern = [1,3,3]
-    # cfig.bg_weight_multiplier=0.0
-    # cfig.weight_decay = False
+    p.kern = [1.5,3,3]
+    p.subsample_traintimes = slice(0,None,10)
+
+
+  ## ignore errors when one object is within evalBorder of XY image boundary
+  if isbiname in ["DIC-C2DH-HeLa", "Fluo-C2DL-Huh7", "Fluo-C2DL-MSC", "Fluo-C3DH-H157", "Fluo-N2DH-GOWT1", "Fluo-N3DH-CE", "Fluo-N3DH-CHO", "PhC-C2DH-U373",]:
+    p.evalBorder = (0,50,50) if info.ndim==3 else (50,50)
+  elif isbiname in ["BF-C2DL-HSC", "BF-C2DL-MuSC", "Fluo-C3DL-MDA231", "Fluo-N2DL-HeLa", "PhC-C2DL-PSC",]:
+    p.evalBorder = (0,25,25) if info.ndim==3 else (25,25)
+  elif isbiname in ["Fluo-C3DH-A549", "Fluo-N2DH-SIM+", "Fluo-N3DH-SIM+", "Fluo-C3DH-A549-SIM", "Fluo-N3DL-DRO", "Fluo-N3DL-TRIC", "Fluo-N3DL-TRIF"]:
+    p.evalBorder = (0,0,0) if info.ndim==3   else (0,0)
   
   ## Sparsely Annotated datasets get: loss masking, patch-wise normalization and target creation (for speed), 
-  p.sparse = True if info.isbiname in ["Fluo-N3DL-DRO", "Fluo-N3DL-TRIC", "Fluo-N3DL-TRIF",] else False
-  ## Big datasets get patch-wise normalization and target creation, but no loss masking
-  p.toobig = True if info.isbiname in ["Fluo-C3DH-H157", "Fluo-N3DL-TRIF"] else False
-  return p
+
+  if pid in [0,1,2,3]:
+    p.subsample_traintimes = slice(0,None,30)
+
+  if pid in [22,23]: p.subsample_traintimes = slice(0,None,2) ## 
+  if pid in [26,27,29]: p.subsample_traintimes = slice(0,None,3) ## 
+  if pid in [30]: p.subsample_traintimes = slice(0,None,2) ## Fluo-N3DL-TRIC
+  if pid in [31]: p.subsample_traintimes = slice(0,None,8) ## Fluo-N3DL-TRIC
+
+  if pid in [32,33]:
+    pass
+  if pid in[34,35]:
+    p.kern = [3,3]
+
+  if pid in [36,37]:
+    p.subsample_traintimes = slice(0,None,4)
+
+  # print("AFTER SPECIALIZATION: ", p)
 
 
+## Stable. Create Dataframe of Virtual Images. 
 
-
-## Create Dataset Version 1.0. 
-
-def filenames2garlist(filenames):
-  "takes list tuples [(raw-name, lab-name)] "
-  def f(a,b):
-    raw  = load(a)
-    lab  = load(b)
-    time = int(re.search(r'(\d+)\.(tif|zar)', a).group(1))
-    return SimpleNamespace(raw=raw,lab=lab,n_raw=a,n_lab=b,time=time)
-  garlist = [f(*x) for x in filenames]
-  return garlist
-
-def gar2samples(gar, nsamples, params):
-  print(f"running {inspect.currentframe().f_code.co_name}, T={gar.time}", flush=True)
-
-  raw = gar.raw
-  lab = gar.lab
-  pts = gar.pts
-
-  raw = zoom(raw,params.zoom,order=1)
-  lab = zoom(lab,params.zoom,order=0)
-  # raw = gputools.scale(raw,params.zoom,interpolation='linear')
-  pts = (np.array(pts) * params.zoom).astype(np.int)
-
-  _rawsmall = raw if raw.ndim==2 else raw[::2,::6,::6]
-  p2,p99 = np.percentile(_rawsmall,[2,99.4]) ## for speed
-  raw = (raw-p2)/(p99-p2)
-
-  target = dgen.place_gaussian_at_pts(pts,raw.shape,params.kern)
-  # pts = dgen.mantrack2pts(lab)
-
-  ## subsample dataset. no overlapping patches.
-  # slices = dgen.shape2slicelist(raw.shape,params.patch,divisible=(1,8,8)[-raw.ndim:])
-  slices = dgen.tile_multidim(raw.shape, params.patch, (2,10,10)[-raw.ndim:])
-  c = Counter([tuple(s.stop-s.start for s in x.a) for x in slices])
-  output_slices = [x.b for x in slices]
-  res = dgen.find_points_within_patches3(pts,output_slices)
-  _ressum = res.sum(0) ## number of points per patch
-  pts_per_slice = [pts[np.argwhere(res[:,i])[:,0]] for i in range(len(slices))]
-
-  slices = [s for i,s in enumerate(slices) if _ressum[i]>0]
-  # ipdb.set_trace()
-
-  np.random.shuffle(slices)
-  # slices = slices[:nsamples]
-
-  def f(ss):
-    r = raw[ss.a].copy().astype(np.float16)     ## use full 'input' slice.a , but use 'mask' slice.b in loss
-    l = lab[ss.a].copy().astype(np.uint8)       ## use full 'input' slice.a , but use 'mask' slice.b in loss
-    t = target[ss.a].copy().astype(np.float16)  ## use full 'input' slice.a , but use 'mask' slice.b in loss
-
-    _fp = np.ones([3,5,5],dtype=np.bool) if r.ndim==3 else np.ones([5,5],dtype=np.bool)
-    p = peak_local_max(t.astype(np.float32)[ss.c], threshold_abs=0.9, footprint=_fp)
-    if p.shape[0]>0: ipdb.set_trace()
-    return SimpleNamespace(raw=r,lab=l,target=t,pts=p,time=gar.time,slice=ss,)
-
-  return [f(ss) for ss in slices]
-
-def gar2samples_sampleFirst(gar, nsamples, params):
-  # print("time, size, npts", gar.time, gar.raw.shape, gar.pts.shape[0])
-  print(f"running {inspect.currentframe().f_code.co_name}, T={gar.time}", flush=True)
-  raw = gar.raw
-  lab = gar.lab
-  pts = gar.pts
-
-  # ## norm for speed ... Doesn't work. super slow.
-  # _rawsmall = raw if raw.ndim==2 else raw[::2,::6,::6]
-  # p2,p99 = np.percentile(_rawsmall,[2,99.4])
-  # raw = (raw-p2)/(p99-p2)
-
-  ## subsample dataset. no overlapping patches.
-  patchsize = (np.array(params.patch) // params.zoom).astype(int)
-  # slices = dgen.shape2slicelist(raw.shape,patchsize,divisible=(1,8,8)[-raw.ndim:])
-  DD = int(8 // params.zoom[-1])
-
-  _ftile  = lambda a,b,c : dgen.tile1d_predict(a,b,c,divisible=DD) #tile1d_predict(end,length,border,divisible=8)
-  borders = (2,10,10)[-raw.ndim:]
-  slices  = dgen.tile_multidim(raw.shape, patchsize, borders, f_singledim=_ftile) #, (4,10,10)[-raw.ndim:])
-
-  # ipdb.set_trace()
-  c = Counter([tuple(s.stop-s.start for s in x.a) for x in slices])
-  # slices = [x.a for x in slices]
-  output_slices = [x.b for x in slices]
-  res = dgen.find_points_within_patches3(pts,output_slices)
-
-  # shapes, centers = patch_shapes_and_centers_from_slices(slices)
-  # pts_per_patch = dgen.find_points_within_patches(centers, pts, shapes[0])
-  
-  # slices = [s for i,s in enumerate(slices) if len(pts_per_patch[i])>0]
-  _ressum = res.sum(0) ## number of points per patch
-  slices = [s for i,s in enumerate(slices) if _ressum[i]>0]
-  np.random.shuffle(slices)
-  slices = slices[:nsamples]
-
-  def f(ss):
-    # print("XXX 1")
-    r = raw[ss.a].copy() ## use full 'input' slice.a 
-    l = lab[ss.a].copy() ## use full 'input' slice.a 
-    
-    ## NO MORE REFERENCES TO RAW OR LAB!
-
-    # print("XXX 2")
-    ## zoom
-    r = zoom(r,params.zoom,order=1)
-    l = zoom(l,params.zoom,order=0)
-
-    ## build target
-    # print("XXX 3")
-    p = dgen.mantrack2pts(l)
-    t = dgen.place_gaussian_at_pts(p,r.shape,params.kern)
-
-    r = r.astype(np.float16)
-    l = l.astype(np.uint8)
-    t = t.astype(np.float16)
-
-    # print("XXX 4")
-    return SimpleNamespace(raw=r,lab=l,target=t,pts=p,time=gar.time,slice=ss,)
-
-  return [f(ss) for ss in slices]
-
-@DeprecationWarning
-def build_trainingdata(pid=0):
-
-  P = pid2params(pid)
-  # print(json.dumps(P.info.__dict__,sort_keys=True, indent=2, default=str), flush=True)
-  info = P.info
+def build_imgFrame_and_params(pid=0):
+  dPID = pid2params(pid)
+  info = dPID.info
   
   print(f"""
-    Begin pid {pid} ... {info.isbiname} / {info.dataset}.
-    Savedir is {P.savedir_local}
+    Begin `build_trainingdata2()` on pid {pid} ... {info.isbiname} / {info.dataset}.
+    Savedir is {dPID.savedir_local}
     """)
 
-  ## initial patch shit
+  # ipdb.set_trace()
+  imgFrame = pid2ImgFrame(info)
   params  = init_params(info.ndim)
-  _params = cpnet_ISBIdata_specialization(info)
-  for k in _params.__dict__.keys(): params.__dict__[k] = _params.__dict__[k]
+  cpnet_ISBIdata_specialization(params,info,pid)
 
-  ## automatic patch sizing
-  # params.patch = (256,256) 
-  max_size_in_MB = 2000
-  N = 100 if info.ndim==2 else 20 ## max number of images
-  N_png_samples = 10
-
-  print("Start to load images.")
-
-  image_names,ltps_name = isbiInfo_to_filenames(info)
-  _N = min(N,len(image_names))
-  garlist = filenames2garlist(take_n_evenly_spaced_items(image_names,_N))
-  ltps = load(ltps_name)
-  for g in garlist: g.pts = ltps[g.time]
-
-  print("Done loading images. Start to chop into patches.")
-
-  ## now stop depending on info... only on virtual_img_data
-  def _f():
-    a = len(garlist)   ## N images
-    b = np.prod(params.patch)    ## N pixels / patch
-    c = max_size_in_MB*1_000_000 ## N Bytes
-    d = 2 ## N float values / patch-pixel (raw + target)
-    e = 2 ## N Bytes / float value
-    f = int(c / (b*d*e)) ## Total number of patches
-    g = f/a ## desired patches per image
-    h = np.prod(garlist[0].raw.shape) ## N image pixels
-    i = h / b ## actual number of patches per image
-    # print('g',g,'i',i,)
-    # print('a',a,'b',b,'c',c,'d',d,'e',e,'f',f,)
-    return f, a
-
-  n_patches, n_images = _f()
-  ## goal is divide n_patches roughly evenly among all n_images
-  n_patches_per_img = [x.stop-x.start for x in divide_evenly_with_min1(n_patches, n_images)]
-  # print(np.unique(n_patches_per_img, return_counts=True))
-  # print(n_patches,n_images,)
-
-  _f_gar2samp = gar2samples_sampleFirst if params.sparse else gar2samples
-  fullsamples = [_f_gar2samp(gar,nsamples,params) for (gar,nsamples) in zip(garlist,n_patches_per_img)]
-  fullsamples = np.array([x for stime in fullsamples for x in stime])
-
-  if params.sparse: fullsamples = norm_samples_raw(fullsamples)
-
-  print("Done creating samples. Now save to disk.")
-
-  save(samples2pngSN(take_n_evenly_spaced_items(fullsamples,N_png_samples)), P.savedir_local / 'sample_pngs')
-  res = SimpleNamespace(samples=fullsamples, params=params)
-  save(res, P.savedir_local / 'fullsamples')
-
-  _n1 = len(res.samples)
-  _n2 = res.samples[0].raw.shape
-  _n3 = (2+1+2) * _n1 * np.prod(_n2) / 1_000_000
-  print(f"""
-  Working on {info.isbiname} / {info.dataset}.
-  In total we saved {_n1} samples, each with shape {_n2}.
-  This makes a total of {_n3:0.3f} MB of data.
-  """)
-  return res
-
-
-## WIP. Create Dataframe of Virtual Samples, then fill them in.
-
-def build_trainingdata2(pid=0):
-  P = pid2params(pid)
-  info = P.info
+  ## train = 0; test = 1
+  labels = np.ones(len(imgFrame),dtype=np.uint8)
+  labels[params.subsample_traintimes] = 0
+  imgFrame['labels'] = labels
   
-  print(f"""
-    Begin pid {pid} ... {info.isbiname} / {info.dataset}.
-    Savedir is {P.savedir_local}
-    """)
+  imgFrame = addRescalingInfo2ImgFrame(imgFrame,params.zoom)
 
-  params  = init_params(info.ndim)
-  _params = cpnet_ISBIdata_specialization(info)
-  for k in _params.__dict__.keys(): params.__dict__[k] = _params.__dict__[k]  
+  # imgFrame.to_pickle(dPID.savedir_local / 'imgFrame.pkl')
+  # save(params, dPID.savedir_local / 'params.pkl')
+  return imgFrame, params
 
+## Used by build_imgFrame_and_params
+
+def pid2ImgFrame(info):
   image_names,ltps_name = isbiInfo_to_filenames(info)
   raw_names,lab_names = zip(*image_names)
   
@@ -533,32 +456,33 @@ def build_trainingdata2(pid=0):
   N = len(image_names)
   imgFrame['shape']  = [info.shape] * N
   imgFrame['npts']   = imgFrame['pts'].apply(len)
+  return imgFrame
 
-  # ipdb.set_trace()
-
-  # imgFrame = imgFrame.iloc[::3]   ## subsample images to manage data size ## MYPARAM
-
-  imgFrame['shape_rescaled'] = imgFrame['shape'].apply(lambda x: tuple((x*np.array(params.zoom)).astype(np.uint32)))
-  imgFrame['zoom_effective'] = imgFrame['shape_rescaled'] / imgFrame['shape'].apply(np.array)
-  def zoom_pts(pts,scale):
-    """
-    rescale pts to be consistent with scipy.ndimage.zoom(img,scale)
-    """
-    # assert type(pts) is np.ndarray
-    pts = pts+0.5                         ## move origin from middle of first bin to left boundary (array index convention)
-    pts = pts * scale                     ## rescale
-    pts = pts-0.5                         ## move origin back to middle of first bin
-    pts = np.round(pts).astype(np.uint32) ## binning
-    return pts
+def addRescalingInfo2ImgFrame(imgFrame,_zoom):
   
+  ## WARNING: this must exactly replicate the way that zoom() acts on the image shape.
+  imgFrame['shape_rescaled'] = imgFrame['shape'].apply(lambda x: tuple((x*np.array(_zoom)).astype(np.uint32)))
+  imgFrame['zoom_effective'] = imgFrame['shape_rescaled'] / imgFrame['shape'].apply(np.array)  
   imgFrame['pts_rescaled']   = imgFrame.apply(lambda x: zoom_pts(x.pts, x.zoom_effective), axis=1) ## WARNING: consistent img + pts rescaling is nontrivial!
 
-  def vp(time,pts,sz_img):
+  return imgFrame
+
+
+## Stable. Create DataFrame of Virtual Patches, and reify them.
+
+def build_patchFrame(pid=0):
+  dPID = pid2params(pid)
+  info = dPID.info
+
+  imgFrame, params = build_imgFrame_and_params(pid)
+  imgFrame = imgFrame[imgFrame.labels==0]
+
+  def build_patches(time,pts,sz_img):
     df = virtualPatches(pts, sz_img, params.patch)
     df['time'] = time
     return df
 
-  df = pandas.concat([vp(time,pts,sz_img) for time,pts,sz_img in imgFrame[['time','pts_rescaled','shape_rescaled']].iloc])
+  df = pandas.concat([build_patches(time,pts,sz_img) for time,pts,sz_img in imgFrame[['time','pts_rescaled','shape_rescaled']].iloc])
   df['shape'] = df['ss_main'].apply(lambda ss: tuple(s.stop-s.start for s in ss))
   df['npts']  = df['pts'].apply(len)
   df['ss_startPt'] = df['ss_main'].apply(lambda ss: tuple(s.start for s in ss))
@@ -566,7 +490,7 @@ def build_trainingdata2(pid=0):
 
   if params.sparse: df = df[df.npts>0].reset_index()
 
-  print(f"""
+  desc = f"""
   times considered -- {repr(list(imgFrame.times2))[:50]}
   orig img shape   -- {info.shape}
   zoom factor      -- {params.zoom}
@@ -575,28 +499,26 @@ def build_trainingdata2(pid=0):
   actual patch sha -- {Counter(df['shape'])}
   pixel fraction   -- {df['shape'].apply(np.prod).sum() / (imgFrame['shape_rescaled'].apply(np.prod).sum())}
   object fraction  -- {df['npts'].sum()} / {imgFrame['npts'].sum()} ({df['npts'].sum() / imgFrame['npts'].sum()})
-  """)
+  """
+  print(desc)
   describe_virtual_samples(df)
+
+  df.desc = desc
 
   # ipdb.set_trace()
   # return
   # df = df.sample(n=4)
-
-  ipdb.set_trace()
 
   tic = time()
   f = lambda timegroup : processOneTimepoint(timegroup.name, timegroup, imgFrame, params)
   df = df.groupby('time').apply(f)
   print("Total patch creation time: ", time()-tic)
 
-  save(params, P.savedir_local / 'params.pkl')
-  # ipdb.set_trace()
-
-  df.to_pickle(P.savedir_local / 'patchFrame.pkl')
-  imgFrame.to_pickle(P.savedir_local / 'imgFrame.pkl')
+  df.to_pickle(dPID.savedir_local / 'patchFrame.pkl')
   idxs = np.linspace(0,len(df)-1,min(len(df),10)).astype(int) ## evenly sample items
-  save(samples2pngSN(df.iloc[idxs].iloc), P.savedir_local / 'sample_pngs')
+  save(samples2pngSN(df.iloc[idxs].iloc), dPID.savedir_local / 'sample_pngs')
 
+## Used by build_patchFrame
 
 def processOneTimepoint(time,patchFrame,imgFrame,params):
   """
@@ -604,7 +526,8 @@ def processOneTimepoint(time,patchFrame,imgFrame,params):
   """
   print(f"Processing {time} ...",end="\r")
   df = patchFrame
-  imfr = imgFrame.loc[time]
+  # ipdb.set_trace()
+  imfr = imgFrame.set_index('time').loc[time]
 
   raw = load(imfr['rawname'])
   lab = load(imfr['labname'])
@@ -633,7 +556,6 @@ def processOneTimepoint(time,patchFrame,imgFrame,params):
 
   return df
 
-
 def conform_szPatch(sz_img,sz_patch,divisible=8):
   """
   Ensure that patch size and box size are smaller than image and that patch_size is divisible by 8
@@ -650,40 +572,6 @@ def get_slices2(pts, sz_img, sz_patch):
 
   return slices , 'inner'
 
-def virtualPatches(pts, sz_img, sz_patch):
-  slices, ss_main = get_slices2(pts, sz_img, sz_patch)
-
-  df = DataFrame([x.__dict__ for x in slices])
-  df['ss_main'] = df[ss_main] ## varies depending on get_slices()
-
-  res = dgen.find_points_within_patches3(pts, df['ss_main'])
-  df['pts'] = [pts[np.argwhere(res[:,i])[:,0]] for i in range(len(slices))]
-
-  if pts.shape != df['pts'].iloc[0].shape: ipdb.set_trace()
-
-  return df
-
-def describe_virtual_samples(df):
-  sizes  = Counter(df['shape'])
-  counts = Counter(df['npts'])
-
-  sortedcounts = sorted(counts.keys())
-  ellipsis = "..." if len(sortedcounts) >= 10 else ""
-  sortedcounts = sortedcounts[:10]
-
-  r1 = ("{:>6}"*len(sortedcounts)).format(*[str(k) for k in sortedcounts])
-  r2 = ("{:>6}"*len(sortedcounts)).format(*[str(counts[k]) for k in sortedcounts])
-
-  print(f"""
-  Contains {len(df)} samples with {df.npts.sum()} total objects from {len(df['time'].unique())} timepoints
-  Patch Sizes --  {sizes}
-  --- Object Counts per Patch ---
-  N objects: {r1} {ellipsis} 
-  N patches: {r2} {ellipsis} 
-  Total size: {strDiskSizePatchFrame(df)}
-  """)
-
-
 def get_slices1(pts, imshape, params):
   ## subsample dataset. no overlapping patches.
   patchsize = (np.array(params.patch) // params.zoom).astype(int)  
@@ -694,95 +582,19 @@ def get_slices1(pts, imshape, params):
   # slices  = [SimpleNamespace(outer=x.outer,inner=x.inner,inner_rel=x.inner_rel) for x in slices]
   return slices , 'outer'
 
+def virtualPatches(pts, sz_img, sz_patch):
+  slices, ss_main = get_slices2(pts, sz_img, sz_patch)
 
+  df = DataFrame([x.__dict__ for x in slices])
+  df['ss_main'] = df[ss_main] ## varies depending on get_slices()
 
-## Experimental. Highly Unstable.
+  res = dgen.find_points_within_patches3(pts, df['ss_main'])
+  df['pts'] = [pts[np.argwhere(res[:,i])[:,0]] for i in range(len(slices))]
 
-def get_dataset_balance():
-  for pid in range(19*2):
-    _params = pid2params(pid)
-    I = _params.info
+  # if pts.shape != df['pts'].iloc[0].shape: ipdb.set_trace()
 
-    fullsamples = load(savedir / f"e24_isbidet_AOT/v01/pid{pid:03d}/fullsamples2")
-    counts = Counter([s.pts.shape[0] for s in fullsamples.samples])
+  return df
 
-    print(f"""
-    pid{pid:03d} on dataset {I.isbiname} / {I.dataset}
-    sample object Counts: 0:{counts[0]} nonzero:{sum(counts)-counts[0]}
-    """)
-
-@DeprecationWarning
-def get_all_dataset_sizes():
-  def f(pid):
-    _params = pid2params(pid)
-    myname = _params.info.myname
-    isbiname = _params.info.isbiname
-    dataset = _params.info.dataset
-    ltps = load(f"/projects/project-broaddus/rawdata/{myname}/traj/{isbiname}/{dataset}_traj.pkl")
-    if type(ltps) is dict: ltps = list(ltps.values())
-    npts = [len(x) for x in ltps]
-
-    n_imgs = (_params.info.stop - _params.info.start)
-    n_pix_per_img = np.prod(_params.info.shape.shape)
-    n_pixels = n_imgs * n_pix_per_img
-    n_total_objects = sum(npts)
-    n_pix_per_obj = n_pixels / n_total_objects
-
-    s = dict(
-             n_pix_per_obj=n_pix_per_obj,
-             isbiname=isbiname,
-             dataset=dataset,
-             n_imgs=n_imgs,
-             n_pix_per_img=n_pix_per_img,
-             n_total_objects=n_total_objects,
-             n_pixels=n_pixels,
-             myname=myname,
-             )
-
-    return s
-    # return dict({k:locals()[k] for k in set(locals()) - {'_params','npts'}})
-    # return dict(**locals())
-    # return dict(n_pixels=n_pixels, n_total_objects=n_total_objects, n_pix_per_obj=n_pix_per_obj)
-    # return SimpleNamespace(n_imgs=n_imgs,n_pix_per_img=n_pix_per_img,n_pixels=n_pixels,myname=myname,isbiname=isbiname,dataset=dataset,npts=npts,)
-  res = pandas.DataFrame([f(i) for i in range(19*2)])
-  # sizes = np.array([x.n_pix_per_img for x in res])
-  # print(sorted(sizes) / sizes.min())
-  return res
-
-
-def describe_all_fullsamples():
-  for pid in range(19*2): describe_fullsamples_from_pid(pid)
-
-def describe_fullsamples_from_pid(pid):
-  _params = pid2params(pid)
-  myname = _params.info.myname
-  isbiname = _params.info.isbiname
-  dataset = _params.info.dataset
-  ltps = load(f"/projects/project-broaddus/rawdata/{myname}/traj/{isbiname}/{dataset}_traj.pkl")
-  if type(ltps) is dict: ltps = list(ltps.values())
-  npts = [len(x) for x in ltps]
-
-  fname = _params.savedir_local / "fullsamples2"
-  fullsamples = load(fname)
-  print(f'    Pid {pid} Isbiname {isbiname} / {dataset}')
-  describe_samples(fullsamples.samples)
-
-def describe_samples(samples):
-  sizes  = Counter([x.raw.shape for x in samples])
-  counts = Counter([s.pts.shape[0] for s in samples])
-
-  sortedcounts = sorted(counts.keys())[:10]
-  r1 = ("{:>6}"*len(sortedcounts)).format(*[str(k) for k in sortedcounts])
-  r2 = ("{:>6}"*len(sortedcounts)).format(*[str(counts[k]) for k in sortedcounts])
-  # ipdb.set_trace()
-
-  print(f"""
-  contains {len(samples)} samples with sizes {sizes}
-  --- Object Counts per Patch ---
-  N objects: {r1} ... 
-  N patches: {r2} ... 
-  total size: {bytes2string(file_size(fname))}
-  """)
 
 
 

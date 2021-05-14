@@ -25,8 +25,8 @@ isbi_datasets = [
   ("trib_isbi_proj",  "Fluo-N3DL-TRIC"),        # 15    12 
   ("U373",            "PhC-C2DH-U373"),         # 16    14 
   ("PSC",             "PhC-C2DL-PSC"),          # 17    15 
-  ("trib_isbi", "Fluo-N3DL-TRIF"), # 18    13 
-  # ("trib_isbi/crops_2xDown", "Fluo-N3DL-TRIF"), # 18    13 
+  # ("trib_isbi", "Fluo-N3DL-TRIF"), # 18    13 
+  ("trib_isbi/crops_2xDown", "Fluo-N3DL-TRIF"), # 18    13 
   ]
 
 ## WARNING: IN XYZ ORDER!!!
@@ -68,6 +68,7 @@ def get_isbi_info(myname,isbiname,dataset):
   # d.shape = load(trackfiles[0]).shape
 
   n_raw = str(trackfiles[0])[:-4].replace("rawdata","rawdata/zarr") + ".zarr"
+  n_raw = str(trackfiles[0]) #[:-4].replace("rawdata","rawdata/zarr") + ".zarr"
   d.shape = load(n_raw).shape
   
   d.start,d.stop  = int(d.timebounds[0]), int(d.timebounds[-1])+1
