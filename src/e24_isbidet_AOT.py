@@ -14,7 +14,6 @@ from experiments_common import rchoose, partition, shuffle_and_split, parse_pid,
 import datagen as dgen
 
 # from segtools.render import rgb_max
-# from models import CenterpointModel
 # from augmend import Augmend,FlipRot90,Elastic,Rotate,Scale
 # from tracking import nn_tracking_on_ltps, random_tracking_on_ltps
 from isbi_tools import get_isbi_info, isbi_datasets, isbi_scales

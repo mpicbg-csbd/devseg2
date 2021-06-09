@@ -119,11 +119,26 @@ def e08_analyze():
   save(loss,"../expr/e08_horst/v02/loss.npy")
   return res,raw,loss
 
+
+horst_data = [
+  '/projects/project-broaddus/rawdata/HorstObenhaus/60480-openfield_00001_00001.tif',
+  '/projects/project-broaddus/rawdata/HorstObenhaus/60480-openfield_00001_00002.tif',
+  '/projects/project-broaddus/rawdata/HorstObenhaus/60480-openfield_00001_00003.tif',
+  '/projects/project-broaddus/rawdata/HorstObenhaus/60480-openfield_00001_00004.tif',
+  '/projects/project-broaddus/rawdata/HorstObenhaus/60480-openfield_00001_00005.tif',
+  '/projects/project-broaddus/rawdata/HorstObenhaus/60480-openfield_00001_00006.tif',
+  '/projects/project-broaddus/rawdata/HorstObenhaus/88592-openfield_00001_00001.tif',
+  '/projects/project-broaddus/rawdata/HorstObenhaus/88592-openfield_00001_00002.tif',
+  '/projects/project-broaddus/rawdata/HorstObenhaus/88592-openfield_00001_00003.tif',
+  '/projects/project-broaddus/rawdata/HorstObenhaus/88592-openfield_00001_00004.tif',
+  '/projects/project-broaddus/rawdata/HorstObenhaus/img60480.npy',
+  '/projects/project-broaddus/rawdata/HorstObenhaus/img88592.npy',
+  ]
+
 def e08_res():
   res = []
-  import experiments2
   for i in range(10):
-    name = experiments2.horst_data[i]
+    name = horst_data[i]
     x = load(name)
     print(x.shape)
     res.append(x[0])

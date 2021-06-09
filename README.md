@@ -1,37 +1,46 @@
-This is not a library.  
-If you want to use the code herein, you're gonna have to rename all the hard-coded paths and manually find and adjust the appropriate hyperparameters...  
-But it's not that complex, and I welcome you, oh courageous explorer, to try.  
+!!! WARNING
+This repo is WIP and the README is usually outdated.
 
-## usage and names
+This projects hosts scientific python code for detection, segmentation and tracking of cells and nuclei in 2-D and 3-D microscopy images.
 
-- `detect*.py`  data-specific modules for training centerpoint detection
-- `denoise*.py` data-specific modules for applying (Structured) Noise2Void
-- `projection*.py` data-specific 3D centerpoint detection models with 2D training data on max projections
-- `Snakemake`, `files.py`, `cluster.yaml` are for making the whole project run in parallel on the cluster
-- `evaluation.py`, `point_matcher.py`, `predict.py` for predictions and evaluations
-- `ipy.py`, `ns2dir.py` utils
-- `torch_models.py` implements U-net and associated helper funcs
+# Interactive usage
 
-To train and use a centerpoint detection model, e.g. `detect_adapt_fly.py` open ipython (on machine GPU) and do:
-
-```python
-import detect_adapt_fly
-m,d,td,ta = detect_adapt_fly.init("my_local_dir/experiment01/")
-detect_adapt_fly.train(m,d,td,ta)
-
-## names
-## m  :: models (update in place)
-## vd :: validation data
-## td :: training data
-## ta :: training artifacts (update in place)
-
-import predict
-from skimage.feature  import peak_local_max
-
-result_image = predict.apply_net_tiled_3d(m.net,input_image) ## takes care of tiling large images. type(input_image) is np.ndarray.
-centerpoints = peak_local_max(result_image,threshold_abs=0.2,exclude_border=False,footprint=np.ones((3,3,3)))
+```bash
+cd devseg_2/src
+ipython ## python>=3.5
 ```
 
-if you want to stop training just use Ctrl-C, it will restart at the same iteration where you left off because of state in ta and m.
+then in ipython on a machine with a GPU + CUDA.
+```python
+import e24_isbidet_AOT as A
+import e24_trainer as B
+
+## looks for Fluo-N2DH-GOWT1/01/t*.tif in /projects/project-broaddus/rawdata/GOWT1/
+
+A.build_patchFrame(pid=16) # generate training data
+B.train(pid=16) # train a CP-Net model
+B.evaluate(pid=16) ## scores on train/vali/test patches
+B.evaluate_imgFrame(pid=16) ## scores on full images
+
+```
 
 
+---
+
+
+old, deprecated ipython workflow...
+```python
+## blocking cuda enables straightforward time profiling
+export CUDA_LAUNCH_BLOCKING=1
+ipython
+
+import denoiser, detector, tracking
+import networkx as nx
+import numpy_indexed as ndi
+
+import numpy as np
+from segtools.ns2dir import load,save,toarray
+import experiments2 as ex
+import analysis2, ipy
+%load_ext line_profiler
+```

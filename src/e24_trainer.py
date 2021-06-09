@@ -57,6 +57,7 @@ import e24_isbidet_AOT
 # memory = e24_isbidet_AOT.memory
 from e24_isbidet_AOT import zoom_pts
 import tracking
+from segtools import scores_dense
 
 
 savedir = savedir_global()
@@ -670,14 +671,13 @@ def evaluate_imgFrame(pid=0,swap=False):
   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
   net = _init_unet_params(info.ndim).net
   net = net.to(device)
-  
   weights = f"/projects/project-broaddus/devseg_2/expr/e24_isbidet_AOT/v01/pid{pid_2:03d}/m/best_weights_loss.pt"
   net.load_state_dict(torch.load(weights))  ## MYPARAM use loss, f1, or some other vali metric ?
 
   def eval_sample(sample,withImageData=True):
 
     s  = sample
-    print(f"predict on time {s.time}",end="\r")
+    print(f"predict on time {s.time}",end="\r") 
 
     raw = load(s.rawname).astype(np.float)
     o_shape = raw.shape ## original shape
@@ -861,8 +861,6 @@ def evaluate_imgFrame(pid=0,swap=False):
   agg_scores['ISBI_TRA'] = dDetTra['tra']
   agg_scores.to_pickle(savedir_local / f'agg_scores{ext}.pkl')
 
-from segtools import scores_dense
-
 def test_outputs():
   img = load("/projects/project-broaddus/rawdata/trib_isbi/crops_2xDown/Fluo-N3DL-TRIF/01/t007.tif").astype(np.float)
   res = load("/projects/project-broaddus/rawdata/trib_isbi/crops_2xDown/Fluo-N3DL-TRIF/01_RES/mask007.tif")
@@ -912,7 +910,6 @@ def get_exemplars_imgFrame(table, metricNames = ['f1','recall','height']):
         pass
 
   return exemplars
-
 
 def mkpng(imgFrameRow):
   R = imgFrameRow

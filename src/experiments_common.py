@@ -2,25 +2,8 @@
 ## blocking cuda enables straightforward time profiling
 export CUDA_LAUNCH_BLOCKING=1
 ipython
-
-import denoiser, detector, tracking
-import networkx as nx
-#import numpy_indexed as ndi
-#import experiments2 as ex
-import analysis2, ipy
-import e22_flywing as e22
-
-import numpy as np
-from segtools.ns2dir import load,save,toarray
-import e21_isbidet as e21
-import e23_mauricio as e23
-import e24_isbi_datagen as e24
-
 %load_ext line_profiler
 """
-
-# from types import SimpleNamespace
-
 
 import ipdb
 import itertools

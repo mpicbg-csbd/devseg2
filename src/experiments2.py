@@ -1,20 +1,6 @@
 """
-## blocking cuda enables straightforward time profiling
-export CUDA_LAUNCH_BLOCKING=1
-ipython
+Detection and denoising.
 
-import denoiser, detector, tracking
-import networkx as nx
-import numpy_indexed as ndi
-
-import numpy as np
-from segtools.ns2dir import load,save,toarray
-import experiments2 as ex
-import analysis2, ipy
-%load_ext line_profiler
-"""
-
-"""
 Each function of the form `eXX_name` is a self-contained experiment.
 Each is parameterized by a single integer param ID (pid).
 The remaining functions are helpers in some way: usually building method configurations.
@@ -22,9 +8,6 @@ The top level function `run_slurm` will submit All Experiments x All Parameters 
 The top level value `savedir` controls a single global output home for all experiments.
 """
 
-"""
-Detection and denoising.
-"""
 
 # import torch
 # from torch import nn
