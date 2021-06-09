@@ -1,54 +1,41 @@
-# %load ipy.py
-# import torch
-# from torch import nn
-# import torch_models
-import itertools
-# from math import floor,ceil
-import numpy as np
+"""
+WIP
+recursively rescale a folder full of RAW images and associated GT labels.
+GT images with uint labels are converted to list-of-dict format with various object properties.
+"""
+
+
+from experiments_common import iterdims
+from glob import glob
+from matplotlib import pyplot as plt
+from pandas import DataFrame
+from pathlib import Path
+from scipy.ndimage import label,zoom
+from segtools.ns2dir import load,save,flatten_sn,toarray
+from segtools.numpy_utils import normalize3
+from segtools.point_tools import trim_images_from_pts2
 from skimage.feature  import peak_local_max
 from skimage.measure  import regionprops, regionprops_table
-# import tifffile
-from pathlib import Path
-
-# from isbi_tools import get_isbi_info, isbi_datasets, isbi_scales
-from segtools.point_tools import trim_images_from_pts2
-import matplotlib
-
-savedir_global = Path("/projects/project-broaddus/devseg_2/expr/")
-
 from time import time
-from glob import glob
-
-
-# from subprocess import Popen,run
-# from segtools.math_utils import conv_at_pts_multikern
-# import files
-# from segtools.numpy_utils import normalize3
-# from segtools.render import get_fnz_idx2d
-from segtools.ns2dir import load,save,flatten_sn,toarray
 from types import SimpleNamespace
-from segtools.point_tools import trim_images_from_pts2
-import shutil
-import re
-from experiments_common import iterdims
-
-from segtools.numpy_utils import normalize3
-from matplotlib import pyplot as plt
-
-
-import pandas
-from pandas import DataFrame
+import ipdb
+import itertools
+import matplotlib
+import numpy as np
 import os
+import pandas
+import re
+import shutil
+import zarr
+
 
 try:
     import gputools
 except ImportError as e:
     print("Can't import gputools on non-gpu node...\n", e)
 
-from scipy.ndimage import label,zoom
-import zarr
+savedir_global = Path("/projects/project-broaddus/devseg_2/expr/")
 
-import ipdb
 
 
 def swap_root(path, oldroot, newroot):
@@ -114,7 +101,6 @@ def rescale_dataset(oldroot,newroot,scale=(1,0.5,0.5),crop=False,ltps=None):
 
         zarr.save_array(str(newname),x)
 
-
 def myzoom(img,scale):
   _dt = img.dtype
   if x.ndim==2 and 'int' in str(_dt):
@@ -126,7 +112,6 @@ def myzoom(img,scale):
   if x.ndim==3 and 'float' in str(_dt):
     img = gputools.scale(img,scale,interpolation='linear').astype(_dt)
   return img
-
 
 def test_rescale():
   myname = "H157"

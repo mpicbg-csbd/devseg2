@@ -1,0 +1,53 @@
+datagen             	['expand_labels_scikit']      	from expand_labels_scikit import expand_labels
+detector            	['isbi_tools']                	import isbi_tools
+detector2           	['isbi_tools']                	import isbi_tools
+e21_isbidet         	['datagen']                   	import datagen
+e21_isbidet         	['experiments_common']        	from experiments_common import rchoose, partition, shuffle_and_split, parse_pid, iterdims, savedir_global
+e21_isbidet         	['isbi_tools']                	from isbi_tools import get_isbi_info, isbi_datasets, isbi_scales
+e21_isbidet_predict 	['datagen']                   	from datagen import place_gaussian_at_pts
+e21_isbidet_predict 	['experiments_common']        	from experiments_common import rchoose, partition, shuffle_and_split, parse_pid, iterdims, savedir_global
+e21_isbidet_predict 	['isbi_tools']                	from isbi_tools import get_isbi_info, isbi_datasets, isbi_scales
+e21_isbidet_predict 	['models']                    	# from models import CenterpointModel, SegmentationModel, StructN2V
+e21_isbidet_predict 	['tracking']                  	# from tracking import nn_tracking_on_ltps, random_tracking_on_ltps
+e22_flywing         	['experiments_common']        	from experiments_common import *
+e23_mauricio        	['datagen']                   	import datagen
+e23_mauricio        	['experiments_common']        	from experiments_common import rchoose, partition, shuffle_and_split, parse_pid, iterdims, savedir_global
+e23_mauricio        	['models']                    	from models import CenterpointModel, SegmentationModel
+e24_isbidet_AOT     	['datagen']                   	import datagen as dgen
+e24_isbidet_AOT     	['e21_common']                	# from e21_common import *
+e24_isbidet_AOT     	['experiments_common']        	from experiments_common import rchoose, partition, shuffle_and_split, parse_pid, iterdims, savedir_global
+e24_isbidet_AOT     	['isbi_tools']                	from isbi_tools import get_isbi_info, isbi_datasets, isbi_scales
+e24_isbidet_AOT     	['tracking']                  	# from tracking import nn_tracking_on_ltps, random_tracking_on_ltps
+e24_trainer         	['datagen']                   	import datagen
+e24_trainer         	['datagen']                   	import datagen as dgen
+e24_trainer         	['e24_isbidet_AOT']           	  # import e24_isbidet_AOT
+e24_trainer         	['e24_isbidet_AOT']           	from e24_isbidet_AOT import zoom_pts
+e24_trainer         	['e24_isbidet_AOT']           	import e24_isbidet_AOT
+e24_trainer         	['expand_labels_scikit']      	from expand_labels_scikit import expand_labels
+e24_trainer         	['experiments_common']        	from experiments_common import rchoose, partition, shuffle_and_split, parse_pid, iterdims, savedir_global
+e24_trainer         	['isbi_tools']                	from isbi_tools import get_isbi_info, isbi_datasets, isbi_scales
+e24_trainer         	['tracking']                  	import tracking
+e25_isbi_segment    	['datagen']                   	import datagen
+e25_isbi_segment    	['experiments_common']        	from experiments_common import rchoose, partition, shuffle_and_split, parse_pid, iterdims, savedir_global
+e25_isbi_segment    	['isbi_tools']                	from isbi_tools import get_isbi_info, isbi_datasets, isbi_scales
+e25_isbi_segment    	['models']                    	import models
+experiments2        	['datagen']                   	import datagen
+experiments2        	['denoise_utils']             	import denoiser, denoise_utils
+experiments2        	['detector']                  	import detector #, detect_utils
+experiments2        	['detector2']                 	import detector2
+experiments2        	['e19_tracking']              	slurm.e19 = 'sbatch -J e19_{pid:03d} -n 1 -t 1:00:00 -c 4 --mem 128000 -o slurm/e19_pid{pid:03d}.out -e slurm/e19_pid{pid:03d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e19_tracking({pid})\"\' '
+experiments2        	['e21_isbidet']               	slurm.e21 = 'sbatch -J e21_{pid:03d} -p gpu --gres gpu:1 -n 1 -t  6:00:00 -c 1 --mem 128000 -o slurm/e21_pid{pid:03d}.out -e slurm/e21_pid{pid:03d}.err --wrap \'python3 -c \"import ex2copy; ex2copy.e21_isbidet({pid})\"\' '
+experiments2        	['expand_labels_scikit']      	from expand_labels_scikit import expand_labels
+experiments2        	['isbi_tools']                	from isbi_tools import get_isbi_info, isbi_datasets, isbi_scales
+experiments2        	['tracking']                  	import tracking
+get_cell_stats      	['experiments_common']        	from experiments_common import parse_pid
+get_cell_stats      	['isbi_tools']                	from isbi_tools import get_isbi_info, isbi_datasets
+ipy                 	['experiments_common']        	from experiments_common import iterdims
+ipy                 	['isbi_tools']                	# from isbi_tools import get_isbi_info, isbi_datasets, isbi_scales
+models              	['datagen']                   	from datagen import shape2slicelist, jitter_center_inbounds, sample_slice_from_volume
+models              	['denoise_utils']             	import denoise_utils
+models              	['experiments_common']        	# from experiments_common import *
+models              	['experiments_common']        	from experiments_common import rchoose, partition, shuffle_and_split
+rescale_data        	['experiments_common']        	from experiments_common import iterdims
+tracking            	['datagen']                   	from datagen import mantrack2pts
+tracking            	['expand_labels_scikit']      	from expand_labels_scikit import expand_labels
