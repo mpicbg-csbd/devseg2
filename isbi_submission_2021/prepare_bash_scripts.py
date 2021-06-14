@@ -3,9 +3,6 @@ Make the bash scripts required for ISBI CSC/CTC compliance from `template.sh`.
 Move the weights appropriate for each model into the `models/` folder.
 """
 
-
-
-
 from glob import glob
 import os
 import shutil
@@ -36,7 +33,7 @@ isbi_datasets = [
   ]
 
 
-def run():
+def main():
 
 	for i in range(38):
 		weightname_in = f"../expr/e24_isbidet_AOT/v01/pid{i:03d}/m/best_weights_loss.pt"
@@ -78,4 +75,4 @@ def run():
 		run([f"chmod +x {fout}"],shell=True)
 
 if __name__=="__main__":
-	run()
+	main()

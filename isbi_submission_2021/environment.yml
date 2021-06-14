@@ -5,6 +5,7 @@ dependencies:
   - ipython
   - tifffile
   - numpy
+  - tqdm
   - scipy
   - scikit-image
   - pytorch
