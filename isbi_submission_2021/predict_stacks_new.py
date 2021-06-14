@@ -12,10 +12,13 @@ import numpy as np
 import pickle
 import re
 
+import sys
 from scipy.ndimage import zoom,label
 from skimage.feature  import peak_local_max
 from tifffile import imread, imsave
 import torch
+
+from tqdm import tqdm
 
 import torch_models
 
@@ -245,6 +248,7 @@ def predict_and_save_segmentation(indir,outdir,cpnet_weights,seg_weights,params)
 
   t0 = time()
 
+  Path(outdir).mkdir(parents=True,exist_ok=True)
   cpnet = _init_unet_params(params.ndim).net
   # cpnet  = torch.load(cpnet_weights)
   cpnet.load_state_dict(torch.load(cpnet_weights))
@@ -252,11 +256,11 @@ def predict_and_save_segmentation(indir,outdir,cpnet_weights,seg_weights,params)
   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
   cpnet  = cpnet.to(device)
 
-  fileglob = sorted(Path(indir).glob("*.tif"))
-  print(f"Running detection over {len(fileglob)} files...")
+  fileglob = sorted(Path(indir).glob("t*.tif"))
+  print(f"Running detection over {len(fileglob)} files...\n\n",flush=True)
   # ipdb.set_trace()
 
-  for rawname in fileglob:
+  for rawname in tqdm(fileglob, ascii=True, file=sys.stdout):
     
     inname = Path(rawname).name
 
@@ -268,13 +272,13 @@ def predict_and_save_segmentation(indir,outdir,cpnet_weights,seg_weights,params)
     # ipdb.set_trace()
 
     outname = "mask" + inname[1:] ## remove the 't'
+
     seg = eval_sample_predOnly(rawname,cpnet,segnet,params)
+    # print(f"finished image: {rawname}",end="\r", flush=True)
     seg = seg.astype(np.uint16)
     imsave(Path(outdir)/outname, seg)
 
 def eval_sample_predOnly(rawname,cpnet,segnet,params):
-
-  print(f"segmenting image: {rawname}",end="\r")
 
   raw = imread(rawname).astype(np.float)
   o_shape = raw.shape ## original shape
