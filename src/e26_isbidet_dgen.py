@@ -223,8 +223,9 @@ def cpnet_ISBIdata_specialization(params,info,pid):
     # p.zoom = (1,1/4,1/4)
     p.zoom = (1,1/2,1/2)
   if isbiname=="Fluo-C2DL-MSC":
-    a,b = info.shape
-    p.zoom = {'01':(1/4,1/4), '02':(128/a, 200/b)}[info.dataset]
+    # a,b = info.shape
+    # p.zoom = {'01':(1/4,1/4), '02':(128/a, 200/b)}[info.dataset]
+    p.zoom = 1/4, 1/4
     ## '02' rescaling is almost exactly isotropic while still being divisible by 8.
   if isbiname=="DIC-C2DH-HeLa":
     # p.kern = [7,7]
@@ -232,6 +233,7 @@ def cpnet_ISBIdata_specialization(params,info,pid):
   if isbiname=="Fluo-N3DL-DRO":
     p.kern = [1.5,3,3]
     p.subsample_traintimes = slice(0,None,10)
+
 
 
   ## ignore errors when one object is within evalBorder of XY image boundary
@@ -246,24 +248,18 @@ def cpnet_ISBIdata_specialization(params,info,pid):
 
   if pid in [0,1,2,3]:
     p.subsample_traintimes = slice(0,None,30)
-
   if pid in [22,23]: p.subsample_traintimes = slice(0,None,2) ## 
   if pid in [26,27,29]: p.subsample_traintimes = slice(0,None,3) ## 
   if pid in [30]: p.subsample_traintimes = slice(0,None,2) ## Fluo-N3DL-TRIC
   if pid in [31]: p.subsample_traintimes = slice(0,None,8) ## Fluo-N3DL-TRIC
-
   if pid in [32,33]:
     pass
   if pid in[34,35]:
     p.kern = [3,3]
-
   if pid in [36,37]:
     p.subsample_traintimes = slice(0,None,4)
 
   # print("AFTER SPECIALIZATION: ", p)
-
-
-
 
 ## Stable. Create Dataframe of Virtual Images. 
 

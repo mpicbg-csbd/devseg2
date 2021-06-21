@@ -96,27 +96,27 @@ def memoize(closure,filename,force=False):
 
 @DeprecationWarning
 def mycache(file_name):
-    # varname = ".cached_" + file_name + ".pkl"    
-    def decorator(original_func):
+  # varname = ".cached_" + file_name + ".pkl"    
+  def decorator(original_func):
 
-        # try:
-        #     # cache = json.load(open(file_name, 'r'))
-        #     cache = load(file_name)
-        #     cache_vars = load(varname)
-        # except (IOError, ValueError):
-        #     cache = {}
+      # try:
+      #     # cache = json.load(open(file_name, 'r'))
+      #     cache = load(file_name)
+      #     cache_vars = load(varname)
+      # except (IOError, ValueError):
+      #     cache = {}
 
-        def new_func(param):
-          file_name = file_name.format(**locals())
-          if param not in cache:
-              cache[param] = original_func(param)
-              save
-              json.dump(cache, open(file_name, 'w'))
-          return cache[param]
+      def new_func(param):
+        file_name = file_name.format(**locals())
+        if param not in cache:
+            cache[param] = original_func(param)
+            save
+            json.dump(cache, open(file_name, 'w'))
+        return cache[param]
 
-        return new_func
+      return new_func
 
-    return decorator
+  return decorator
 
 
 
@@ -186,8 +186,8 @@ def train(pid,continue_training=False):
     Savedir is {savedir_local}
     """)
 
-  ds1,params1,_pngs = e26_isbidet_dgen.build_patchFrame(pid)
-  ds2,params2,_pngs = e26_isbidet_dgen.build_patchFrame(pid+1)
+  ds1,params1,_pngs = e26_isbidet_dgen.build_patchFrame(2*pid)
+  ds2,params2,_pngs = e26_isbidet_dgen.build_patchFrame(2*pid+1)
 
   # df = ds1.concat(ds2)
   df = pandas.concat([ds1,ds2])
@@ -203,6 +203,8 @@ def train(pid,continue_training=False):
   # ipdb.set_trace()
 
   P = params
+
+  # ipdb.set_trace()
 
   ## loss and network
   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -387,9 +389,9 @@ def evaluate(pid=0):
     """)
 
   traindir = savedir / f"e26_isbidet/train/pid{pid:03d}/"   ## we can use the same PID for train() and evaluate()
-  samples = load(traindir / "patchFrame.pkl")
+  samples  = load(traindir / "patchFrame.pkl")
   samples.reset_index(inplace=True)
-  samples['labels'] = load(traindir / "labels.pkl").astype(np.uint8)
+  samples['labels'] = load(traindir / "labels.pkl").astype(np.uint8) #[::-1]
   params = load(traindir / "params.pkl")
 
   ## filter out empty patches
@@ -449,7 +451,6 @@ def evaluate(pid=0):
 
     # _set =   samples['set']     = [['train','vali','test'][l] for l in samples.labels]
 
-
     res = dict(
      time = s.time,
      yPred =     y,
@@ -468,7 +469,7 @@ def evaluate(pid=0):
     return res
   
   f = lambda : pandas.DataFrame([eval_sample(s) for s in samples.iloc])
-  table = memoize(f,savedir_local/"scores_patchTable.pkl")
+  table = memoize(f,savedir_local/"scores_patchTable.pkl",force=1)
 
   metricNames = ['logloss','f1','recall','height']
   print('\n'+' '*15 + "Metric Means\n",table.groupby('set')[metricNames].mean())
@@ -532,17 +533,18 @@ def evaluate_imgFrame(pid=0,swap=False):
 
   t0 = time()
 
-  (p0,p1),pid = parse_pid(pid,[19,2])
-  savedir_local = savedir / f'e24_isbidet_AOT_on_both/v01/pid{pid:03d}/'
+  (p0,),pid = parse_pid(pid,[19])
+  savedir_local = savedir / f'e26_isbidet/evaluate_imgFrame/pid{pid:03d}/'
   myname, isbiname = isbi_datasets[p0] # v05
-  trainset = ["01","02"][p1] # v06
-  info = get_isbi_info(myname,isbiname,trainset)
+  # trainset = ["01","02"][p1] # v06
+  info = get_isbi_info(myname,isbiname,"01") ## NOTE. we use both 01/02
   
   p2  = {True:1, False:0}[swap]
   ext = '_2' if swap else '_1'
-  ## MYPARAM predict on opposite dataset
-  pid_2 = pid + 1 if pid%2==0 else pid -1
-  pid_2 = pid_2 if swap else pid
+
+  # ## MYPARAM predict on opposite dataset
+  # pid_2 = pid + 1 if pid%2==0 else pid -1
+  # pid_2 = pid_2 if swap else pid
 
 
   print(f"""
@@ -550,7 +552,8 @@ def evaluate_imgFrame(pid=0,swap=False):
     Savedir is {savedir_local}
     """)
 
-  samples, params = e24_isbidet_AOT_on_both.build_imgFrame_and_params(pid)
+  samples, params = e26_isbidet_dgen.build_imgFrame_and_params([pid,0])
+
   # samples = samples.iloc[::10]
   samples['set']     = [['train','test'][l] for l in samples.labels]
   # samples.reset_index(inplace=True)
@@ -565,7 +568,7 @@ def evaluate_imgFrame(pid=0,swap=False):
   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
   net = _init_unet_params(info.ndim).net
   net = net.to(device)
-  weights = f"/projects/project-broaddus/devseg_2/expr/e24_isbidet_AOT_on_both/v01/pid{pid_2:03d}/m/best_weights_loss.pt"
+  weights = f"/projects/project-broaddus/devseg_2/expr/e26_isbidet/train/pid{pid:03d}/m/best_weights_loss.pt"
   net.load_state_dict(torch.load(weights))  ## MYPARAM use loss, f1, or some other vali metric ?
 
   def eval_sample(sample,withImageData=True):
@@ -737,6 +740,7 @@ def evaluate_imgFrame(pid=0,swap=False):
 
   def det_tra():
     ltps = list(table.yPts)
+    ipdb.set_trace()
     tb = tracking.nn_tracking_on_ltps(ltps=ltps, scale=info.scale, dub=60)
     tracking.eval_tb_isbi(tb,info,savedir_local)
     # ## add {ext} to 01_DET.txt 01_TRA.txt
@@ -749,11 +753,14 @@ def evaluate_imgFrame(pid=0,swap=False):
       tra = re.match(r'TRA measure: (\d\.\d+)',file.read()).group(1)
     return dict(det=det,tra=tra,ext=ext)
 
-  dDetTra = memoize(det_tra,savedir_local/f'dDetTra{ext}.pkl',force=1)
+  # dDetTra = memoize(det_tra,savedir_local/f'dDetTra{ext}.pkl',force=1)
+  # agg_scores['ISBI_DET'] = dDetTra['det']
+  # agg_scores['ISBI_TRA'] = dDetTra['tra']
 
-  agg_scores['ISBI_DET'] = dDetTra['det']
-  agg_scores['ISBI_TRA'] = dDetTra['tra']
   agg_scores.to_pickle(savedir_local / f'agg_scores{ext}.pkl')
+
+
+
 
 def test_outputs():
   img = load("/projects/project-broaddus/rawdata/trib_isbi/crops_2xDown/Fluo-N3DL-TRIF/01/t007.tif").astype(np.float)
@@ -843,7 +850,6 @@ def compile_agg_scores():
   df = mk_single('_1')
   df = mk_single('_2')
   # ipdb.set_trace()
-
 
 def compile_scores_imgFrame():
 
