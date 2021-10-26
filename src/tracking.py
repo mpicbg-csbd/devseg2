@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 
 from skimage.io import imread
-from skimage.measure import regionprops_table
+from skimage.measure import regionprops, regionprops_table
 
 from segtools.ns2dir import load, save, toarray
 from segtools.math_utils import conv_at_pts_multikern
@@ -337,6 +337,8 @@ def tb2lbep(tb):
 
 
 
+
+
 ## Reading/Writing to disk
 
 def _load_mantrack(path,dset,idx):
@@ -399,7 +401,8 @@ def load_isbi2nap(path,dset,ntimes,):
   return nap
 
 
-from datagen import mantrack2pts
+# from datagen import mantrack2pts
+def mantrack2pts(mantrack): return np.array([r.centroid for r in regionprops(mantrack)],np.int)
 
 def save_isbi_tb(tb,info,_kern=None):
 

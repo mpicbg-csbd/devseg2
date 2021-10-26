@@ -5,7 +5,7 @@ from segtools.ns2dir import load, save, toarray
 import re
 
 
-## (myname, isbiname) | my order | official order
+## (myname, isbiname) | my order | official ISBI order
 isbi_datasets = [
   ("HSC",             "BF-C2DL-HSC"),           #  0     0 
   ("MuSC",            "BF-C2DL-MuSC"),          #  1     1 

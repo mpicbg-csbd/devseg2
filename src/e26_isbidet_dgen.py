@@ -203,7 +203,7 @@ def cpnet_ISBIdata_specialization(params,info,pid):
   p.traintime = 200
   p.scale = info.scale
   p.sparse = True if info.isbiname in ["Fluo-N3DL-DRO", "Fluo-N3DL-TRIC", "Fluo-N3DL-TRIF",] else False
-  p.subsample_traintimes = slice(None)
+  p.subsample_traintimes = slice(0,None,4)
 
   if isbiname in ["Fluo-N3DH-CE", "Fluo-N3DH-SIM+","PhC-C2DH-U373"]:
     p.zoom  = {3:(1,0.5,0.5), 2:(0.5,0.5)}[info.ndim]
@@ -252,11 +252,11 @@ def cpnet_ISBIdata_specialization(params,info,pid):
   if pid in [26,27,29]: p.subsample_traintimes = slice(0,None,3) ## 
   if pid in [30]: p.subsample_traintimes = slice(0,None,2) ## Fluo-N3DL-TRIC
   if pid in [31]: p.subsample_traintimes = slice(0,None,8) ## Fluo-N3DL-TRIC
-  if pid in [32,33]:
+  if pid in [32,33]: # "PhC-C2DH-U373" 
     pass
-  if pid in[34,35]:
+  if pid in[34,35]: # "PhC-C2DL-PSC"
     p.kern = [3,3]
-  if pid in [36,37]:
+  if pid in [36,37]: ## TRIF
     p.subsample_traintimes = slice(0,None,4)
 
   # print("AFTER SPECIALIZATION: ", p)
@@ -268,18 +268,19 @@ def build_imgFrame_and_params(pid=0):
   info = dPID.info
   
   print(f"""
-    Begin `build_trainingdata2()` on pid {pid} ... {info.isbiname} / {info.dataset}.
+    Begin `build_imgFrame_and_params()` on pid {pid} ... {info.isbiname} / {info.dataset}.
     """)
   # Savedir is IRRELEVANT ~~{dPID.savedir_local}~~
 
   imgFrame = pid2ImgFrame(info)
   params  = init_params(info.ndim)
-  cpnet_ISBIdata_specialization(params,info,pid)
+  cpnet_ISBIdata_specialization(params,info,dPID.pid)
 
   ## train = 0; test = 1
   labels = np.ones(len(imgFrame),dtype=np.uint8)
   labels[params.subsample_traintimes] = 0
   imgFrame['labels'] = labels
+  # ipdb.set_trace()
   
   imgFrame = addRescalingInfo2ImgFrame(imgFrame,params.zoom)
 
@@ -321,7 +322,7 @@ def build_patchFrame(pid=0):
   dPID = pid2params(pid)
   info = dPID.info
 
-  imgFrame, params = build_imgFrame_and_params(pid)
+  imgFrame, params = build_imgFrame_and_params(dPID.pid)
   imgFrame = imgFrame[imgFrame.labels==0]
 
   def build_patches(time,pts,sz_img):

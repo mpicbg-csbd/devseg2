@@ -3,9 +3,8 @@
 dependencies:
   - python=3.6
   - ipython
-  - tifffile
+  - tifffile=2020
   - numpy
-  - tqdm
   - scipy
   - scikit-image
   - pytorch

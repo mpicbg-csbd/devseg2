@@ -661,7 +661,7 @@ def evaluate_imgFrame(pid=0,swap=False):
   samples['set']     = [['train','test'][l] for l in samples.labels]
   # samples.reset_index(inplace=True)
 
-  # ipdb.set_trace()
+  ipdb.set_trace()
   
   print("How many pts per patch? ", Counter(samples['npts']))
   

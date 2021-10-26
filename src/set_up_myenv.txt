@@ -1,0 +1,33 @@
+# setting up python virtual env on the cluster 
+
+```
+# -- prediction only
+
+# setting up venv on the cluster
+# be careful that $PYTHONPATH is not set! And that we haven't loaded python3/3.7.4 ! or pip is screwed
+# we want python 3.6 
+
+pip install --upgrade pip ## verions 10 is broken. we want 21.
+pip install ipython
+pip install jedi==0.17.2
+pip install numpy
+pip install torch
+pip install tifffile
+pip install scipy
+pip install scikit-image
+pip install imagecodecs
+pip install pykdtree
+
+
+# -- for training (extra)
+
+pip install pandas
+pip install ipdb
+pip install -e ../../segtools/ # this really is way too big... installs all kinds of unnecessary stuff
+pip install zarr
+pip install git+https://github.com/stardist/augmend.git
+pip install psutil
+pip install tqdm
+pip install gputools
+pip install numpy_indexed
+```

@@ -1,9 +1,9 @@
 # #!/bin/bash
 
 echo "Current dir: $(pwd)"
-echo "Current Python: $(which python3)"
+# echo "Current Python: $(which python)"
 
-python3 predict_stacks_new.py \
+./my_env3/bin/python3 predict_stacks_new.py \
 	-i "<indir>" \
 	-o "<outdir>" \
 	--cpnet_weights "models/<weightname>" \

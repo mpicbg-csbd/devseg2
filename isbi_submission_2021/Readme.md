@@ -5,7 +5,7 @@ Python scripts to perform cell detection/segmentation with CP-Net.
 
 The bash scripts in this folder follow the ISBI CTC calling convention.
 They are runnable without args, i.e. as `./Fluo-N2DH-GOWT1-01.sh` in the cwd.
-Associated folders of TIF files are expected to be located in `../Fluo-N2DH-GOWT1/01/` with names in glob `t*.tif`.
+Associated folders of raw data (TIFF) files are expected to be located in `../Fluo-N2DH-GOWT1/01/` with names in glob `t*.tif`.
 
 These bash scripts run `predict_stacks_new.py` with data-specific params.
 

@@ -31,7 +31,7 @@ from torch.utils.data import IterableDataset, DataLoader
 
 try:
     import gputools
-except ImportError as e:
+except Exception as e:
     print("Can't import gputools on non-gpu node...\n", e)
 
 from experiments_common import rchoose, partition, shuffle_and_split, parse_pid, iterdims, savedir_global
@@ -155,43 +155,41 @@ def build_augmend(ndim):
 
 ## Unstable. Main Training function.
 
-# def pid2params(pid):
-#   (p0,),pid = parse_pid(pid,[19])
-#   savedir_local = savedir / f'e26_isbidet/train/pid{pid:03d}/'
-#   myname, isbiname = isbi_datasets[p0] # v05
-#   # trainset = ["01","02"][p1] # v06
-#   info01 = get_isbi_info(myname,isbiname,"01")
-#   info02 = get_isbi_info(myname,isbiname,"02")
-#   return SimpleNamespace(**locals())
 
-
-
+"""
+Train a new model with either 01,02,or both datasets.
+The specific images used are determined by `params.subsample_traintimes`
+"""
 def train(pid,continue_training=False):
 
-  (p0,),pid = parse_pid(pid,[19])
+  (p1,p0,),pid = parse_pid(pid,[3,19])
+  ## p1 : 0 = both, 1 = 01, 2 = 02
+
   savedir_local = savedir / f'e26_isbidet/train/pid{pid:03d}/'
   myname, isbiname = isbi_datasets[p0] # v05
 
-  # trainset = ["01","02"][p1] # v06
-  info01 = get_isbi_info(myname,isbiname,"01")
-  info02 = get_isbi_info(myname,isbiname,"02")
+  if p1==0:
+    info01 = get_isbi_info(myname,isbiname,"01")
+    info02 = get_isbi_info(myname,isbiname,"02")
+    ds1,params1,_pngs = e26_isbidet_dgen.build_patchFrame([p0,0])
+    ds2,params2,_pngs = e26_isbidet_dgen.build_patchFrame([p0,1])
+    df = pandas.concat([ds1,ds2])
+    info = info01
+    params = params1
+  if p1==1:
+    info = get_isbi_info(myname,isbiname,"01")
+    df,params,_pngs = e26_isbidet_dgen.build_patchFrame([p0,0])
+  if p1==2:
+    info = get_isbi_info(myname,isbiname,"02")
+    df,params,_pngs = e26_isbidet_dgen.build_patchFrame([p0,1])
 
-  # dPID = pid2params(pid)
-
-  # info01 = dPID.info01
-  # savedir_local = dPID.savedir_local
 
   print(f"""
-    Begin pid {pid} ... {info01.isbiname} both 01 and 02.
+    Begin pid {pid} ... {info.isbiname}
+    p0 = {p0} 
+    =>  p1 : 0 = both, 1 = 01, 2 = 02
     Savedir is {savedir_local}
     """)
-
-  ds1,params1,_pngs = e26_isbidet_dgen.build_patchFrame(2*pid)
-  ds2,params2,_pngs = e26_isbidet_dgen.build_patchFrame(2*pid+1)
-
-  # df = ds1.concat(ds2)
-  df = pandas.concat([ds1,ds2])
-  params = params1
 
   save(df,savedir_local / 'patchFrame.pkl')
   save(params, savedir_local / 'params.pkl')
@@ -200,15 +198,11 @@ def train(pid,continue_training=False):
   # params = load(savedir_local / "params.pkl")
   e26_isbidet_dgen.describe_virtual_samples(df)
 
-  # ipdb.set_trace()
-
   P = params
-
-  # ipdb.set_trace()
 
   ## loss and network
   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-  net = _init_unet_params(info01.ndim).net
+  net = _init_unet_params(info.ndim).net
   net = net.to(device)
 
   ## MYPARAM continue training existing dataset
@@ -220,12 +214,22 @@ def train(pid,continue_training=False):
     net.load_state_dict(torch.load(savedir_local / f'm/best_weights_latest.pt')) ## MYPARAM start off from best_weights ?
     history = load(savedir_local / 'history.pkl')
   else:
-    N = len(df)
-    a,b = N*5//8,N*7//8  ## MYPARAM train / vali / test fractions
-    labels = np.zeros(N,dtype=np.uint8)
-    labels[a:b]=1; labels[b:]=2 ## 0=train 1=vali 2=test
-    np.random.shuffle(labels)
-    save(labels, savedir_local / "labels.pkl")
+    if p1!=0:
+      N = len(df)
+      a,b = N*5//8,N*7//8  ## MYPARAM train / vali / test fractions
+      labels = np.zeros(N,dtype=np.uint8)
+      labels[a:b]=1; labels[b:]=2 ## 0=train 1=vali 2=test
+      np.random.shuffle(labels)
+      save(labels, savedir_local / "labels.pkl")
+    else:
+      _,pid1 = parse_pid([1,p0],[3,19])
+      _,pid2 = parse_pid([2,p0],[3,19])
+      labels1 = load(savedir / f'e26_isbidet/train/pid{pid1:03d}/labels.pkl')
+      labels2 = load(savedir / f'e26_isbidet/train/pid{pid2:03d}/labels.pkl')
+      labels = np.concatenate([labels1,labels2]) ## first 01 then 02
+      save(labels, savedir_local / "labels.pkl")
+      ipdb.set_trace()
+
     history = SimpleNamespace(lossmeans=[],valimeans=[],)
     wipedir(savedir_local/'m')
     wipedir(savedir_local/"glance_output_train/")
@@ -372,27 +376,42 @@ def evaluate(pid=0):
 
   t0 = time()
 
-  (p0,),pid = parse_pid(pid,[19])
+  (p1,p0,),pid = parse_pid(pid,[3,19])
   savedir_local = savedir / f'e26_isbidet/evaluate/pid{pid:03d}/'
 
   myname, isbiname = isbi_datasets[p0] # v05
-  info01 = get_isbi_info(myname,isbiname,"01")
-  info02 = get_isbi_info(myname,isbiname,"02")
 
-  # dPID = pid2params(pid)
-  # info = dPID.info
-  # savedir_local = dPID.savedir_local
+  info = get_isbi_info(myname,isbiname,"01") ## Just pick "01" ... it doesn't matter...
 
   print(f"""
-    Begin evaluate() on pid {pid} ... {info01.isbiname}
+    Begin evaluate() on pid {pid} ... {isbiname}
     Savedir is {savedir_local}
     """)
 
-  traindir = savedir / f"e26_isbidet/train/pid{pid:03d}/"   ## we can use the same PID for train() and evaluate()
-  samples  = load(traindir / "patchFrame.pkl")
-  samples.reset_index(inplace=True)
-  samples['labels'] = load(traindir / "labels.pkl").astype(np.uint8) #[::-1]
-  params = load(traindir / "params.pkl")
+  traindir = savedir / f"e26_isbidet/train/pid{pid:03d}/"   ## we can use the same PID for train() and evaluate()  
+
+  def build_samples():
+    (_p1,_1,),_pid = parse_pid([1,p0],[3,19]) ## get traindir for dataset "01"
+    _traindir = savedir / f"e26_isbidet/train/pid{_pid:03d}/"
+    samples1  = load(_traindir / "patchFrame.pkl")
+    samples1.reset_index(inplace=True)
+    samples1['labels'] = load(_traindir / "labels.pkl").astype(np.uint8) #[::-1]
+    params1 = load(_traindir / "params.pkl")
+    samples1['dataset'] = "01"
+
+    (_p1,_1,),_pid = parse_pid([2,p0],[3,19]) ## get traindir for dataset "02"
+    _traindir = savedir / f"e26_isbidet/train/pid{_pid:03d}/"
+    samples2  = load(_traindir / "patchFrame.pkl")
+    samples2.reset_index(inplace=True)
+    samples2['labels'] = load(_traindir / "labels.pkl").astype(np.uint8) #[::-1]
+    params2 = load(_traindir / "params.pkl")
+    samples2['dataset'] = "02"
+
+    samples = pandas.concat([samples1,samples2])
+    params = params1
+    return samples, params
+
+  samples, params = build_samples()
 
   ## filter out empty patches
   # samples = samples[samples.npts>0].reset_index() ## MYPARAM only evaluate patches with points?
@@ -412,7 +431,7 @@ def evaluate(pid=0):
 
   ## loss and network
   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-  net = _init_unet_params(info01.ndim).net
+  net = _init_unet_params(info.ndim).net
   net = net.to(device)
   net.load_state_dict(torch.load(traindir / f'm/best_weights_loss.pt'))  ## MYPARAM use loss, f1, or some other vali metric ?
 
@@ -463,7 +482,8 @@ def evaluate(pid=0):
      precision = match.precision,
      height =    y.max(),
      labels = s.labels,
-     set = ['train','vali','test'][s.labels]
+     set = ['train','vali','test'][s.labels],
+     dataset = s.dataset,
     )
 
     return res
@@ -529,31 +549,35 @@ def get_exemplars(table, metrics=['logloss','f1','recall']):
 
 ## Unstable. predict and eval on full images with simple metrics (don't call ISBI binaries)
 
-def evaluate_imgFrame(pid=0,swap=False):
+def evaluate_imgFrame(pid=0):
 
   t0 = time()
 
-  (p0,),pid = parse_pid(pid,[19])
+  (p1,p0,),pid = parse_pid(pid,[3,19])
   savedir_local = savedir / f'e26_isbidet/evaluate_imgFrame/pid{pid:03d}/'
   myname, isbiname = isbi_datasets[p0] # v05
   # trainset = ["01","02"][p1] # v06
   info = get_isbi_info(myname,isbiname,"01") ## NOTE. we use both 01/02
-  
-  p2  = {True:1, False:0}[swap]
-  ext = '_2' if swap else '_1'
-
-  # ## MYPARAM predict on opposite dataset
-  # pid_2 = pid + 1 if pid%2==0 else pid -1
-  # pid_2 = pid_2 if swap else pid
-
 
   print(f"""
     Begin pid {pid} ... {info.isbiname} / {info.dataset}.
     Savedir is {savedir_local}
     """)
 
-  samples, params = e26_isbidet_dgen.build_imgFrame_and_params([pid,0])
 
+  def build_samples():
+    samples1,params1  = e26_isbidet_dgen.build_imgFrame_and_params([pid,0])
+    samples1['dataset'] = "01"
+    samples2,params2  = e26_isbidet_dgen.build_imgFrame_and_params([pid,1])
+    samples2['dataset'] = "02"
+
+    samples = pandas.concat([samples1,samples2])
+    params = params1
+    return samples, params
+
+  samples, params = build_samples()
+
+  # samples, params = e26_isbidet_dgen.build_imgFrame_and_params([pid,0])
   # samples = samples.iloc[::10]
   samples['set']     = [['train','test'][l] for l in samples.labels]
   # samples.reset_index(inplace=True)
@@ -675,6 +699,7 @@ def evaluate_imgFrame(pid=0,swap=False):
      yPts_small  = yPts_small,
      gtPts_small = gtPts_small,
      percentiles = percentiles,
+     dataset = s.dataset,
      # loss  =     loss,
      # zoom_effective = zoom_effective,
     )
@@ -698,7 +723,7 @@ def evaluate_imgFrame(pid=0,swap=False):
     table = table.merge(samples,on='time',how='left') # left_index=True,right_index=True)
     return table
   
-  table = memoize(f_table, savedir_local/f"scores_imgTable{ext}.pkl",force=1) ## MYPARAM predict on opposite dataset
+  table = memoize(f_table, savedir_local/f"scores_imgTable.pkl",force=1) ## MYPARAM predict on opposite dataset
 
   # samples['logloss'] = -np.log10(samples['loss'])
   metricNames = ['f1','recall','height',]
@@ -729,7 +754,7 @@ def evaluate_imgFrame(pid=0,swap=False):
     exemplars = SimpleNamespace()
     for row in ssam.iloc: exemplars.__dict__[f'time{row.time}'] = row.png
     return exemplars
-  memoize(f_exemplars, savedir_local / f'exemplars_imgFrame{ext}',force=1) ## MYPARAM predict on opposite dataset
+  memoize(f_exemplars, savedir_local / f'exemplars_imgFrame',force=1) ## MYPARAM predict on opposite dataset
 
   # ipdb.set_trace()
 
@@ -758,8 +783,6 @@ def evaluate_imgFrame(pid=0,swap=False):
   # agg_scores['ISBI_TRA'] = dDetTra['tra']
 
   agg_scores.to_pickle(savedir_local / f'agg_scores{ext}.pkl')
-
-
 
 
 def test_outputs():
@@ -812,8 +835,6 @@ def get_exemplars_imgFrame(table, metricNames = ['f1','recall','height']):
 
   return exemplars
 
-
-
 def mkpng(imgFrameRow):
   R = imgFrameRow
   a = img2png(R.raw_small)
@@ -827,72 +848,59 @@ def mkpng(imgFrameRow):
   # png = blendRawLab(a,d,colors=[(0,0,1),(0,1,0),(1,0,0)])
   return png
 
-
 ## compile scores from all predictions
-
-def compile_agg_scores():
-
-  def mk_single(postfix='_2'):
-    scores = sorted(list((savedir / 'e24_isbidet_AOT_on_both/v01/').glob(f"pid*/agg_scores{postfix}.pkl")))
-
-    def f(name):
-      name = str(name)
-      pid = int(re.search(r'pid(\d+)/', name).group(1))
-      df = load(name)
-      df['pid'] = pid
-      # df = df[keepers]
-      return df
-    
-    df = pandas.concat([f(s) for s in scores])
-    df.to_pickle(savedir / f'e24_isbidet_AOT_on_both/v01/agg_scores{postfix}.pkl')
-    return df
-
-  df = mk_single('_1')
-  df = mk_single('_2')
-  # ipdb.set_trace()
-
-def compile_scores_imgFrame():
-
-  def mk_single(postfix='_2'):
-    keepers = ["time", "f1", "recall", "precision", "height", "pid", "shape","npts","labels","zoom_effective","set",]
-    scores = sorted(list((savedir / 'e24_isbidet_AOT_on_both/v01/').glob(f"pid*/scores_imgTable{postfix}.pkl")))
-    print(*scores,sep='\n')
-
-    def f(name):
-      name = str(name)
-      pid = int(re.search(r'pid(\d+)/', name).group(1))
-      df = load(name)
-      df['pid'] = pid
-      df = df[keepers]
-      return df
-    
-    df = pandas.concat([f(s) for s in scores])
-    df.to_pickle(savedir / f'e24_isbidet_AOT_on_both/v01/allscores{postfix}.pkl')
-
-  mk_single('')
-  mk_single('_2')
 
 def compile_scores():
 
-  def mk_single(postfix='_2'):
+  # res = load(savedir / "e26_isbidet/compile_scores/scores_evaluate.pkl")
+  # ipdb.set_trace()
 
-    # keepers = ["time", "f1", "recall", "precision", "height", "pid", "shape","npts","labels","zoom_effective","set",]
-    keepers = ['logloss', 'f1', 'recall', 'precision', 'height', 'set', 'pid'] # remove = ['yPred', 'yPts', 'ytPts', ]
-    scores = sorted(list((savedir / 'e24_isbidet_AOT_on_both/v01/').glob(f"pid*/scores_patchTable{postfix}.pkl")))
+  def load_df(name,pid,keepers=None):
+    name = str(name).format(pid=pid)
 
-    def f(name):
-      name = str(name)
-      pid = int(re.search(r'pid(\d+)/', name).group(1))
+    (p1,p0,),pid = parse_pid(pid,[3,19])
+
+    try:
       df = load(name)
-      df['pid'] = pid
-      df = df[keepers]
-      return df
-    
-    df = pandas.concat([f(s) for s in scores])
-    df.to_pickle(savedir / f'e24_isbidet_AOT_on_both/v01/allscores_patch{postfix}.pkl')
+      if keepers: df = df[keepers]
+      print("Worked:", [p1,p0])
+    except:
+      df = pandas.DataFrame([])
 
-  # mk_single('')
-  mk_single('_2')
+    df['my_id'] = p0
+    df['trainset'] = ["01+02","01","02"][p1]
+    df['pid'] = pid
+
+    return df
+
+  keepers = ['loss', 'logloss', 'f1', 'recall', 'precision', 'height', ## losses / metrics
+            'time', 
+            'labels', ## equivalent to `set`
+            'set', ## train/vali/test
+            'dataset', ## 01/02
+            ]
+  d_evaluate = savedir / "e26_isbidet/evaluate/pid{pid:03d}/scores_patchTable.pkl"
+  scores_evaluate = [load_df(d_evaluate,pid,keepers=keepers) for pid in range(3*19)]
+  # ipdb.set_trace()
+  scores_evaluate = pandas.concat(scores_evaluate)
+  scores_evaluate = scores_evaluate.reset_index()
+  save(scores_evaluate, savedir/"e26_isbidet/compile_scores/scores_evaluate.pkl")
+  
+  # keepers = ["time", "f1", "recall", "precision", "height", "pid", "shape","npts","labels","zoom_effective","set",]
+  # d_evaluate_imgFrame = savedir / "e26_isbidet/evaluate_imgFrame/pid{pid:03d}/agg_scores_1.pkl"
+  # scores_evaluate_imgFrame = [load_df(d_evaluate_imgFrame,pid) for pid in range(19)]
+  # scores_evaluate_imgFrame = pandas.concat(scores_evaluate_imgFrame)
+  # scores_evaluate_imgFrame = scores_evaluate_imgFrame.reset_index()
+  # save(scores_evaluate_imgFrame, savedir/"e26_isbidet/compile_scores/scores_evaluate_imgFrame.pkl")
+  # # ipdb.set_trace()
+
+def test_compile_scores():
+  res = load(savedir/"e26_isbidet/compile_scores/scores_evaluate_imgFrame.pkl")
+  ipdb.set_trace()
+
+
+
+
 
 
 

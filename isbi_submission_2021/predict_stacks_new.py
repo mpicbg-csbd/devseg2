@@ -16,9 +16,10 @@ import sys
 from scipy.ndimage import zoom,label
 from skimage.feature  import peak_local_max
 from tifffile import imread, imsave
+import tifffile
 import torch
 
-from tqdm import tqdm
+# from tqdm import tqdm
 
 import torch_models
 
@@ -46,7 +47,7 @@ def zoom_pts(pts,scale):
   return pts
 
 
-## To perform segmentation
+## To perform "segmentation"
 
 def conv_at_pts_multikern(pts,kerns,sh,func=lambda a,b:np.maximum(a,b),beyond_borders=False):
   
@@ -260,8 +261,13 @@ def predict_and_save_segmentation(indir,outdir,cpnet_weights,seg_weights,params)
   print(f"Running detection over {len(fileglob)} files...\n\n",flush=True)
   # ipdb.set_trace()
 
-  for rawname in tqdm(fileglob, ascii=True, file=sys.stdout):
+  print("tifffile.__version__ = ", tifffile.__version__)
+
+
+  # for rawname in tqdm(fileglob, ascii=True, file=sys.stdout):
+  for i,rawname in enumerate(fileglob):
     
+    print(f"i={i+1}/{len(fileglob)} , file={rawname} \033[F", flush=True)
     inname = Path(rawname).name
 
     # time = re.search(r"(\d{3,4})\.tif", str(name)).group(1)
@@ -280,7 +286,7 @@ def predict_and_save_segmentation(indir,outdir,cpnet_weights,seg_weights,params)
 
 def eval_sample_predOnly(rawname,cpnet,segnet,params):
 
-  raw = imread(rawname).astype(np.float)
+  raw = imread(str(rawname)).astype(np.float)
   o_shape = raw.shape ## original shape
 
   ## downscale
@@ -323,8 +329,8 @@ def test_predict_and_save_segmentation():
   
   isbidir = "/projects/project-broaddus/rawdata/GOWT1/Fluo-N2DH-GOWT1/"
   dataset = "01"
-  indir  = "/projects/project-broaddus/rawdata/GOWT1/Fluo-N2DH-GOWT1/01/"
-  outdir = "testseg/GOWT1/Fluo-N2DH-GOWT1/"
+  indir   = "/projects/project-broaddus/rawdata/GOWT1/Fluo-N2DH-GOWT1/01/"
+  outdir  = "testseg/GOWT1/Fluo-N2DH-GOWT1/"
   Path(outdir).mkdir(parents=True,exist_ok=True)
   
   cpnet_weights = "/projects/project-broaddus/devseg_2/expr/e24_isbidet_AOT/v01/pid016/m/best_weights_loss.pt"
