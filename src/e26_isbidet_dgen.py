@@ -205,7 +205,7 @@ def cpnet_ISBIdata_specialization(params,info,pid):
   p.sparse = True if info.isbiname in ["Fluo-N3DL-DRO", "Fluo-N3DL-TRIC", "Fluo-N3DL-TRIF",] else False
   p.subsample_traintimes = slice(0,None,4)
 
-  if isbiname in ["Fluo-N3DH-CE", "Fluo-N3DH-SIM+","PhC-C2DH-U373"]:
+  if isbiname in ["Fluo-N3DH-CE" , "Fluo-N3DH-SIM+" , "PhC-C2DH-U373" , "Fluo-N2DH-GOWT1"]:
     p.zoom  = {3:(1,0.5,0.5), 2:(0.5,0.5)}[info.ndim]
   if isbiname == "Fluo-N3DH-CHO":
     p.zoom   = (1,0.5,0.5)

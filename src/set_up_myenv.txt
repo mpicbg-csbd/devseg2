@@ -8,6 +8,7 @@
 # we want python 3.6 
 
 pip install --upgrade pip ## verions 10 is broken. we want 21.
+
 pip install ipython
 pip install jedi==0.17.2
 pip install numpy

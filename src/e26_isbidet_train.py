@@ -32,7 +32,7 @@ from torch.utils.data import IterableDataset, DataLoader
 try:
     import gputools
 except Exception as e:
-    print("Can't import gputools on non-gpu node...\n", e)
+    print("GPUTOOLS ERROR \n", e)
 
 from experiments_common import rchoose, partition, shuffle_and_split, parse_pid, iterdims, savedir_global
 import datagen
@@ -214,7 +214,8 @@ def train(pid,continue_training=False):
     net.load_state_dict(torch.load(savedir_local / f'm/best_weights_latest.pt')) ## MYPARAM start off from best_weights ?
     history = load(savedir_local / 'history.pkl')
   else:
-    if p1!=0:
+    # if p1!=0:
+    if True:
       N = len(df)
       a,b = N*5//8,N*7//8  ## MYPARAM train / vali / test fractions
       labels = np.zeros(N,dtype=np.uint8)
@@ -228,7 +229,7 @@ def train(pid,continue_training=False):
       labels2 = load(savedir / f'e26_isbidet/train/pid{pid2:03d}/labels.pkl')
       labels = np.concatenate([labels1,labels2]) ## first 01 then 02
       save(labels, savedir_local / "labels.pkl")
-      ipdb.set_trace()
+      # ipdb.set_trace()
 
     history = SimpleNamespace(lossmeans=[],valimeans=[],)
     wipedir(savedir_local/'m')

@@ -279,7 +279,7 @@ def tb2nap(tb,ltps=None):
   idx     = np.lexsort(nodes.T[[1,0]])
   nodes,trackid = nodes[idx],trackid[idx]
 
-  if ltps:
+  if ltps is not None:
     _ltps = [ltps[_time][_id] for (_time,_id) in nodes]
   else:
     _ltps = [tb.nodes[(_time,_id)]['pt'] for (_time,_id) in nodes]
