@@ -11,21 +11,42 @@ These bash scripts run `predict_stacks_new.py` with data-specific params.
 
 ## Install
 
-We require the following dependencies:
-```txt
-- python=3.6
-- ipython
-- tifffile
-- numpy
-- scipy
-- scikit-image
-- pytorch
-- cudatoolkit=9.2
-- pykdtree
+tested with:
+- python 3.6
+- pip 21
+- cudatoolkit 9.2 and 9.0
+
+We require the following python dependencies:
+
 ```
 
-Use conda to install: `conda env create -f environment.yml`.
+# -- prediction only (CTC and CSC)
 
+pip install numpy
+pip install torch
+pip install tifffile
+pip install scipy
+pip install scikit-image
+pip install imagecodecs
+pip install pykdtree
+pip install numpy-indexed
+
+# -- for interactive 
+
+pip install ipython
+pip install jedi==0.17.2
+pip install ipdb
+
+# -- for training torch models
+
+pip install pandas
+pip install -e ../../segtools/
+pip install zarr
+pip install git+https://github.com/stardist/augmend.git
+pip install psutil
+pip install tqdm
+pip install gputools
+```
 
 ## Example usage
 

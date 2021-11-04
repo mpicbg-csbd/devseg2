@@ -9,3 +9,5 @@ echo "Current dir: $(pwd)"
 	--cpnet_weights "models/<weightname>" \
 	--zoom <zoom> \
 	--nms_footprint <nms_footprint> \
+	--scale <scale> \
+	--mantrack_t0 "<mantrack_t0>" \

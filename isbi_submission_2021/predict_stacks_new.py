@@ -20,7 +20,7 @@ import tifffile
 import torch
 
 # from tqdm import tqdm
-
+import tracking
 import torch_models
 
 ## Utils
@@ -279,22 +279,94 @@ def predict_and_save_segmentation(indir,outdir,cpnet_weights,seg_weights,params)
 
     outname = "mask" + inname[1:] ## remove the 't'
 
-    seg = eval_sample_predOnly(rawname,cpnet,segnet,params)
+    seg = eval_sample(rawname,cpnet,segnet,params)
     # print(f"finished image: {rawname}",end="\r", flush=True)
     seg = seg.astype(np.uint16)
     imsave(Path(outdir)/outname, seg)
 
-def eval_sample_predOnly(rawname,cpnet,segnet,params):
+def predict_and_save_tracking(indir,outdir,cpnet_weights,seg_weights,params,mantrack_t0=None):
+
+  t0 = time()
+
+  Path(outdir).mkdir(parents=True,exist_ok=True)
+  cpnet = _init_unet_params(params.ndim).net
+  # cpnet  = torch.load(cpnet_weights)
+  cpnet.load_state_dict(torch.load(cpnet_weights))
+  segnet = None
+  device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+  cpnet  = cpnet.to(device)
+
+  fileglob = sorted(Path(indir).glob("t*.tif"))
+  # fileglob = fileglob[:7]  ## FIXME
+  print(f"Running tracking over {len(fileglob)} files...\n\n",flush=True)
+  # ipdb.set_trace()
+
+  ## predict & extract pts for each image independently
+  ltps = []
+  for i,rawname in enumerate(fileglob):
+    print(f"i={i+1}/{len(fileglob)} , file={rawname} \033[F", flush=True)
+    pts = eval_sample(rawname,cpnet,segnet,params,ptsOnly=True)
+    ltps.append(pts)
+
+  # print(ltps,flush=True)
+  # pickle.dump(ltps,open)
+  np.save(outdir + '/ltps.npy', ltps)
+
+  ## do tracking from pts
+  radius = np.max(np.array(params.nms_footprint) / params.zoom) * 2
+  tb = tracking.nn_tracking_on_ltps(ltps, scale=params.scale, dub=radius*2)
+
+  raw = imread(str(fileglob[0])).astype(np.float)
+  o_shape = raw.shape ## original shape
+  t_start = int(re.search(r"(\d{3,4})\.tif", str(fileglob[0])).group(1))
+
+  if "Fluo-N3DL-DRO" in indir:
+    radius = 5
+
+  savedir = outdir
+  if mantrack_t0:
+    lbep, labelset, stackset = tracking.save_isbi_tb_2(tb,radius,o_shape,t_start,params.ndim,savedir,penalizeFP='0',mantrack_t0=mantrack_t0)
+  else:
+    lbep, labelset, stackset = tracking.save_isbi_tb_2(tb,radius,o_shape,t_start,params.ndim,savedir,penalizeFP='1',mantrack_t0=None)
+
+
+  # ## save masks given tracking
+  # for i,rawname in enumerate(fileglob):
+  #   print(f"i={i+1}/{len(fileglob)} , file={rawname} \033[F", flush=True)
+  #   inname = Path(rawname).name
+  #   outname = "mask" + inname[1:] ## remove the 't'
+  #   seg = buildSegFromLPtsAndTB(ltps,tb,i,o_shape)
+  #   seg = seg.astype(np.uint16)
+  #   imsave(Path(outdir)/outname, seg)
+
+
+"""
+Takes list-of-timepts (ltps) , TrueBranching (tb) and current time (i)
+Returns points rasterized to an image of proper size.
+"""
+def buildSegFromLPtsAndTB(ltps,tb,i,o_shape):
+  pts = ltps[i]
+  stack  = conv_at_pts4(pts,np.ones([1,]*len(o_shape)),o_shape).astype(np.uint16)
+  stack  = label(stack)[0]
+  radius = np.max(np.array(params.nms_footprint) / params.zoom) * 2
+  print(f"Old size: 25 , new size : {radius} \n")
+  stack = expand_labels(stack,radius)
+
+
+"""
+TODO: speed up this function. 2mins 2sec to run on TRIF shape=(975, 1820, 1000) with zoom=(0.5 , 0.5 , 0.5)
+"""
+def eval_sample(rawname,cpnet,segnet,params,ptsOnly=False):
 
   raw = imread(str(rawname)).astype(np.float)
   o_shape = raw.shape ## original shape
 
-  ## downscale
+  ## downscale raw
   _raw = zoom(raw,params.zoom,order=1)
   zoom_effective = _raw.shape / np.array(raw.shape)
   raw = _raw
 
-  ## normalize intensities
+  ## normalize intensity
   raw = norm_percentile01(raw,2,99.4)
   # percentiles = np.percentile(raw,np.linspace(0,100,101))
 
@@ -316,62 +388,24 @@ def eval_sample_predOnly(rawname,cpnet,segnet,params):
   ## undo scaling
   pts = zoom_pts(pts,1/zoom_effective)
 
+  if ptsOnly: return pts
+
   o_shape = np.array(o_shape)
   ## Filter out points near border
   # pts2   = [p for p in pts   if np.all(p%(o_shape - params.evalBorder) >= params.evalBorder)]
   # gtpts2 = [p for p in s.pts if np.all(p%(o_shape - params.evalBorder) >= params.evalBorder)]
-  stack = conv_at_pts4(pts,np.ones([1,]*len(o_shape)),o_shape).astype(np.uint16)
-  stack = label(stack)[0]
-  stack = expand_labels(stack,25)
+  stack  = conv_at_pts4(pts,np.ones([1,]*len(o_shape)),o_shape).astype(np.uint16)
+  stack  = label(stack)[0]
+  radius = np.max(np.array(params.nms_footprint) / params.zoom) * 2
+  print(f"Old size: 25 , new size : {radius} \n")
+  stack = expand_labels(stack,radius)
   return stack
 
-def test_predict_and_save_segmentation():
-  
-  isbidir = "/projects/project-broaddus/rawdata/GOWT1/Fluo-N2DH-GOWT1/"
-  dataset = "01"
-  indir   = "/projects/project-broaddus/rawdata/GOWT1/Fluo-N2DH-GOWT1/01/"
-  outdir  = "testseg/GOWT1/Fluo-N2DH-GOWT1/"
-  Path(outdir).mkdir(parents=True,exist_ok=True)
-  
-  cpnet_weights = "/projects/project-broaddus/devseg_2/expr/e24_isbidet_AOT/v01/pid016/m/best_weights_loss.pt"
-  seg_weights = None
-  params = pickle.load(open("/projects/project-broaddus/devseg_2/expr/e24_isbidet_AOT/v01/pid016/params.pkl",'rb'))
 
-  # ipdb.set_trace()
-
-  P = init_params(2)
-
-  predict_and_save_segmentation(
-    indir,
-    outdir,
-    cpnet_weights,
-    seg_weights,
-    params,)
-
-  isbidir_parent = Path(isbidir).parent
-  isbiname = Path(indir).parts[-2]
-  dataset = Path(indir).parts[-1]
-  # ipdb.set_trace()
-  ndigits = 3
-  penalize_FP = ''
-
-  ## Evaluate
-  bashcmd = f"""
-  cp -r {outdir}/* {isbidir}/{dataset}_RES/
-  localtra=/projects/project-broaddus/comparison_methods/EvaluationSoftware2/Linux/TRAMeasure
-  localdet=/projects/project-broaddus/comparison_methods/EvaluationSoftware2/Linux/DETMeasure
-  detout="{isbiname}_{dataset}_DET.txt"
-  $localdet {isbidir_parent}/{isbiname} {dataset} {ndigits} {penalize_FP} > $detout
-  cat $detout
-  """
-  run(bashcmd,shell=True)
-
-  # $localtra {info.isbi_dir} {info.dataset} {info.ndigits} > {savedir}/{info.dataset}_TRA.txt
-  # cat {savedir}/{info.dataset}_TRA.txt
 
 
 if __name__ == '__main__':
-  parser = argparse.ArgumentParser(description='Segment a folder of Tifs...')
+  parser = argparse.ArgumentParser(description='Track cells. Take a folder of TIFFs as input...')
 
   parser.add_argument('-i', "--indir", default="/projects/CSBDeep/ISBI/upload_test/01")
   parser.add_argument('-o', "--outdir", default="/projects/CSBDeep/ISBI/upload_test/01_RES")
@@ -379,33 +413,40 @@ if __name__ == '__main__':
   parser.add_argument("--segnet_weights", default=None)
   parser.add_argument('--zoom', type=float, nargs='*', default=[1.,1.])
   parser.add_argument('--nms_footprint', type=int, nargs='*', default=[3,3])
+  parser.add_argument('--scale', type=float, nargs='*', default=[1.,1.])
+  parser.add_argument('--mantrack_t0', type=str)
+
+  # mantrack_t0 = "None"
 
   # parser.add_argument('--threshold_abs',type = float, default=.3)
   # parser.add_argument('--min_distance',type = int, default=4)
   # parser.add_argument('--tile_size', type = int, nargs = 3, default=[-1,512,256])
   
+
   args = parser.parse_args()
+
+  if args.mantrack_t0 == "None":
+    mantrack_t0 = None
+  else:
+    mantrack_t0 = args.mantrack_t0
+
+  # ipdb.set_trace()
+
 
   params = SimpleNamespace()
   params.zoom = args.zoom
   params.nms_footprint = args.nms_footprint
   params.ndim = len(args.zoom)
+  params.scale = args.scale
 
-  predict_and_save_segmentation(
+  predict_and_save_tracking(
     args.indir,
     args.outdir,
     args.cpnet_weights,
     args.segnet_weights,
     params,
+    mantrack_t0,
     )
-
-
-
-
-
-
-
-
 
 
 
