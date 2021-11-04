@@ -244,47 +244,10 @@ def _init_unet_params(ndim):
   torch_models.init_weights(T.net)
   return T
 
-
-def predict_and_save_segmentation(indir,outdir,cpnet_weights,seg_weights,params):
-
-  t0 = time()
-
-  Path(outdir).mkdir(parents=True,exist_ok=True)
-  cpnet = _init_unet_params(params.ndim).net
-  # cpnet  = torch.load(cpnet_weights)
-  cpnet.load_state_dict(torch.load(cpnet_weights))
-  segnet = None
-  device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-  cpnet  = cpnet.to(device)
-
-  fileglob = sorted(Path(indir).glob("t*.tif"))
-  print(f"Running detection over {len(fileglob)} files...\n\n",flush=True)
-  # ipdb.set_trace()
-
-  print("tifffile.__version__ = ", tifffile.__version__)
-
-
-  # for rawname in tqdm(fileglob, ascii=True, file=sys.stdout):
-  for i,rawname in enumerate(fileglob):
-    
-    print(f"i={i+1}/{len(fileglob)} , file={rawname} \033[F", flush=True)
-    inname = Path(rawname).name
-
-    # time = re.search(r"(\d{3,4})\.tif", str(name)).group(1)
-    # ndigits = len(time)
-    # time = int(time)
-    # outname = f"mask{time:03d}.tif" if ndigits==3 else f"mask{time:04d}.tif"
-    # outname = str(inname).replace("t","mask")
-    # ipdb.set_trace()
-
-    outname = "mask" + inname[1:] ## remove the 't'
-
-    seg = eval_sample(rawname,cpnet,segnet,params)
-    # print(f"finished image: {rawname}",end="\r", flush=True)
-    seg = seg.astype(np.uint16)
-    imsave(Path(outdir)/outname, seg)
-
 def predict_and_save_tracking(indir,outdir,cpnet_weights,seg_weights,params,mantrack_t0=None):
+
+  extrasdir = Path(outdir.replace("isbi_challenge_out", "isbi_challenge_out_extra"))
+  extrasdir.mkdir(parents=True,exist_ok=True)
 
   t0 = time()
   
@@ -297,23 +260,32 @@ def predict_and_save_tracking(indir,outdir,cpnet_weights,seg_weights,params,mant
   cpnet  = cpnet.to(device)
 
   fileglob = sorted(Path(indir).glob("t*.tif"))
+  # fileglob = fileglob[:20]  ## FIXME
   print(f"Running tracking over {len(fileglob)} files...\n\n",flush=True)
+  # ipdb.set_trace()
 
   ## predict & extract pts for each image independently
+  (extrasdir / "ltps").mkdir(exist_ok=1)
   ltps = []
   for i,rawname in enumerate(fileglob):
     print(f"i={i+1}/{len(fileglob)} , file={rawname} \033[F", flush=True)
     pts = eval_sample(rawname,cpnet,segnet,params,ptsOnly=True)
+    np.save(str(extrasdir / 'ltps/pts.npy'), pts)
     ltps.append(pts)
+
+  np.save(str(extrasdir / 'ltps/ltps.npy'), np.array(ltps,dtype=object))
 
   ## do tracking from pts
   radius = np.max(np.array(params.nms_footprint) / params.zoom) * 2
+  print(f"Radius = {radius}")
+
   tb = tracking.nn_tracking_on_ltps(ltps, scale=params.scale, dub=radius*2)
 
   raw = imread(str(fileglob[0])).astype(np.float)
   o_shape = raw.shape ## original shape
   t_start = int(re.search(r"(\d{3,4})\.tif", str(fileglob[0])).group(1))
 
+  print(indir)
   if "Fluo-N3DL-DRO" in indir:
     radius = 5
 

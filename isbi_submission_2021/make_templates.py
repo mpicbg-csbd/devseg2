@@ -116,10 +116,12 @@ if __name__=="__main__":
     # for local testing
     indir  = f"/projects/project-broaddus/rawdata/isbi_challenge/{isbiname}/{dataset_pred}"
     outdir = f"/projects/project-broaddus/rawdata/isbi_challenge_out/{isbiname}/{dataset_pred}_RES"
+    script = "predict_stacks_new_local.py"
     # for prediction on ISBI server
     if target_remote:
       indir  = f"../{isbiname}/{dataset_pred}"
       outdir = f"../{isbiname}/{dataset_pred}_RES"
+      script = "predict_stacks_new.py"
 
     ## Manual extensions
     if isbiname in ["Fluo-N3DL-DRO", "Fluo-N3DL-TRIC", "Fluo-N3DL-TRIF",]:
@@ -130,6 +132,7 @@ if __name__=="__main__":
     if isbiname == "Fluo-N3DL-TRIF": params.zoom = (0.5 , 0.5 , 0.5)
 
     temp = {
+      "<script>" : script,
       "<indir>": indir,
       "<outdir>": outdir,
       "<weightname>":weightname_out,
