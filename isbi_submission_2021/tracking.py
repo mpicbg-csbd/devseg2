@@ -435,7 +435,7 @@ def eval_tb_isbi(tb,info,savedir):
 
 
 
-def save_isbi_tb_2(tb,radius,imshape,t_start,ndim,savedir,*,penalizeFP='1',mantrack_t0=None,):
+def save_isbi_tb_2(tb,radius,scale,imshape,t_start,ndim,savedir,*,penalizeFP='1',mantrack_t0=None,):
 
   if penalizeFP=='0':
     # ipdb.set_trace()
@@ -448,7 +448,7 @@ def save_isbi_tb_2(tb,radius,imshape,t_start,ndim,savedir,*,penalizeFP='1',mantr
   nap = tb2nap(tb)
   nap.tracklets[:,1] += t_start
   # _kern = np.ones([1,]*ndim)
-  return save_isbi_2(nap, radius, shape=imshape,savedir=savedir)
+  return save_isbi_2(nap, radius, scale, shape=imshape,savedir=savedir)
 
 
 """
@@ -457,7 +457,7 @@ sort the tracklets by time (TrackID,Time,Z,Y,X)
 for each time rasterize detections using the correct labels
 write the man_tracks.txt from properties alone.
 """
-def save_isbi_2(nap, radius, shape=None, savedir="napri2isbi_test/"):
+def save_isbi_2(nap, radius, scale, shape=None, savedir="napri2isbi_test/"):
 
   tracklets,graph,properties = nap.tracklets,nap.graph,nap.properties
 
@@ -493,7 +493,7 @@ def save_isbi_2(nap, radius, shape=None, savedir="napri2isbi_test/"):
     stack = np.zeros(shape,dtype=np.uint16)
     stack[tuple(pts.T)] = labels
 
-    stack  = expand_labels(stack,radius)
+    stack  = expand_labels(stack,radius,scale)
     stackset.append(set(np.unique(stack)))
     savename = savedir / tifname.format(time=time)
 

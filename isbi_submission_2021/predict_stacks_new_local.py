@@ -260,7 +260,7 @@ def predict_and_save_tracking(indir,outdir,cpnet_weights,seg_weights,params,mant
   cpnet  = cpnet.to(device)
 
   fileglob = sorted(Path(indir).glob("t*.tif"))
-  # fileglob = fileglob[:20]  ## FIXME
+  # fileglob = fileglob[::7]  ## FIXME
   print(f"Running tracking over {len(fileglob)} files...\n\n",flush=True)
   # ipdb.set_trace()
 
@@ -290,10 +290,13 @@ def predict_and_save_tracking(indir,outdir,cpnet_weights,seg_weights,params,mant
     radius = 5
 
   savedir = outdir
+
+  sampling = params.scale * np.array([0.5,1,1])[-len(params.scale):] ## extra width in Z
+
   if mantrack_t0:
-    lbep, labelset, stackset = tracking.save_isbi_tb_2(tb,radius,o_shape,t_start,params.ndim,savedir,penalizeFP='0',mantrack_t0=mantrack_t0)
+    lbep, labelset, stackset = tracking.save_isbi_tb_2(tb,radius,sampling,o_shape,t_start,params.ndim,savedir,penalizeFP='0',mantrack_t0=mantrack_t0)
   else:
-    lbep, labelset, stackset = tracking.save_isbi_tb_2(tb,radius,o_shape,t_start,params.ndim,savedir,penalizeFP='1',mantrack_t0=None)
+    lbep, labelset, stackset = tracking.save_isbi_tb_2(tb,radius,sampling,o_shape,t_start,params.ndim,savedir,penalizeFP='1',mantrack_t0=None)
 
 
   # ## save masks given tracking
@@ -306,17 +309,17 @@ def predict_and_save_tracking(indir,outdir,cpnet_weights,seg_weights,params,mant
   #   imsave(Path(outdir)/outname, seg)
 
 
-"""
-Takes list-of-timepts (ltps) , TrueBranching (tb) and current time (i)
-Returns points rasterized to an image of proper size.
-"""
-def buildSegFromLPtsAndTB(ltps,tb,i,o_shape):
-  pts = ltps[i]
-  stack  = conv_at_pts4(pts,np.ones([1,]*len(o_shape)),o_shape).astype(np.uint16)
-  stack  = label(stack)[0]
-  radius = np.max(np.array(params.nms_footprint) / params.zoom) * 2
-  print(f"Old size: 25 , new size : {radius} \n")
-  stack = expand_labels(stack,radius)
+# """
+# Takes list-of-timepts (ltps) , TrueBranching (tb) and current time (i)
+# Returns points rasterized to an image of proper size.
+# """
+# def buildSegFromLPtsAndTB(ltps,tb,i,o_shape):
+#   pts = ltps[i]
+#   stack  = conv_at_pts4(pts,np.ones([1,]*len(o_shape)),o_shape).astype(np.uint16)
+#   stack  = label(stack)[0]
+#   radius = np.max(np.array(params.nms_footprint) / params.zoom) * 2
+#   print(f"Old size: 25 , new size : {radius} \n")
+#   stack = expand_labels(stack,radius)
 
 
 """
@@ -356,18 +359,16 @@ def eval_sample(rawname,cpnet,segnet,params,ptsOnly=False):
 
   if ptsOnly: return pts
 
-  o_shape = np.array(o_shape)
-  ## Filter out points near border
-  # pts2   = [p for p in pts   if np.all(p%(o_shape - params.evalBorder) >= params.evalBorder)]
-  # gtpts2 = [p for p in s.pts if np.all(p%(o_shape - params.evalBorder) >= params.evalBorder)]
-  stack  = conv_at_pts4(pts,np.ones([1,]*len(o_shape)),o_shape).astype(np.uint16)
-  stack  = label(stack)[0]
-  radius = np.max(np.array(params.nms_footprint) / params.zoom) * 2
-  print(f"Old size: 25 , new size : {radius} \n")
-  stack = expand_labels(stack,radius)
-  return stack
-
-
+  # o_shape = np.array(o_shape)
+  # ## Filter out points near border
+  # # pts2   = [p for p in pts   if np.all(p%(o_shape - params.evalBorder) >= params.evalBorder)]
+  # # gtpts2 = [p for p in s.pts if np.all(p%(o_shape - params.evalBorder) >= params.evalBorder)]
+  # stack  = conv_at_pts4(pts,np.ones([1,]*len(o_shape)),o_shape).astype(np.uint16)
+  # stack  = label(stack)[0]
+  # radius = np.max(np.array(params.nms_footprint) / params.zoom) * 2
+  # print(f"Old size: 25 , new size : {radius} \n")
+  # stack = expand_labels(stack,radius,sampling=params.scale)
+  # return stack
 
 
 if __name__ == '__main__':
