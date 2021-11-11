@@ -62,8 +62,8 @@ def lab_to_distance_transform(lab):
 
 ## weights
 
+"weight pixels in the slice based on ytrue content"
 def weights__decaying_bg_multiplier(yt,time,thresh=1.0,decayTime=None,bg_weight_multiplier=1.0):
-  "weight pixels in the slice based on pred patch content"
   
   w = np.ones(yt.shape)
   m0 = yt<thresh # background

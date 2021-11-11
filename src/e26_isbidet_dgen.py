@@ -196,20 +196,20 @@ def init_params(ndim):
 
   return P
 
-def cpnet_ISBIdata_specialization(params,info,pid):
+def cpnet_ISBIdata_specialization(params,info):
   isbiname = info.isbiname
+  dataset = info.dataset
   p = params
 
   p.traintime = 200
   p.scale = info.scale
   p.sparse = True if info.isbiname in ["Fluo-N3DL-DRO", "Fluo-N3DL-TRIC", "Fluo-N3DL-TRIF",] else False
-  p.subsample_traintimes = slice(0,None,4)
 
   if isbiname in ["Fluo-N3DH-CE" , "Fluo-N3DH-SIM+" , "PhC-C2DH-U373" , "Fluo-N2DH-GOWT1"]:
     p.zoom  = {3:(1,0.5,0.5), 2:(0.5,0.5)}[info.ndim]
   if isbiname == "Fluo-N3DH-CHO":
-    p.zoom   = (1,0.5,0.5)
-    p.border = (0,2,2)
+    p.zoom   = (1,0.25,0.25)
+    p.border = (0,0,0)
   if isbiname=="Fluo-N3DL-TRIF":
     p.kern  = [3,3,3]
     # p.zoom  = (0.5,0.5,0.5) ## MYPARAM undo this
@@ -232,7 +232,8 @@ def cpnet_ISBIdata_specialization(params,info,pid):
     p.zoom = (0.5,0.5)
   if isbiname=="Fluo-N3DL-DRO":
     p.kern = [1.5,3,3]
-    p.subsample_traintimes = slice(0,None,10)
+  if isbiname == 'PhC-C2DL-PSC':
+    p.kern = [3,3]
 
 
 
@@ -246,20 +247,20 @@ def cpnet_ISBIdata_specialization(params,info,pid):
   
   ## Sparsely Annotated datasets get: loss masking, patch-wise normalization and target creation (for speed), 
 
-  if pid in [0,1,2,3]:
-    p.subsample_traintimes = slice(0,None,30)
-  if pid in [22,23]: p.subsample_traintimes = slice(0,None,2) ## 
-  if pid in [26,27,29]: p.subsample_traintimes = slice(0,None,3) ## 
-  if pid in [30]: p.subsample_traintimes = slice(0,None,2) ## Fluo-N3DL-TRIC
-  if pid in [31]: p.subsample_traintimes = slice(0,None,8) ## Fluo-N3DL-TRIC
-  if pid in [32,33]: # "PhC-C2DH-U373" 
-    pass
-  if pid in[34,35]: # "PhC-C2DL-PSC"
-    p.kern = [3,3]
-  if pid in [36,37]: ## TRIF
-    p.subsample_traintimes = slice(0,None,4)
+  p.subsample_traintimes = slice(0,None,None)
 
-  # print("AFTER SPECIALIZATION: ", p)
+  if isbiname in ['BF-C2DL-HSC' , 'BF-C2DL-MuSC']:
+    p.subsample_traintimes = slice(0,None,30)
+
+  # if isbiname == 'Fluo-N3DH-CE': p.subsample_traintimes = slice(0,None,2) ## 22,23
+  # if isbiname == 'Fluo-N3DH-SIM+': p.subsample_traintimes = slice(0,None,3)
+  # if isbiname == 'Fluo-N3DL-DRO' and dataset == '02': p.subsample_traintimes = slice(0,None,3)
+  # if isbiname == 'Fluo-N3DL-TRIC' and dataset == '01' : p.subsample_traintimes = slice(0,None,2) ## Fluo-N3DL-TRIC
+  # if isbiname == 'Fluo-N3DL-TRIC' and dataset == '02' : p.subsample_traintimes = slice(0,None,3) ## Fluo-N3DL-TRIC
+  # if isbiname == 'PhC-C2DH-U373': 
+  #   p.subsample_traintimes = slice(0,None,4)
+  # if isbiname == 'Fluo-N3DL-TRIF':
+  #   p.subsample_traintimes = slice(0,None,4)
 
 ## Stable. Create Dataframe of Virtual Images. 
 
@@ -274,7 +275,7 @@ def build_imgFrame_and_params(pid=0):
 
   imgFrame = pid2ImgFrame(info)
   params  = init_params(info.ndim)
-  cpnet_ISBIdata_specialization(params,info,dPID.pid)
+  cpnet_ISBIdata_specialization(params,info,)
 
   ## train = 0; test = 1
   labels = np.ones(len(imgFrame),dtype=np.uint8)
@@ -317,7 +318,7 @@ def addRescalingInfo2ImgFrame(imgFrame,_zoom):
 
 ## Stable. Create DataFrame of Virtual Patches, and reify them.
 
-@memory.cache
+# @memory.cache
 def build_patchFrame(pid=0):
   dPID = pid2params(pid)
   info = dPID.info

@@ -1,8 +1,6 @@
 """
-Training detection for the ISBI datasets in a data-generator / sampler agnostic way.
+Train CPNet on ISBI datasets with "ahead of time" sample creation.
 Derived from e24_trainer.py
-
-Works with "ahead of time" sampler.
 """
 
 
@@ -36,7 +34,7 @@ except Exception as e:
 
 from experiments_common import rchoose, partition, shuffle_and_split, parse_pid, iterdims, savedir_global
 import datagen
-from isbi_tools import get_isbi_info, isbi_datasets, isbi_scales
+from isbi_tools import get_isbi_info, isbi_datasets, isbi_scales, isbi_names
 from segtools.ns2dir import load, save
 import augmend
 from augmend import Augmend,FlipRot90,Elastic,Rotate,Scale,IntensityScaleShift,Identity
@@ -75,7 +73,6 @@ from expand_labels_scikit import expand_labels
 
 
 ## Stable. Utils.
-
 
 def wipedir(path):
   path = Path(path)
@@ -153,46 +150,57 @@ def build_augmend(ndim):
   return aug
 
 
-## Unstable. Main Training function.
 
+
+## Unstable. Main Training function.
 
 """
 Train a new model with either 01,02,or both datasets.
 The specific images used are determined by `params.subsample_traintimes`
 """
-def train(pid,continue_training=False):
+def train(isbiname,dataset,continue_training=False,reload_patches=False):
 
-  (p1,p0,),pid = parse_pid(pid,[3,19])
-  ## p1 : 0 = both, 1 = 01, 2 = 02
+  p1 = {'01':1 , '02':2, 'both':0}[dataset]
+  p0 = isbi_names.index(isbiname)
 
-  savedir_local = savedir / f'e26_isbidet/train/pid{pid:03d}/'
-  myname, isbiname = isbi_datasets[p0] # v05
+  (p1,p0,),pid = parse_pid([p1,p0],[3,19])
 
-  if p1==0:
-    info01 = get_isbi_info(myname,isbiname,"01")
-    info02 = get_isbi_info(myname,isbiname,"02")
-    ds1,params1,_pngs = e26_isbidet_dgen.build_patchFrame([p0,0])
-    ds2,params2,_pngs = e26_isbidet_dgen.build_patchFrame([p0,1])
-    df = pandas.concat([ds1,ds2])
-    info = info01
-    params = params1
-  if p1==1:
-    info = get_isbi_info(myname,isbiname,"01")
-    df,params,_pngs = e26_isbidet_dgen.build_patchFrame([p0,0])
-  if p1==2:
-    info = get_isbi_info(myname,isbiname,"02")
-    df,params,_pngs = e26_isbidet_dgen.build_patchFrame([p0,1])
+  ## MYPARAM continue training existing dataset
+  CONTINUE = continue_training
+  print("CONTINUE ? : ", bool(CONTINUE))
 
+  # savedir_local = savedir / f'e26_isbidet/train/pid{pid:03d}/'
+  myname, _ = isbi_datasets[p0] # v05
+
+  savedir_local = savedir / f'e26_isbidet/train/{isbiname}/{dataset}/'
 
   print(f"""
-    Begin pid {pid} ... {info.isbiname}
-    p0 = {p0} 
-    =>  p1 : 0 = both, 1 = 01, 2 = 02
+    Begin training {isbiname} / {dataset} (pid = {pid})
     Savedir is {savedir_local}
     """)
 
-  save(df,savedir_local / 'patchFrame.pkl')
-  save(params, savedir_local / 'params.pkl')
+  if reload_patches:
+    df     = load(savedir_local / 'patchFrame.pkl')
+    params = load(savedir_local / 'params.pkl')
+  else:
+    if dataset=='both':
+      info01 = get_isbi_info(myname,isbiname,"01")
+      info02 = get_isbi_info(myname,isbiname,"02")
+      info   = info01
+      ds1,params1,_pngs = e26_isbidet_dgen.build_patchFrame([p0,0])
+      ds2,params2,_pngs = e26_isbidet_dgen.build_patchFrame([p0,1])
+      df = pandas.concat([ds1,ds2])
+      params = params1
+    if dataset=='01':
+      info = get_isbi_info(myname,isbiname,"01")
+      df,params,_pngs = e26_isbidet_dgen.build_patchFrame([p0,0])
+    if dataset=='02':
+      info = get_isbi_info(myname,isbiname,"02")
+      df,params,_pngs = e26_isbidet_dgen.build_patchFrame([p0,1])
+
+  if not reload_patches:
+    save(df,savedir_local / 'patchFrame.pkl')
+    save(params, savedir_local / 'params.pkl')
 
   # df = load(savedir_local / "patchFrame.pkl")
   # params = load(savedir_local / "params.pkl")
@@ -204,10 +212,6 @@ def train(pid,continue_training=False):
   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
   net = _init_unet_params(info.ndim).net
   net = net.to(device)
-
-  ## MYPARAM continue training existing dataset
-  CONTINUE = continue_training
-  print("CONTINUE ? : ", bool(CONTINUE))
   
   if CONTINUE:
     labels = load(savedir_local / "labels.pkl")
@@ -245,7 +249,9 @@ def train(pid,continue_training=False):
 
   def addweights(s):
     if P.sparse:
-      w0 = dgen.weights__decaying_bg_multiplier(s.target,0,thresh=np.exp(-0.5*(3)**2),decayTime=None,bg_weight_multiplier=0.0)
+      # w0 = dgen.weights__decaying_bg_multiplier(s.target,0,thresh=np.exp(-0.5*(3)**2),decayTime=None,bg_weight_multiplier=0.0)
+      # NOTE: i think this is equivalent to a simple threshold mask @ 3xstddev, i.e.
+      w0 = (s.target > np.exp(-0.5*(3**2))).astype(np.float32)
     else:
       w0 = np.ones(s.target.shape,dtype=np.float32)
     return w0
@@ -355,8 +361,9 @@ def train(pid,continue_training=False):
       save(img2png(pred),savedir_local/f'glance_output_vali/a{time}_{i}.png')
 
   tic = time()
-  n_pix = trainset['shape'].apply(np.prod).sum() / 1_000_000 ## Megapixels
+  n_pix = trainset['shape'].apply(np.prod).sum() / 1_000_000 ## Megapixels of raw data only
   N_epochs=300 ## MYPARAM
+  print(f"Estimated Time: {n_pix} Mpix * 1s/Mpix = {300*n_pix/60}m = {300*n_pix/60/60}h \n")
   print(f"\nBegin training for {N_epochs} epochs...\n\n")
   for ep in range(N_epochs):
     backprop_n_samples_into_net()
@@ -369,6 +376,30 @@ def train(pid,continue_training=False):
 
     print("\033[F",end='') ## move cursor UP one line 
     print(f"epoch {ep}/{N_epochs}, loss={history.lossmeans[-1]:4f}, dt={dt:4f}, rate={n_pix/dt:5f} Mpix/s", end='\n',flush=True)
+
+def train_slurm():
+  _gpu  = "-p gpu --gres gpu:1 -n 1 -c 1 -t 3-00:00:00 --mem 128000 "    ## TODO: more cores?
+  # _cpu  = "-n 1 -t 3:00:00 -c 1 --mem 128000 "
+  # Popen("cp *.py temp/",shell=True)
+  slurm = """
+cp *.py temp/
+cd temp
+sbatch -J train_{name} {_resources} -o ../slurm/train_{name}.out -e ../slurm/train_{name}.err \
+<< EOF
+#!/bin/bash 
+python -c \'import e26_isbidet_train as A; A.train(\"{isbiname}\",\"{dataset}\",continue_training=True)\'
+EOF
+"""
+  slurm = slurm.replace("{_resources}",_gpu) ## you can't partially format(), but you can replace().
+
+  Popen(slurm.format(name='TRIC',isbiname='Fluo-N3DL-TRIC',dataset='both'),shell=True)
+
+  # for isbiname in isbi_tools.isbi_names:
+  #   if '3D' not in isbiname: continue
+  #   for dataset in ["01","02"]:
+  #     # print(slurm.format(name=isbiname[-6:],isbiname=isbiname,dataset=dataset),flush=True)
+  #     Popen(slurm.format(name=isbiname[-6:],isbiname=isbiname,dataset=dataset),shell=True)
+
 
 
 ## Unstable. predict and evaluate on patches
@@ -424,7 +455,8 @@ def evaluate(pid=0):
 
   def addweights(s):
     if P.sparse:
-      w0 = dgen.weights__decaying_bg_multiplier(s.target,0,thresh=np.exp(-0.5*(3)**2),decayTime=None,bg_weight_multiplier=0.0)
+      # w0 = dgen.weights__decaying_bg_multiplier(s.target,0,thresh=np.exp(-0.5*(3)**2),decayTime=None,bg_weight_multiplier=0.0)
+      w0 = (s.target > np.exp(-0.5*(3**2))).astype(np.float32)
     else:
       w0 = np.ones(s.target.shape,dtype=np.float32)
     return w0
@@ -907,8 +939,17 @@ def test_compile_scores():
 
 
 
+import argparse, sys
 
-if __name__=='__main__':
-  # for i in range(19*2):
-  #   train(i)
-  myrun_slurm(range(19*2))
+if __name__=="__main__":
+
+  parser = argparse.ArgumentParser(description='Train CPNet on ISBI CTC data.')
+  parser.add_argument('-i','--isbiname',)
+  parser.add_argument('-d','--dataset', )
+  parser.add_argument('--continue', dest='continue', default=False, action='store_true')
+  # parser.add_argument('-c','--continue', default=False)
+  # parser.set_defaults(remote=False)
+
+  args = parser.parse_args()
+  train(args.isbiname , args.dataset)
+

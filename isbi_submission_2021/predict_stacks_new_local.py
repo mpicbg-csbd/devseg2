@@ -16,7 +16,10 @@ import sys
 from scipy.ndimage import zoom,label
 from skimage.feature  import peak_local_max
 from tifffile import imread, imsave
-import tifffile
+
+# def imread(name):
+#   return np.fromfile(name,dtype='uint16').reshape(134,1024,512)
+
 import torch
 
 # from tqdm import tqdm
@@ -246,9 +249,6 @@ def _init_unet_params(ndim):
 
 def predict_and_save_tracking(indir,outdir,cpnet_weights,seg_weights,params,mantrack_t0=None):
 
-  extrasdir = Path(outdir.replace("isbi_challenge_out", "isbi_challenge_out_extra"))
-  extrasdir.mkdir(parents=True,exist_ok=True)
-
   t0 = time()
   
   Path(outdir).mkdir(parents=True,exist_ok=True)
@@ -260,16 +260,20 @@ def predict_and_save_tracking(indir,outdir,cpnet_weights,seg_weights,params,mant
   cpnet  = cpnet.to(device)
 
   fileglob = sorted(Path(indir).glob("t*.tif"))
-  # fileglob = fileglob[::7]  ## FIXME
+  # fileglob = sorted(Path(indir).glob("*.raw"))
+  # fileglob = fileglob[-3:]  ## FIXME
   print(f"Running tracking over {len(fileglob)} files...\n\n",flush=True)
   # ipdb.set_trace()
 
   ## predict & extract pts for each image independently
+  extrasdir = Path(outdir.replace("isbi_challenge_out", "isbi_challenge_out_extra"))
+  extrasdir.mkdir(parents=True,exist_ok=True)
   (extrasdir / "ltps").mkdir(exist_ok=1)
   ltps = []
   for i,rawname in enumerate(fileglob):
     print(f"i={i+1}/{len(fileglob)} , file={rawname} \033[F", flush=True)
     pts = eval_sample(rawname,cpnet,segnet,params,ptsOnly=True)
+    print(f"Found {len(pts)} pts in image {i}.", flush=True)
     np.save(str(extrasdir / 'ltps/pts.npy'), pts)
     ltps.append(pts)
 
@@ -347,6 +351,10 @@ def eval_sample(rawname,cpnet,segnet,params,ptsOnly=False):
   pred = apply_net_tiled_nobounds(f_net,raw[None],outchan=1,)
   pred = pred[0]
 
+  # newdir = str(rawname).replace("isbi_challenge","isbi_challenge_pred")
+  # Path(newdir).parent.mkdir(parents=True,exist_ok=True)
+  # imsave(newdir, pred)
+
   ## renormalize intensity
   _peaks = pred/pred.max()
 
@@ -357,8 +365,9 @@ def eval_sample(rawname,cpnet,segnet,params,ptsOnly=False):
   ## undo scaling
   pts = zoom_pts(pts,1/zoom_effective)
 
-  if ptsOnly: return pts
+  return pts
 
+  # if ptsOnly: return pts
   # o_shape = np.array(o_shape)
   # ## Filter out points near border
   # # pts2   = [p for p in pts   if np.all(p%(o_shape - params.evalBorder) >= params.evalBorder)]

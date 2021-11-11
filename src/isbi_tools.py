@@ -5,6 +5,32 @@ from segtools.ns2dir import load, save, toarray
 import re
 
 
+
+## (myname, isbiname) | my order | official ISBI order
+isbi_names = [
+  "BF-C2DL-HSC",           #  0     0 
+  "BF-C2DL-MuSC",          #  1     1 
+  "DIC-C2DH-HeLa",         #  2     2 
+  "Fluo-C2DL-MSC",         #  3     3 
+  "Fluo-C3DH-A549",        #  4     4 
+  "Fluo-C3DH-A549-SIM",    #  5    16 
+  "Fluo-C3DH-H157",        #  6     5 
+  "Fluo-C3DL-MDA231",      #  7     6 
+  "Fluo-N2DH-GOWT1",       #  8     7 
+  "Fluo-N2DH-SIM+",        #  9    17 
+  "Fluo-N2DL-HeLa",        # 10     8 
+  "Fluo-N3DH-CE",          # 11     9 
+  "Fluo-N3DH-CHO",         # 12    10 
+  "Fluo-N3DH-SIM+",        # 13    18 
+  "Fluo-N3DL-DRO",         # 14    11 
+  "Fluo-N3DL-TRIC",        # 15    12 
+  "PhC-C2DH-U373",         # 16    14 
+  "PhC-C2DL-PSC",          # 17    15 
+  "Fluo-N3DL-TRIF",        # 18    13 
+  ]
+
+
+
 ## (myname, isbiname) | my order | official ISBI order
 isbi_datasets = [
   ("HSC",             "BF-C2DL-HSC"),           #  0     0 

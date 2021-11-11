@@ -84,7 +84,7 @@ def file_size(root):
     return os.stat(fname).st_size
 
 def strDiskSizePatchFrame(df):
-  _totsize = (2+1+2) * df['shape'].apply(np.prod).sum()
+  _totsize = (2+1+2) * df['shape'].apply(np.prod).sum() ## u16 (raw) + u8 (lab) + u16 (target)
   return bytes2string(_totsize)
 
 def myzoom(img,scale):

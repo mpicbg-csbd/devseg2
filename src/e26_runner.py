@@ -16,10 +16,6 @@ def myrun_slurm():
   ## copy the experiments file to a safe name that you WONT EDIT. If you edit the code while jobs are waiting in the SLURM queue it could cause inconsistencies.
   ## NOTE: here we only copy experiment.py file, but THE SAME IS TRUE FOR ALL DEPENDENCIES.
 
-  # shutil.copy(__file__, Path("/projects/project-broaddus/devseg_2/src/temp/")) # / str(Path(__file__).stem + "_copy.py"))
-  # shutil.copy("e26_isbidet_dgen.py", Path("/projects/project-broaddus/devseg_2/src/temp/")) ## becomes a local import 
-  # shutil.copy("e26_isbidet_train.py", Path("/projects/project-broaddus/devseg_2/src/temp/")) ## becomes a local import 
-
   _gpu  = "-p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 "    ## TODO: more cores?
   _cpu  = "-n 1 -t 1:00:00 -c 4 --mem 128000 "
   slurm = """

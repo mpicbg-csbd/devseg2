@@ -55,24 +55,25 @@ def trackingvideo2D():
 """
 Generate a three-panel movie of the tracking with colored cell centerpoint trajectories.
 """
-def trackingvideo(CONTINUE=False):
+def trackingvideo(
+    rawdir = "/projects/project-broaddus/rawdata/isbi_challenge/Fluo-N3DL-DRO/01/",
+    ltpsfile_local = "/projects/project-broaddus/rawdata/isbi_challenge_out_extra/Fluo-N3DL-DRO/01_RES/ltps/ltps.npy",
+    outdir = "/projects/project-broaddus/rawdata/isbi_challenge_out_extra/Fluo-N3DL-DRO/01/trackingvideo/",
+    DT    = 3,   # >= 1 
+    lw    = 1,   # >= 1 
+    scale = (5,1,1) ,
+    dub   = 20 ,
+    CONTINUE=False):
 
-  outdir = Path("/projects/project-broaddus/rawdata/isbi_challenge_out_extra/Fluo-N3DL-DRO/01/trackingvideo/")
+  outdir = Path(outdir)
   outdir.mkdir(exist_ok=True, parents=True)
 
   # ltpsfile_remote = f"/projects/project-broaddus/rawdata/isbi_challenge_out_extra/Fluo-N2DH-GOWT1/01_RES/ltps.npy"
   # rsync_pull2(ltpsfile_remote, return_value=False)
-  ltpsfile_local = f"/projects/project-broaddus/rawdata/isbi_challenge_out_extra/Fluo-N3DL-DRO/01_RES/ltps/ltps.npy"
-  rawdir = "/projects/project-broaddus/rawdata/isbi_challenge/Fluo-N3DL-DRO/01/"
 
-  # N = len(ltps)
-  # files = glob("/Users/broaddus/Desktop/project-broaddus/rawdata/isbi_challenge/Fluo-N3DL-DRO/02/t*.tif")
-  # N = len(files)
-  N     = 20
-  DT    = 3 # >= 1
-  lw    = 1 # >= 1
-  scale = (5,1,1)
-  dub   = 20
+  files = sorted(Path(rawdir).glob("t*.tif"))
+  N = len(files)
+  # N = 7
 
   ## do the tracking
   ltps = np.load(ltpsfile_local, allow_pickle=True)
@@ -168,3 +169,138 @@ def trackingvideo(CONTINUE=False):
     print(imgX.shape)
 
     save(panel , outdir / f"frames/frame{i:03d}.png")
+
+import argparse
+
+
+def run_standard(isbiname='Fluo-N3DL-TRIF', dataset='01',):
+  scale = isbi_tools.isbi_scales[isbiname]
+  scale = (np.array(scale)/scale[0])[::-1]
+  scale = tuple(scale)
+
+  trackingvideo(
+    rawdir = f"/projects/project-broaddus/rawdata/isbi_challenge/{isbiname}/{dataset}/",
+    ltpsfile_local = f"/projects/project-broaddus/rawdata/isbi_challenge_out_extra/{isbiname}/{dataset}_RES/ltps/ltps.npy",
+    outdir = f"/projects/project-broaddus/rawdata/isbi_challenge_out_extra/{isbiname}/{dataset}/trackingvideo/",
+    DT    = 3,
+    lw    = 1,
+    scale = scale,
+    dub   = 20 ,
+    CONTINUE=False)  
+
+
+import isbi_tools
+from subprocess import Popen
+
+def myrun_slurm():
+  ## copy the experiments file to a safe name that you WONT EDIT. If you edit the code while jobs are waiting in the SLURM queue it could cause inconsistencies.
+  ## NOTE: here we only copy experiment.py file, but THE SAME IS TRUE FOR ALL DEPENDENCIES.
+
+  # _gpu  = "-p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 "    ## TODO: more cores?
+  _cpu  = "-n 1 -t 3:00:00 -c 1 --mem 128000 "
+  Popen("cp *.py temp/",shell=True)
+  slurm = """
+cd temp
+sbatch -J png_{name} {_resources} -o ../slurm/png_{name}.out -e ../slurm/png_{name}.err \
+<< EOF
+#!/bin/bash 
+python3 -c \'import png_tracking as A; A.run_standard(\"{isbiname}\",\"{dataset}\")\'
+EOF
+"""
+  slurm = slurm.replace("{_resources}",_cpu) ## you can't partially format(), but you can replace().
+
+  isbiname = 'Fluo-N3DL-TRIC'
+  dataset  = '01'
+  Popen(slurm.format(name=isbiname[-6:],isbiname=isbiname,dataset=dataset),shell=True)
+  
+  # for isbiname in isbi_tools.isbi_names:
+  #   if '3D' not in isbiname: continue
+  #   for dataset in ["01","02"]:
+  #     # print(slurm.format(name=isbiname[-6:],isbiname=isbiname,dataset=dataset),flush=True)
+  #     Popen(slurm.format(name=isbiname[-6:],isbiname=isbiname,dataset=dataset),shell=True)
+
+
+
+if __name__=="__main__":
+
+  parser = argparse.ArgumentParser(description='Create folder of PNGs with cell tracking solutions from results.')
+  parser.add_argument('-r','--rawdir',)
+  parser.add_argument('-d','--detections', )
+  parser.add_argument('-o','--outdir',)
+  parser.add_argument('--dt',type=int,default=3)
+  parser.add_argument('--scale', type=float, nargs='*', default=[1.,1.])
+
+  # parser.add_argument('-c','--continue', default=False)
+  # parser.set_defaults(remote=False)
+
+  args = parser.parse_args()
+  
+  trackingvideo(
+    rawdir = args.rawdir,
+    ltpsfile_local = args.detections,
+    outdir = args.outdir,
+    DT    = args.dt,   # >= 1 
+    lw    = 1,   # >= 1 
+    scale = tuple(args.scale) ,
+    dub   = 20 ,
+    CONTINUE=False)
+
+
+
+
+"""
+sbatch -J Fluo-N3DL-TRIF-01 \
+-p gpu --gres gpu:1 -n 1 -c 1 -t 12:00:00 --mem 128000 \
+-o slurm_out/png_tracking/Fluo-N3DL-TRIF-01.txt \
+-e slurm_err/png_tracking/Fluo-N3DL-TRIF-01.txt \
+<< EOF
+#!/bin/bash
+/bin/time -v python png_tracking.py \
+-r /projects/project-broaddus/rawdata/isbi_challenge/Fluo-N3DL-TRIF/01 \
+-d /projects/project-broaddus/rawdata/isbi_challenge_out_extra/Fluo-N3DL-TRIF/01_RES/ltps/ltps.npy \
+-o /projects/project-broaddus/rawdata/isbi_challenge_out_extra/Fluo-N3DL-TRIF/01/trackingvideo/ \
+--dt 3 \
+--scale 1 1 1
+EOF
+
+
+sbatch -J Fluo-N3DL-TRIF-02 \
+-p gpu --gres gpu:1 -n 1 -c 1 -t 12:00:00 --mem 128000 \
+-o slurm_out/png_tracking/Fluo-N3DL-TRIF-02.txt \
+-e slurm_err/png_tracking/Fluo-N3DL-TRIF-02.txt \
+<< EOF
+#!/bin/bash
+/bin/time -v python png_tracking.py \
+-r /projects/project-broaddus/rawdata/isbi_challenge/Fluo-N3DL-TRIF/02 \
+-d /projects/project-broaddus/rawdata/isbi_challenge_out_extra/Fluo-N3DL-TRIF/02_RES/ltps/ltps.npy \
+-o /projects/project-broaddus/rawdata/isbi_challenge_out_extra/Fluo-N3DL-TRIF/02/trackingvideo/ \
+--dt 3 \
+--scale 1 1 1
+EOF
+
+
+sbatch -J Png-DRO-02 -n 1 -c 1 -t 12:00:00 --mem 16000 \
+-o slurm_out/png_tracking/Png-DRO-02.txt \
+-e slurm_err/png_tracking/Png-DRO-02.txt \
+<<EOF
+#!/bin/bash
+/bin/time -v python -c 'import png_tracking as A; A.run_standard("Fluo-N3DL-DRO","02",5);'
+EOF
+
+sbatch -J Png-DRO-02 -n 1 -c 1 -t 12:00:00 --mem 16000 \
+-o slurm_out/png_tracking/Png-DRO-02.txt \
+-e slurm_err/png_tracking/Png-DRO-02.txt \
+<<EOF
+#!/bin/bash
+/bin/time -v python -c 'import png_tracking as A; A.run_standard("Fluo-N3DL-DRO","02",5);'
+EOF
+
+
+sbatch -J png-DRO-02 -n 1 -c 1 -t 12:00:00 --mem 16000 -o slurm/png-DRO-02.out -e slurm/png-DRO-02.err 
+<<EOF
+#!/bin/bash
+/bin/time -v python -c 'import png_tracking as A; A.run_standard("Fluo-N3DL-DRO","02",5);'
+EOF
+
+
+"""
