@@ -56,8 +56,8 @@ def trackingvideo2D():
 Generate a three-panel movie of the tracking with colored cell centerpoint trajectories.
 """
 def trackingvideo(
-    rawdir = "/projects/project-broaddus/rawdata/isbi_challenge/Fluo-N3DL-DRO/01/",
-    ltpsfile_local = "/projects/project-broaddus/rawdata/isbi_challenge_out_extra/Fluo-N3DL-DRO/01_RES/ltps/ltps.npy",
+    filenames,
+    ltps,
     outdir = "/projects/project-broaddus/rawdata/isbi_challenge_out_extra/Fluo-N3DL-DRO/01/trackingvideo/",
     DT    = 3,   # >= 1 
     lw    = 1,   # >= 1 
@@ -70,13 +70,10 @@ def trackingvideo(
 
   # ltpsfile_remote = f"/projects/project-broaddus/rawdata/isbi_challenge_out_extra/Fluo-N2DH-GOWT1/01_RES/ltps.npy"
   # rsync_pull2(ltpsfile_remote, return_value=False)
-
-  files = sorted(Path(rawdir).glob("t*.tif"))
-  N = len(files)
+  # files = sorted(Path(rawdir).glob("t*.tif"))
+  N = len(filenames)
   # N = 7
 
-  ## do the tracking
-  ltps = np.load(ltpsfile_local, allow_pickle=True)
   tb   = tracking.nn_tracking_on_ltps(ltps, scale=scale, dub=dub)
   nap  = tracking.tb2nap(tb,ltps)
 
@@ -87,11 +84,15 @@ def trackingvideo(
 
   ## Save a max projection from each angle
   for i in range(N):
+    # file = f"{rawdir}/t{i:03d}.tif"
     print(i)
-    file = f"{rawdir}/t{i:03d}.tif"
+    file = filenames[i]
 
     if not CONTINUE:
-      img  = load(file)
+      if str(file)[-3:]=='raw':
+        img = imreadraw(file)
+      else:
+        img  = load(file)
       bigshape = img.shape
       imgZ = norm_percentile01(img.max(0), 0, 99)
       save(imgZ, outdir / f"imgZ{i:03d}.png")
@@ -178,9 +179,13 @@ def run_standard(isbiname='Fluo-N3DL-TRIF', dataset='01',):
   scale = (np.array(scale)/scale[0])[::-1]
   scale = tuple(scale)
 
+  rawdir = f"/projects/project-broaddus/rawdata/isbi_challenge/{isbiname}/{dataset}/"
+  filenames = sorted(Path(rawdir).glob("t*.tif"))
+  ltps = np.load(f"/projects/project-broaddus/rawdata/isbi_challenge_out_extra/{isbiname}/{dataset}_RES/ltps/ltps.npy",allow_pickle=1)
+
   trackingvideo(
-    rawdir = f"/projects/project-broaddus/rawdata/isbi_challenge/{isbiname}/{dataset}/",
-    ltpsfile_local = f"/projects/project-broaddus/rawdata/isbi_challenge_out_extra/{isbiname}/{dataset}_RES/ltps/ltps.npy",
+    filenames,
+    ltps,
     outdir = f"/projects/project-broaddus/rawdata/isbi_challenge_out_extra/{isbiname}/{dataset}/trackingvideo/",
     DT    = 3,
     lw    = 1,
@@ -220,30 +225,55 @@ EOF
   #     Popen(slurm.format(name=isbiname[-6:],isbiname=isbiname,dataset=dataset),shell=True)
 
 
+def imreadraw(name):
+  return np.fromfile(name,dtype='uint16').reshape(134,1024,512)
 
-if __name__=="__main__":
+def runDaniela():
 
-  parser = argparse.ArgumentParser(description='Create folder of PNGs with cell tracking solutions from results.')
-  parser.add_argument('-r','--rawdir',)
-  parser.add_argument('-d','--detections', )
-  parser.add_argument('-o','--outdir',)
-  parser.add_argument('--dt',type=int,default=3)
-  parser.add_argument('--scale', type=float, nargs='*', default=[1.,1.])
+  # rawdir = f"/projects/project-broaddus/rawdata/isbi_challenge/{isbiname}/{dataset}/"
+  rawdir = "/projects/project-broaddus/rawdata/daniela/2019-12-11-10-39-07-98-Trier_Tribolium_nGFP_window_highres/stacks/C0opticsprefused/"
+  filenames = sorted(Path(rawdir).glob("*.raw"))
+  ltps  = np.load("/projects/project-broaddus/rawdata/daniela/pred/ltps/ltps.npy",allow_pickle=1)
 
-  # parser.add_argument('-c','--continue', default=False)
-  # parser.set_defaults(remote=False)
-
-  args = parser.parse_args()
-  
   trackingvideo(
-    rawdir = args.rawdir,
-    ltpsfile_local = args.detections,
-    outdir = args.outdir,
-    DT    = args.dt,   # >= 1 
+    filenames,
+    ltps,
+    outdir = "/projects/project-broaddus/rawdata/daniela/pred/trackingvideo/",
+    DT    = 3,   # >= 1 
     lw    = 1,   # >= 1 
-    scale = tuple(args.scale) ,
+    scale = (4,1,1) ,
     dub   = 20 ,
-    CONTINUE=False)
+    CONTINUE=False,
+    )
+
+
+
+
+
+
+# if __name__=="__main__":
+
+#   parser = argparse.ArgumentParser(description='Create folder of PNGs with cell tracking solutions from results.')
+#   parser.add_argument('-r','--rawdir',)
+#   parser.add_argument('-d','--detections', )
+#   parser.add_argument('-o','--outdir',)
+#   parser.add_argument('--dt',type=int,default=3)
+#   parser.add_argument('--scale', type=float, nargs='*', default=[1.,1.])
+
+#   # parser.add_argument('-c','--continue', default=False)
+#   # parser.set_defaults(remote=False)
+
+#   args = parser.parse_args()
+  
+#   trackingvideo(
+#     rawdir = args.rawdir,
+#     ltpsfile_local = args.detections,
+#     outdir = args.outdir,
+#     DT    = args.dt,   # >= 1 
+#     lw    = 1,   # >= 1 
+#     scale = tuple(args.scale) ,
+#     dub   = 20 ,
+#     CONTINUE=False)
 
 
 

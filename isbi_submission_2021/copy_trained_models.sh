@@ -1,0 +1,25 @@
+
+tdir="/projects/project-broaddus/devseg_2/expr/e26_isbidet/train/"
+mdir="/projects/project-broaddus/devseg_2/isbi_submission_2021/models/"
+mkdir -p $mdir
+rm $mdir/*.pt
+
+cp "$tdir/pid000/m/best_weights_loss.pt"              "$mdir/BF-C2DL-HSC-01+02_weights.pt"
+cp "$tdir/pid001/m/best_weights_loss.pt"              "$mdir/BF-C2DL-MuSC-01+02_weights.pt"
+cp "$tdir/DIC-C2DH-HeLa/both/m/best_weights_loss.pt"  "$mdir/DIC-C2DH-HeLa-01+02_weights.pt"
+cp "$tdir/Fluo-C2DL-MSC/both/m/best_weights_loss.pt"  "$mdir/Fluo-C2DL-MSC-01+02_weights.pt"
+cp "$tdir/pid004/m/best_weights_loss.pt"              "$mdir/Fluo-C3DH-A549-01+02_weights.pt"
+cp "$tdir/pid005/m/best_weights_loss.pt"              "$mdir/Fluo-C3DH-A549-SIM-01+02_weights.pt"
+cp "$tdir/pid006/m/best_weights_loss.pt"              "$mdir/Fluo-C3DH-H157-01+02_weights.pt"
+cp "$tdir/pid007/m/best_weights_loss.pt"              "$mdir/Fluo-C3DL-MDA231-01+02_weights.pt"
+cp "$tdir/pid008/m/best_weights_loss.pt"              "$mdir/Fluo-N2DH-GOWT1-01+02_weights.pt"
+cp "$tdir/pid009/m/best_weights_loss.pt"              "$mdir/Fluo-N2DH-SIM+-01+02_weights.pt"
+cp "$tdir/pid010/m/best_weights_loss.pt"              "$mdir/Fluo-N2DL-HeLa-01+02_weights.pt"
+cp "$tdir/pid011/m/best_weights_loss.pt"              "$mdir/Fluo-N3DH-CE-01+02_weights.pt"
+cp "$tdir/pid012/m/best_weights_loss.pt"              "$mdir/Fluo-N3DH-CHO-01+02_weights.pt"
+cp "$tdir/pid013/m/best_weights_loss.pt"              "$mdir/Fluo-N3DH-SIM+-01+02_weights.pt"
+cp "$tdir/pid014/m/best_weights_loss.pt"              "$mdir/Fluo-N3DL-DRO-01+02_weights.pt"
+cp "$tdir/Fluo-N3DL-TRIC/both/m/best_weights_loss.pt" "$mdir/Fluo-N3DL-TRIC-01+02_weights.pt"
+cp "$tdir/pid016/m/best_weights_loss.pt"              "$mdir/PhC-C2DH-U373-01+02_weights.pt"
+cp "$tdir/pid017/m/best_weights_loss.pt"              "$mdir/PhC-C2DL-PSC-01+02_weights.pt"
+cp "$tdir/pid018/m/best_weights_loss.pt"              "$mdir/Fluo-N3DL-TRIF-01+02_weights.pt"

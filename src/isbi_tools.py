@@ -4,8 +4,6 @@ from pathlib import Path
 from segtools.ns2dir import load, save, toarray
 import re
 
-
-
 ## (myname, isbiname) | my order | official ISBI order
 isbi_names = [
   "BF-C2DL-HSC",           #  0     0 
@@ -28,7 +26,6 @@ isbi_names = [
   "PhC-C2DL-PSC",          # 17    15 
   "Fluo-N3DL-TRIF",        # 18    13 
   ]
-
 
 
 ## (myname, isbiname) | my order | official ISBI order

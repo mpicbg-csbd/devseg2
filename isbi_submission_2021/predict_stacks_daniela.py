@@ -1,6 +1,5 @@
 # from skimage.io import imread
-# from expand_labels_scikit import expand_labels
-
+from expand_labels_scikit import expand_labels
 from glob import glob
 from math import floor,ceil
 from pathlib import Path
@@ -17,10 +16,12 @@ import sys
 from scipy.ndimage import zoom,label
 from skimage.feature  import peak_local_max
 from tifffile import imread, imsave
+from tifffile import imsave
+
+def imread(name):
+  return np.fromfile(name,dtype='uint16').reshape(134,1024,512)
 
 import torch
-
-from os import path
 
 # from tqdm import tqdm
 import tracking
@@ -219,7 +220,7 @@ def init_params(ndim):
     P.border = [2,2]
     P.match_dub = 10
     P.match_scale = [1,1]
-    # P.evalBorder = (5,5)
+    P.evalBorder = (5,5)
 
   elif ndim==3:
     P.zoom   = (1,1,1)
@@ -228,7 +229,7 @@ def init_params(ndim):
     P.border = [1,2,2]
     P.match_dub = 10
     P.match_scale = [4,1,1]
-    # P.evalBorder = (1,5,5)
+    P.evalBorder = (1,5,5)
 
   P.nms_footprint = P.kern
   P.patch = np.array(P.patch)
@@ -259,36 +260,58 @@ def predict_and_save_tracking(indir,outdir,cpnet_weights,seg_weights,params,mant
   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
   cpnet  = cpnet.to(device)
 
-  fileglob = sorted(Path(indir).glob("t*.tif"))
+  # fileglob = sorted(Path(indir).glob("t*.tif"))
+  # fileglob = fileglob[36:]
+  # mantrack_t0 = "/projects/project-broaddus/rawdata/isbi_challenge_out/Fluo-N3DL-TRIF/01_RES/mask036.tif"
+  # fileglob = fileglob[-3:]  ## FIXME
+  fileglob = sorted(Path(indir).glob("*.raw"))
   print(f"Running tracking over {len(fileglob)} files...\n\n",flush=True)
+  # ipdb.set_trace()
 
-  ## predict & extract pts for each image independently
+  # ## predict & extract pts for each image independently
+  extrasdir = Path(outdir.replace("isbi_challenge_out", "isbi_challenge_out_extra"))
+  extrasdir.mkdir(parents=True,exist_ok=True)
+  (extrasdir / "ltps").mkdir(exist_ok=1)
   ltps = []
   for i,rawname in enumerate(fileglob):
     print(f"i={i+1}/{len(fileglob)} , file={rawname} \033[F", flush=True)
-    pts = eval_sample(rawname,cpnet,segnet,params)
+    pts = eval_sample(rawname,cpnet,segnet,params,ptsOnly=True)
+    print(f"Found {len(pts)} pts in image {i}.", flush=True)
+    np.save(str(extrasdir / f'ltps/pts{i:04d}.npy'), pts)
     ltps.append(pts)
+  np.save(str(extrasdir / 'ltps/ltps.npy'), np.array(ltps,dtype=object))
 
-  ## do tracking from pts
+
+  # ltps = np.load(str(extrasdir / 'ltps/ltps.npy'), allow_pickle=True)
+
+  # ## do tracking from pts
   # radius = np.max(np.array(params.nms_footprint) / params.zoom) * 2
-  tb = tracking.nn_tracking_on_ltps(ltps, scale=params.scale, dub=params.radius*2)
+  # print(f"Radius = {radius}")
 
-  raw = imread(str(fileglob[0])).astype(np.float)
-  o_shape = raw.shape ## original shape
-  t_start = int(re.search(r"(\d{3,4})\.tif", str(fileglob[0])).group(1))
+  # tb = tracking.nn_tracking_on_ltps(ltps, scale=params.scale, dub=radius*2)
 
-  sampling = params.scale * np.array([0.5,1,1])[-len(params.scale):] ## extra width in Z
+  # raw = imread(str(fileglob[0])).astype(np.float)
+  # o_shape = raw.shape ## original shape
+  # t_start = int(re.search(r"(\d{3,4})\.tif", str(fileglob[0])).group(1))
 
-  if mantrack_t0:
-    lbep, labelset, stackset = tracking.save_isbi_tb_2(tb,params.radius,sampling,o_shape,t_start,params.ndim,outdir,penalizeFP='0',mantrack_t0=mantrack_t0)
-  else:
-    lbep, labelset, stackset = tracking.save_isbi_tb_2(tb,params.radius,sampling,o_shape,t_start,params.ndim,outdir,penalizeFP='1',mantrack_t0=None)
+  # print(indir)
+  # if "Fluo-N3DL-DRO" in indir:
+  #   radius = 5
+
+  # savedir = outdir
+
+  # sampling = params.scale * np.array([0.5,1,1])[-len(params.scale):] ## extra width in Z
+
+  # if mantrack_t0:
+  #   lbep, labelset, stackset = tracking.save_isbi_tb_2(tb,radius,sampling,o_shape,t_start,params.ndim,savedir,penalizeFP='0',mantrack_t0=mantrack_t0)
+  # else:
+  #   lbep, labelset, stackset = tracking.save_isbi_tb_2(tb,radius,sampling,o_shape,t_start,params.ndim,savedir,penalizeFP='1',mantrack_t0=None)
 
 
 """
 TODO: speed up this function. 2mins 2sec to run on TRIF shape=(975, 1820, 1000) with zoom=(0.5 , 0.5 , 0.5)
 """
-def eval_sample(rawname,cpnet,segnet,params):
+def eval_sample(rawname,cpnet,segnet,params,ptsOnly=False):
 
   raw = imread(str(rawname)).astype(np.float)
   o_shape = raw.shape ## original shape
@@ -310,6 +333,10 @@ def eval_sample(rawname,cpnet,segnet,params):
   pred = apply_net_tiled_nobounds(f_net,raw[None],outchan=1,)
   pred = pred[0]
 
+  # newdir = str(rawname).replace("isbi_challenge","isbi_challenge_pred")
+  # Path(newdir).parent.mkdir(parents=True,exist_ok=True)
+  # imsave(newdir, pred)
+
   ## renormalize intensity
   _peaks = pred/pred.max()
 
@@ -320,60 +347,24 @@ def eval_sample(rawname,cpnet,segnet,params):
   ## undo scaling
   pts = zoom_pts(pts,1/zoom_effective)
 
-  ## filter out points outside of Field of Interest (FoI)
-  o_shape = np.array(o_shape)
-  filterzone = params.evalBorder + params.radius/params.scale
-  pts2    = [p for p in pts   if np.all(p%(o_shape - filterzone) >= filterzone)]
+  return pts
 
-  return pts2
 
 if __name__ == '__main__':
-  parser = argparse.ArgumentParser(description='Track cells. Take a folder of TIFFs as input...')
-
-  parser.add_argument('-i', "--indir", default="/projects/CSBDeep/ISBI/upload_test/01")
-  parser.add_argument('-o', "--outdir", default="/projects/CSBDeep/ISBI/upload_test/01_RES")
-  parser.add_argument("--cpnet_weights", default="models/Fluo-N2DH-GOWT1-01_weights.pt")
-  parser.add_argument("--segnet_weights", default=None)
-  parser.add_argument('--zoom', type=float, nargs='*', default=[1.,1.])
-  parser.add_argument('--nms_footprint', type=int, nargs='*', default=[3,3])
-  parser.add_argument('--radius', type=float)
-  parser.add_argument('--scale', type=float, nargs='*', default=[1.,1.])
-  parser.add_argument('--mantrack_t0', type=str)
-  parser.add_argument('--evalBorder', type=int, nargs='*',)
-
-  # mantrack_t0 = "None"
-
-  # parser.add_argument('--threshold_abs',type = float, default=.3)
-  # parser.add_argument('--min_distance',type = int, default=4)
-  # parser.add_argument('--tile_size', type = int, nargs = 3, default=[-1,512,256])
   
-
-  args = parser.parse_args()
-
-  if args.mantrack_t0 == "None":
-    mantrack_t0 = None
-  else:
-    mantrack_t0 = args.mantrack_t0
-
-  # ipdb.set_trace()
-
-
   params = SimpleNamespace()
-  params.zoom = args.zoom
-  params.nms_footprint = args.nms_footprint
-  params.ndim = len(args.zoom)
-  params.scale = np.array(args.scale)
-  params.radius = args.radius
-  params.evalBorder = np.array(args.evalBorder)
+  params.zoom = (1,1,1)
+  params.nms_footprint = (3,5,5)
+  params.ndim  = 3
+  params.scale = (4,1,1)
 
   predict_and_save_tracking(
-    args.indir,
-    args.outdir,
-    args.cpnet_weights,
-    args.segnet_weights,
+    "/projects/project-broaddus/rawdata/daniela/2019-12-11-10-39-07-98-Trier_Tribolium_nGFP_window_highres/stacks/C0opticsprefused/",
+    "/projects/project-broaddus/rawdata/daniela/pred/",
+    "models/Fluo-N3DL-TRIF-01+02_weights.pt",
+    None,
     params,
-    mantrack_t0,
+    None,
     )
-
 
 

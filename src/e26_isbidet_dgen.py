@@ -58,9 +58,6 @@ from joblib import Memory
 # savedir = savedir_global()
 # print("savedir:", savedir)
 
-
-
-
 ## stable. job-specific utility funcs.
 
 # def myrun_slurm(pids):

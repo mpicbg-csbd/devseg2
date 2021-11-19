@@ -1,8 +1,3 @@
-#!/bin/bash
-
-
-lftp -u ctc148,Kq6Z9N ftp.celltrackingchallenge.net << EOF
-
 ## TRANSFER CODE
 
 ls
@@ -94,6 +89,4 @@ mput /projects/project-broaddus/rawdata/isbi_challenge_out/Fluo-N2DH-GOWT1/02_RE
 # cd /Fluo-N3DH-SIM+/02_RES/
 # mput /projects/project-broaddus/rawdata/isbi_challenge_out/Fluo-N3DH-SIM+/02_RES/*
 
-
 bye
-EOF

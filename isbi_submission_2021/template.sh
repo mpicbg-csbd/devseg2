@@ -1,13 +1,16 @@
 # #!/bin/bash
 
-echo "Current dir: $(pwd)"
+# echo "Current dir: $(pwd)"
 # echo "Current Python: $(which python)"
 
-./my_env3/bin/python3 <script> \
+python3 predict_stacks_new_local.py \
 	-i "<indir>" \
 	-o "<outdir>" \
 	--cpnet_weights "models/<weightname>" \
 	--zoom <zoom> \
 	--nms_footprint <nms_footprint> \
 	--scale <scale> \
+	--radius <radius> \
 	--mantrack_t0 "<mantrack_t0>" \
+	--evalBorder <evalBorder> \
+

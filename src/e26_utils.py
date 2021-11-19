@@ -27,12 +27,11 @@ def sample2RawPng(sample):
 
 
 
-
+"""
+c = np.divide(a, b, out=np.zeros_like(a), where=b!=0)
+https://stackoverflow.com/questions/26248654/how-to-return-0-with-divide-by-zero
+"""
 def norm_minmax01(x):
-  """
-  c = np.divide(a, b, out=np.zeros_like(a), where=b!=0)
-  https://stackoverflow.com/questions/26248654/how-to-return-0-with-divide-by-zero
-  """
   mx = x.max()
   mn = x.min()
   if mx==mn: 

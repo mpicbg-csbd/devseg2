@@ -1,5 +1,8 @@
 # from skimage.io import imread
-from expand_labels_scikit import expand_labels
+# from expand_labels_scikit import expand_labels
+# from utils import expand_labels
+import ipdb
+
 from glob import glob
 from math import floor,ceil
 from pathlib import Path
@@ -17,14 +20,30 @@ from scipy.ndimage import zoom,label
 from skimage.feature  import peak_local_max
 from tifffile import imread, imsave
 
-# def imread(name):
-#   return np.fromfile(name,dtype='uint16').reshape(134,1024,512)
-
 import torch
-
+from os import path
 # from tqdm import tqdm
 import tracking
 import torch_models
+
+
+def run_slurm(isbiname='Fluo-N3DL-TRIC',dataset='01'):
+
+  _gpu  = "-p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 "    ## TODO: more cores?
+  _cpu  = "-n 1 -t 1:00:00 -c 4 --mem 128000 "
+  slurm = """
+  cp *.py temp
+  cd temp
+  sbatch -J p-{name} {_resources} -o ../slurm/p-{name}.out -e ../slurm/p-{name}.err --wrap \'python -c \"import predict_stacks_new_local.py as A; A.myrun_slurm_entry(isbiname={isbiname},dataset={dataset})\"\' 
+  """
+  slurm = slurm.replace("{_resources}",_gpu) ## you can't partially format(), but you can replace().
+
+
+  for p1 in [0]:
+    for p0 in range(19):
+      # if p0 in [3,6]: continue
+      (p1,p0,),pid = parse_pid([p1,p0],[3,19])
+      Popen(slurm.format(pid=pid),shell=True)  
 
 ## Utils
 
@@ -219,7 +238,7 @@ def init_params(ndim):
     P.border = [2,2]
     P.match_dub = 10
     P.match_scale = [1,1]
-    P.evalBorder = (5,5)
+    # P.evalBorder = (5,5)
 
   elif ndim==3:
     P.zoom   = (1,1,1)
@@ -228,15 +247,12 @@ def init_params(ndim):
     P.border = [1,2,2]
     P.match_dub = 10
     P.match_scale = [4,1,1]
-    P.evalBorder = (1,5,5)
+    # P.evalBorder = (1,5,5)
 
   P.nms_footprint = P.kern
   P.patch = np.array(P.patch)
 
   return P
-
-
-## Run the Prediciton
 
 def _init_unet_params(ndim):
   T = SimpleNamespace()
@@ -247,89 +263,93 @@ def _init_unet_params(ndim):
   torch_models.init_weights(T.net)
   return T
 
+# from time import time as pytime
+
+
+"""
+Run the Prediciton. Main entry point.
+"""
 def predict_and_save_tracking(indir,outdir,cpnet_weights,seg_weights,params,mantrack_t0=None):
 
-  t0 = time()
-  
-  Path(outdir).mkdir(parents=True,exist_ok=True)
+  # t0 = pytime(); print(f"t0:{t0}")
+  # outdir = outdir.replace("isbi_challenge_out","isbi_challenge_out_2")
+  outdir = Path(outdir)
+
+  outdir.mkdir(parents=True,exist_ok=True)
   cpnet = _init_unet_params(params.ndim).net
   # cpnet  = torch.load(cpnet_weights)
   cpnet.load_state_dict(torch.load(cpnet_weights))
   segnet = None
   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
   cpnet  = cpnet.to(device)
+  # t1 = pytime(); print(f"t1:{t1}")
 
   fileglob = sorted(Path(indir).glob("t*.tif"))
-  # fileglob = sorted(Path(indir).glob("*.raw"))
-  # fileglob = fileglob[-3:]  ## FIXME
+  assert len(fileglob)>0 , "Empty Directory"
   print(f"Running tracking over {len(fileglob)} files...\n\n",flush=True)
-  # ipdb.set_trace()
 
-  ## predict & extract pts for each image independently
-  extrasdir = Path(outdir.replace("isbi_challenge_out", "isbi_challenge_out_extra"))
-  extrasdir.mkdir(parents=True,exist_ok=True)
-  (extrasdir / "ltps").mkdir(exist_ok=1)
-  ltps = []
-  for i,rawname in enumerate(fileglob):
-    print(f"i={i+1}/{len(fileglob)} , file={rawname} \033[F", flush=True)
-    pts = eval_sample(rawname,cpnet,segnet,params,ptsOnly=True)
-    print(f"Found {len(pts)} pts in image {i}.", flush=True)
-    np.save(str(extrasdir / 'ltps/pts.npy'), pts)
-    ltps.append(pts)
+  if "project-broaddus" in str(outdir):
+    print("Running main_loop_local()")
+    tb = main_loop_local(fileglob,cpnet,segnet,params,outdir)
+  else:
+    print("Running main_loop_isbi()")
+    tb = main_loop_isbi(fileglob,cpnet,segnet,params,outdir)
 
-  np.save(str(extrasdir / 'ltps/ltps.npy'), np.array(ltps,dtype=object))
-
-  ## do tracking from pts
-  radius = np.max(np.array(params.nms_footprint) / params.zoom) * 2
-  print(f"Radius = {radius}")
-
-  tb = tracking.nn_tracking_on_ltps(ltps, scale=params.scale, dub=radius*2)
-
-  raw = imread(str(fileglob[0])).astype(np.float)
-  o_shape = raw.shape ## original shape
   t_start = int(re.search(r"(\d{3,4})\.tif", str(fileglob[0])).group(1))
-
-  print(indir)
-  if "Fluo-N3DL-DRO" in indir:
-    radius = 5
-
-  savedir = outdir
+  # t3 = pytime(); print(f"t3:{t3}")
 
   sampling = params.scale * np.array([0.5,1,1])[-len(params.scale):] ## extra width in Z
 
+  if   'isbi_challenge/Fluo-N3DL-TRIF/01' in indir: o_shape = (975, 1820, 1000)
+  elif 'isbi_challenge/Fluo-N3DL-TRIF/02' in indir: o_shape = (991, 1871, 965)
+  else: o_shape = imread(str(fileglob[0])).astype(np.float).shape # orig shape
+
+  # ipdb.set_trace()
+
   if mantrack_t0:
-    lbep, labelset, stackset = tracking.save_isbi_tb_2(tb,radius,sampling,o_shape,t_start,params.ndim,savedir,penalizeFP='0',mantrack_t0=mantrack_t0)
+    lbep, labelset, stackset = tracking.save_isbi_tb_2(tb,params.radius,sampling,o_shape,t_start,params.ndim,outdir,penalizeFP='0',mantrack_t0=mantrack_t0)
   else:
-    lbep, labelset, stackset = tracking.save_isbi_tb_2(tb,radius,sampling,o_shape,t_start,params.ndim,savedir,penalizeFP='1',mantrack_t0=None)
+    lbep, labelset, stackset = tracking.save_isbi_tb_2(tb,params.radius,sampling,o_shape,t_start,params.ndim,outdir,penalizeFP='1',mantrack_t0=None)
 
+def main_loop_isbi(fileglob,cpnet,segnet,params,outdir):
+  ltps = []
+  for i,rawname in enumerate(fileglob):
+    # print(f"i={i+1}/{len(fileglob)} , file={rawname} \033[F", flush=True)
+    print(f"i={i+1}/{len(fileglob)} , file={rawname}", flush=True)
+    pts = eval_sample(rawname,cpnet,segnet,params)
+    ltps.append(pts)
+  tb = tracking.nn_tracking_on_ltps(ltps, scale=params.scale, dub=params.radius*2)
+  return tb
 
-  # ## save masks given tracking
-  # for i,rawname in enumerate(fileglob):
-  #   print(f"i={i+1}/{len(fileglob)} , file={rawname} \033[F", flush=True)
-  #   inname = Path(rawname).name
-  #   outname = "mask" + inname[1:] ## remove the 't'
-  #   seg = buildSegFromLPtsAndTB(ltps,tb,i,o_shape)
-  #   seg = seg.astype(np.uint16)
-  #   imsave(Path(outdir)/outname, seg)
+def main_loop_local(fileglob,cpnet,segnet,params,outdir):
+    ## predict & extract pts for each image independently
+  extrasdir = Path(str(outdir).replace("isbi_challenge_out", "isbi_challenge_out_extra"))
+  
+  if (extrasdir / 'ltps/ltps.npy').exists():
+    ltps = np.load(str(extrasdir / 'ltps/ltps.npy'), allow_pickle=1)
+  elif (outdir / 'ltps.npy').exists():
+    ltps = np.load(str(outdir / 'ltps.npy'), allow_pickle=1)
+  elif path.exists(path.join(str(outdir).replace('_2','') , 'ltps.npy')):
+    ltps = np.load(path.join(str(outdir).replace('_2','') , 'ltps.npy'), allow_pickle=1)
+  else:
+    extrasdir.mkdir(parents=True,exist_ok=True)
+    (extrasdir / "ltps").mkdir(exist_ok=1)
+    ltps = []
+    for i,rawname in enumerate(fileglob):
+      print(f"i={i+1}/{len(fileglob)} , file={rawname}", flush=True)
+      pts = eval_sample(rawname,cpnet,segnet,params)
+      ltps.append(pts)
+      np.save(str(extrasdir / 'ltps/pts.npy'), pts)
+    np.save(str(extrasdir / 'ltps/ltps.npy'), np.array(ltps,dtype=object))
 
-
-# """
-# Takes list-of-timepts (ltps) , TrueBranching (tb) and current time (i)
-# Returns points rasterized to an image of proper size.
-# """
-# def buildSegFromLPtsAndTB(ltps,tb,i,o_shape):
-#   pts = ltps[i]
-#   stack  = conv_at_pts4(pts,np.ones([1,]*len(o_shape)),o_shape).astype(np.uint16)
-#   stack  = label(stack)[0]
-#   radius = np.max(np.array(params.nms_footprint) / params.zoom) * 2
-#   print(f"Old size: 25 , new size : {radius} \n")
-#   stack = expand_labels(stack,radius)
+  tb = tracking.nn_tracking_on_ltps(ltps, scale=params.scale, dub=params.radius*2)
+  return tb
 
 
 """
 TODO: speed up this function. 2mins 2sec to run on TRIF shape=(975, 1820, 1000) with zoom=(0.5 , 0.5 , 0.5)
 """
-def eval_sample(rawname,cpnet,segnet,params,ptsOnly=False):
+def eval_sample(rawname,cpnet,segnet,params):
 
   raw = imread(str(rawname)).astype(np.float)
   o_shape = raw.shape ## original shape
@@ -365,20 +385,17 @@ def eval_sample(rawname,cpnet,segnet,params,ptsOnly=False):
   ## undo scaling
   pts = zoom_pts(pts,1/zoom_effective)
 
-  return pts
+  ## filter out points outside of Field of Interest (FoI)
+  o_shape = np.array(o_shape)
+  filterzone = params.evalBorder - params.radius/params.scale ## scale
+  filterzone = filterzone.clip(min=0) ## in case radius > border width
+  pts2    = [p for p in pts   if np.all(p%(o_shape - filterzone) >= filterzone)]
 
-  # if ptsOnly: return pts
-  # o_shape = np.array(o_shape)
-  # ## Filter out points near border
-  # # pts2   = [p for p in pts   if np.all(p%(o_shape - params.evalBorder) >= params.evalBorder)]
-  # # gtpts2 = [p for p in s.pts if np.all(p%(o_shape - params.evalBorder) >= params.evalBorder)]
-  # stack  = conv_at_pts4(pts,np.ones([1,]*len(o_shape)),o_shape).astype(np.uint16)
-  # stack  = label(stack)[0]
-  # radius = np.max(np.array(params.nms_footprint) / params.zoom) * 2
-  # print(f"Old size: 25 , new size : {radius} \n")
-  # stack = expand_labels(stack,radius,sampling=params.scale)
-  # return stack
+  print(f"{len(pts)} obj detected.",flush=True)
+  if len(pts2) < len(pts):
+    print(f"{len(pts) - len(pts2)} obj removed by Field of Interest filter.")
 
+  return pts2
 
 if __name__ == '__main__':
   parser = argparse.ArgumentParser(description='Track cells. Take a folder of TIFFs as input...')
@@ -389,8 +406,10 @@ if __name__ == '__main__':
   parser.add_argument("--segnet_weights", default=None)
   parser.add_argument('--zoom', type=float, nargs='*', default=[1.,1.])
   parser.add_argument('--nms_footprint', type=int, nargs='*', default=[3,3])
+  parser.add_argument('--radius', type=float)
   parser.add_argument('--scale', type=float, nargs='*', default=[1.,1.])
   parser.add_argument('--mantrack_t0', type=str)
+  parser.add_argument('--evalBorder', type=int, nargs='*',)
 
   # mantrack_t0 = "None"
 
@@ -406,14 +425,14 @@ if __name__ == '__main__':
   else:
     mantrack_t0 = args.mantrack_t0
 
-  # ipdb.set_trace()
-
 
   params = SimpleNamespace()
   params.zoom = args.zoom
   params.nms_footprint = args.nms_footprint
   params.ndim = len(args.zoom)
-  params.scale = args.scale
+  params.scale = np.array(args.scale)
+  params.radius = args.radius
+  params.evalBorder = np.array(args.evalBorder)
 
   predict_and_save_tracking(
     args.indir,

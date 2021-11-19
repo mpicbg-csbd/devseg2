@@ -28,9 +28,12 @@ import numpy_indexed as ndi
 from pykdtree.kdtree import KDTree as pyKDTree
 import re
 from expand_labels_scikit import expand_labels
+from utils import place_label_spheres
 from types import SimpleNamespace
 from subprocess import run
 from collections import defaultdict
+
+# from time import time as pytime
 
 COLUMNS = ['label', 'frame', 'centroid-0', 'centroid-1', 'centroid-2']
 
@@ -437,6 +440,7 @@ def eval_tb_isbi(tb,info,savedir):
 
 def save_isbi_tb_2(tb,radius,scale,imshape,t_start,ndim,savedir,*,penalizeFP='1',mantrack_t0=None,):
 
+  assert len(tb.nodes)>0 , "Tracks are empty"
   if penalizeFP=='0':
     # ipdb.set_trace()
     pts_zero = np.array([tb.nodes[n]['pt'] for n in sorted(tb.nodes) if n[0]==0])
@@ -458,12 +462,13 @@ for each time rasterize detections using the correct labels
 write the man_tracks.txt from properties alone.
 """
 def save_isbi_2(nap, radius, scale, shape=None, savedir="napri2isbi_test/"):
-
+  # t0 = pytime(); print(f"t0:{t0}")
   tracklets,graph,properties = nap.tracklets,nap.graph,nap.properties
 
+  # ipdb.set_trace()
   savedir = Path(savedir)
   savedir.mkdir(parents=True,exist_ok=True)
-  for x in savedir.glob('mask*.tif'): x.unlink()
+  # for x in savedir.glob('mask*.tif'): x.unlink()
 
   lbep = nap2lbep(nap)
   np.savetxt(savedir / "res_track.txt",lbep,fmt='%d')
@@ -477,10 +482,13 @@ def save_isbi_2(nap, radius, scale, shape=None, savedir="napri2isbi_test/"):
   time_start = int(tracklets[:,1].min())
   time_stop  = int(tracklets[:,1].max())
   # for sub_tracklets in ndi.group_by(tracklets[:,1]).split(tracklets):
+
+
   for i in range(time_start,time_stop+1):
+    # t1 = pytime(); print(f"t1:{t1}")
     m = tracklets[:,1]==i
     if m.sum()==0: 
-      imsave(np.zeros(shape,dtype=np.uint16), savedir / tifname.format(time=i))
+      imsave(np.zeros(shape,dtype=np.uint16), savedir / tifname.format(time=i), compress=4)
       continue
     sub_tracklets = tracklets[m]
     time   = sub_tracklets[0,1]
@@ -489,17 +497,22 @@ def save_isbi_2(nap, radius, scale, shape=None, savedir="napri2isbi_test/"):
     labelset.append(labels)
     pts    = sub_tracklets[:,2:].astype(np.int)
     # kerns  = [_kern * _id for _id in labels]
-    print(f"Tracking Label t={i} Max Value is {labels.max()}.")
-    stack = np.zeros(shape,dtype=np.uint16)
-    stack[tuple(pts.T)] = labels
-
-    stack  = expand_labels(stack,radius,scale)
-    stackset.append(set(np.unique(stack)))
+    print(f"Drawing {len(pts)} pts at t={i} . Max Label is {labels.max()}.")
+    # stack = np.zeros(shape,dtype=np.uint16)
+    # t2 = pytime(); print(f"t2:{t2}")
+    # stack[tuple(pts.T)] = labels
+    # stack  = expand_labels(stack,radius,scale)
+    stack = place_label_spheres(pts,labels,shape,scale,radius)
+    # t3 = pytime(); print(f"t3:{t3}")
+    # stackset.append(set(np.unique(stack)))
+    # t4 = pytime(); print(f"t4:{t4}")
     savename = savedir / tifname.format(time=time)
 
     # print(f"SIZE OF STACK {i} IS: {stack.shape}\n")
     stack = stack.astype(np.uint16)
-    imsave(savename, stack)
+    # t5 = pytime(); print(f"t5:{t5}")
+    imsave(savename, stack, compress=4)
+    # t6 = pytime(); print(f"t6:{t6}")
 
   return lbep, labelset, stackset
 
