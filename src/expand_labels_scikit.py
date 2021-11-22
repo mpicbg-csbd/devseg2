@@ -10,7 +10,7 @@ import numpy as np
 from scipy.ndimage import distance_transform_edt
 
 
-def expand_labels(label_image, distance=1):
+def expand_labels(label_image, distance=1, sampling=None):
     """Expand labels in label image by ``distance`` pixels without overlapping.
     Given a label image, ``expand_labels`` grows label regions (connected components)
     outwards by up to ``distance`` pixels without overflowing into neighboring regions.
@@ -74,7 +74,9 @@ def expand_labels(label_image, distance=1):
     """
 
     distances, nearest_label_coords = distance_transform_edt(
-        label_image == 0, return_indices=True
+        label_image == 0, 
+        sampling = sampling,
+        return_indices=True,
     )
     labels_out = np.zeros_like(label_image)
     dilate_mask = distances <= distance

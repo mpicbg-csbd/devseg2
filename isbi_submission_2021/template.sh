@@ -3,7 +3,7 @@
 # echo "Current dir: $(pwd)"
 # echo "Current Python: $(which python)"
 
-python3 predict_stacks_new_local.py \
+python3 predict.py \
 	-i "<indir>" \
 	-o "<outdir>" \
 	--cpnet_weights "models/<weightname>" \

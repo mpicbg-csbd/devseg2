@@ -1,7 +1,8 @@
 # from segtools.rsync import rsync_pull2
 
 from types import SimpleNamespace
-from segtools.ns2dir import load,save,toarray
+# from segtools.ns2dir import imread,save,toarray
+from skimage.io import imread,imsave
 import numpy as np
 import matplotlib.pyplot as plt
 # plt.ion(); plt.show()
@@ -92,18 +93,18 @@ def trackingvideo(
       if str(file)[-3:]=='raw':
         img = imreadraw(file)
       else:
-        img  = load(file)
+        img  = imread(file)
       bigshape = img.shape
       imgZ = norm_percentile01(img.max(0), 0, 99)
-      save(imgZ, outdir / f"imgZ{i:03d}.png")
+      imsave(imgZ, outdir / f"imgZ{i:03d}.png")
       imgY = zoom(norm_percentile01(img.max(1), 0, 99), scale[:2], order=1)
-      save(imgY, outdir / f"imgY{i:03d}.png")
+      imsave(imgY, outdir / f"imgY{i:03d}.png")
       imgX = zoom(norm_percentile01(img.max(2), 0, 99), scale[:2], order=1)
-      save(imgX, outdir / f"imgX{i:03d}.png")
+      imsave(imgX, outdir / f"imgX{i:03d}.png")
     else:
-      imgZ = load(outdir / f"imgZ{i:03d}.png")
-      imgY = load(outdir / f"imgY{i:03d}.png")
-      imgX = load(outdir / f"imgX{i:03d}.png")
+      imgZ = imread(outdir / f"imgZ{i:03d}.png")
+      imgY = imread(outdir / f"imgY{i:03d}.png")
+      imgX = imread(outdir / f"imgX{i:03d}.png")
       bigshape = (imgY.shape[0], imgZ.shape[0], imgZ.shape[1])
       print(bigshape)
 
@@ -151,9 +152,9 @@ def trackingvideo(
     plt.savefig(outdir / f"trackX{i:03d}.png")
     plt.close()
 
-    imgZ = load(outdir / f"trackZ{i:03d}.png")
-    imgY = load(outdir / f"trackY{i:03d}.png")
-    imgX = load(outdir / f"trackX{i:03d}.png")
+    imgZ = imread(outdir / f"trackZ{i:03d}.png")
+    imgY = imread(outdir / f"trackY{i:03d}.png")
+    imgX = imread(outdir / f"trackX{i:03d}.png")
     dy,dx,chan1   = imgZ.shape
     dz,dx2,chan2  = imgY.shape
     dz2,dy2,chan3 = imgX.shape
@@ -169,7 +170,7 @@ def trackingvideo(
     print(imgY.shape)
     print(imgX.shape)
 
-    save(panel , outdir / f"frames/frame{i:03d}.png")
+    imsave(panel , outdir / f"frames/frame{i:03d}.png")
 
 import argparse
 

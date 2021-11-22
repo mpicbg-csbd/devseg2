@@ -91,10 +91,10 @@ if __name__=="__main__":
     # pid_train = p1 ## This works, because train() uses [3,19] so pid 000..018 are the models trained on both datasets.
     # weightname_in = f"../expr/e26_isbidet/train/pid{pid_train:03d}/m/best_weights_loss.pt"
 
-    weightname_out = f"{isbiname}-01+02_weights.pt"
     
+    weightname_out = f"{isbiname}-01+02_weights.pt"
     template = open("template.sh",'r').read()
-    params   = pickle.load(open(f"/projects/project-broaddus/devseg_2/expr/e26_isbidet/train/pid{pid:03d}/params.pkl",'rb'))
+    params   = pickle.load(open(f"trainparams/{isbiname}-01+02_params.pkl",'rb'))
     Ndim     = len(params.zoom)
     scale    = np.array(isbi_scales[isbiname])[::-1]
     scale    = scale / scale[-1]
@@ -113,6 +113,11 @@ if __name__=="__main__":
 
 
     radius = np.max(np.array(params.nms_footprint) / params.zoom) * 2
+
+    if "PhC-C2DL-PSC" in indir:
+      print("PhC-C2DL-PSC : ", params.nms_footprint)
+      params.nms_footprint = (3,3)
+      radius = 7
     if "Fluo-N3DL-DRO" in indir:
       radius = 7
     if "Fluo-N3DL-TRIF" in indir:

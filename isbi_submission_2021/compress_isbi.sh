@@ -3,7 +3,7 @@ mkdir temp
 
 cp Readme.md                     temp/
 cp -r models/                    temp/
-cp predict_stacks_new_local.py   temp/
+cp predict.py   temp/
 cp utils.py											 temp/
 cp requirements.txt              temp/
 cp torch_models.py               temp/

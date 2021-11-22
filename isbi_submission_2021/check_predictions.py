@@ -45,14 +45,14 @@ from glob import glob
 def testall():
 	for isbiname,dataset in data:
 		print(isbiname,dataset)
-		assert os.path.exists(f"/projects/project-broaddus/rawdata/isbi_challenge_out_2/{isbiname}/{dataset}_RES/res_track.txt")
+		assert os.path.exists(f"/projects/project-broaddus/rawdata/isbi_challenge_out/{isbiname}/{dataset}_RES/res_track.txt")
 		raws  = sorted(glob(f"/projects/project-broaddus/rawdata/isbi_challenge/{isbiname}/{dataset}/t*.tif"))
-		masks = sorted(glob(f"/projects/project-broaddus/rawdata/isbi_challenge_out_2/{isbiname}/{dataset}_RES/mask*.tif"))
+		masks = sorted(glob(f"/projects/project-broaddus/rawdata/isbi_challenge_out/{isbiname}/{dataset}_RES/mask*.tif"))
 		assert len(raws)==len(masks)
 		for (r,m) in zip(raws,masks):
-			assert r[-7:-4]==m[-7:-4]
-		print(raws[-1])
-		print(masks[-1])
+			assert r[-7:-4]==m[-7:-4] ## check the actual numbers agree
+		print(raws[-1][34:])
+		print(masks[-1][34:])
 
 
 

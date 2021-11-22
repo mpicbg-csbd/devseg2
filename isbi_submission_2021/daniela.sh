@@ -1,19 +1,23 @@
-# /shared="2019-12-11-10-39-07-98-Trier_Tribolium_nGFP_window_highres/stacks/C0opticsprefused"
-# cp /fileserver/myersspimdata/IMAGING/archive_lightsheet_data_good/$shared/0000[012]*.raw /projects/project-broaddus/rawdata/daniela/$shared/
+## move data from fileserver to local rawdata dir
+/shared="2019-12-11-10-39-07-98-Trier_Tribolium_nGFP_window_highres/stacks/C0opticsprefused"
+cp /fileserver/myersspimdata/IMAGING/archive_lightsheet_data_good/$shared/0000[012]*.raw /projects/project-broaddus/rawdata/daniela/$shared/
+## The raw data lives here
+ls /projects/project-broaddus/rawdata/daniela/2019-12-11-10-39-07-98-Trier_Tribolium_nGFP_window_highres/stacks/C0opticsprefused/
 
-ls /projects/project-broaddus/rawdata/daniela/
+## turn on local env
+source my_env3/bin/activate
 
-# run with 
-# sbatch -J daniela -p gpu --gres gpu:1 -n 1 -c 1 -t 36:00:00 --mem 128000 -o slurm/daniela.out -e slurm/daniela.err --wrap 'python predict_stacks_daniela.py'
+## run with 
+python predict_daniela_trib.py
+## or
+sbatch -J daniela -p gpu --gres gpu:1 -n 1 -c 1 -t 36:00:00 --mem 128000 -o slurm/daniela.out -e slurm/daniela.err --wrap 'python predict_daniela_trib.py'
 
-# --wrap '/bin/time -v ./Fluo-N3DL-TRIF-01.sh    '
+## predicted points live in (points only. no masks.)
+ls /projects/project-broaddus/rawdata/daniela/pred/ltps/ltps.npy
 
-# /bin/time -v ./my_env3/bin/python3 predict_stacks_new_local.py \
-# 	-i "/projects/project-broaddus/rawdata/daniela/2019-12-11-10-39-07-98-Trier_Tribolium_nGFP_window_highres/stacks/C0opticsprefused/" \
-# 	-o "/projects/project-broaddus/rawdata/daniela/pred/" \
-# 	--cpnet_weights "models/Fluo-N3DL-TRIF-01+02_weights.pt" \
-# 	--zoom 1.000 1.000 1.000  \
-# 	--nms_footprint   3   5   5  \
-# 	--scale 1.000 1.000 1.000  \
+## make tracking movie with flow lines
+cd ../src
+python -c "import png_tracking as A; A.runDaniela()"
+cd - 
 
-	# --mantrack_t0 "/projects/project-broaddus/rawdata/isbi_challenge/Fluo-N3DL-TRIF/01_GT/TRA/man_track000.tif" \
+
