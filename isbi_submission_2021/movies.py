@@ -146,12 +146,25 @@ def makemovie(
   isbiname="DIC-C2DH-HeLa",
   dataset = "01",
   ):
-  savedir = f"/projects/project-broaddus/rawdata/isbi_challenge_out_extra/{isbiname}/{dataset}/vidz/"
+  
+
+  ## TODO: toggle for dense predictions
+
+  raws  = sorted(glob(f"/projects/project-broaddus/rawdata/isbi_challenge/{isbiname}/{dataset}/t*.tif"))
   savedir_common = f"/projects/project-broaddus/rawdata/isbi_challenge_out_extra/vidz/"
+
+  ## NON-DENSE predictions (standard)
+  savedir = f"/projects/project-broaddus/rawdata/isbi_challenge_out_extra/{isbiname}/{dataset}/vidz/"
+  masks = sorted(glob(f"/projects/project-broaddus/rawdata/isbi_challenge_out/{isbiname}/{dataset}_RES/mask*.tif"))
+  savefile = f"{savedir_common}/{isbiname}-{dataset}.mp4"
+  
+  ## DENSE predictions
+  # savedir = f"/projects/project-broaddus/rawdata/isbi_challenge_out_extra/{isbiname}/{dataset}-dense/vidz/"
+  # masks = sorted(glob(f"/projects/project-broaddus/rawdata/isbi_challenge_out_dense/{isbiname}/{dataset}_RES/mask*.tif"))
+  # savefile = f"{savedir_common}/{isbiname}-{dataset}-dense.mp4"
+
   Path(savedir).mkdir(parents=1,exist_ok=1)
   Path(savedir_common).mkdir(parents=1,exist_ok=1)
-  raws  = sorted(glob(f"/projects/project-broaddus/rawdata/isbi_challenge/{isbiname}/{dataset}/t*.tif"))
-  masks = sorted(glob(f"/projects/project-broaddus/rawdata/isbi_challenge_out/{isbiname}/{dataset}_RES/mask*.tif"))
   
   assert len(raws)>0 , "Empty raw dir"
   assert len(masks)>0 , "Empty mask dir"
@@ -160,6 +173,8 @@ def makemovie(
   cmap = np.random.rand(256,3).clip(min=0.2)
   cmap[0] = (0,0,0)
   cmap = matplotlib.colors.ListedColormap(cmap)
+
+  run([f'rm {savedir}/*.png'], shell=True)
 
   for i in range(len(raws)):
     print(f"Saving png {i}/{len(raws)} .", end='\r', flush=True)
@@ -173,8 +188,12 @@ def makemovie(
     blend = np.pad(blend, ((0,h%2), (0,w%2), (0,0)), mode='constant')
     imsave(os.path.join(savedir,f"blend{i:04d}.png") , blend)
 
-  run([f'ffmpeg -y -i {savedir}/blend%04d.png -c:v libx264 -vf "fps=55,format=yuv420p" {savedir_common}/{isbiname}-{dataset}.mp4'], shell=True)
-  # run([f'rm {savedir}/*.png'], shell=True)
+  ## The -vf flag is alias for -filter:v which uses the filter language.
+  ## To play back at half-speed use setpts=2.0*PTS in filter (Presentation Time Stamp ?)
+  ## to determine framerate, bitrate, duration of video run `ffmpeg -i video.mp4`
+  ## videos with libx264 encoding have preview in Finder and open in Quicktime.
+  ## -crf "constant rate factor" scales quality by a factor, allowing variable bitrate. default is 23 ?
+  run([f'ffmpeg -y -i {savedir}/blend%04d.png -c:v libx264 -vf "setpts=2.0*PTS,format=yuv420p" {savefile}'], shell=True)
 
 
 
@@ -197,20 +216,34 @@ def make_all_movies():
   
   for pid in range(19*2):
     isbiname, dataset = pid2params(pid)
+
     name = isbiname.split("-")[-1] + dataset
-    if name not in redolist: continue
+    if "SIM+" in name:
+      name = "".join(isbiname.split("-")[-2:]) + dataset
+
+    if "TRIF" in name: continue
+    # if name not in denselist: continue
+    # if name not in redolist: continue
     job  = slurm.format(name=name, pid=pid)
     print(job)
     Popen(job,shell=True)
 
 
-redolist = [
-  # "GOWT102",
-  # "CHO02",
-  "PSC01",
-  "PSC02",
-]
+# redolist = [
+#   # "GOWT102",
+#   # "CHO02"
+#   "PSC01",
+#   "PSC02",
+# ]
 
+denselist = [
+  "DRO01",
+  "DRO02",
+  "TRIC01",
+  "TRIC02",
+  "TRIF01",
+  "TRIF02",
+]
 
 
 """bash
@@ -232,16 +265,16 @@ sbatch -J MDA23101 -n 1 -t 4:00:00 -c 1 --mem 128000  -o slurm/MDA23101.out -e s
 sbatch -J MDA23102 -n 1 -t 4:00:00 -c 1 --mem 128000  -o slurm/MDA23102.out -e slurm/MDA23102.err --wrap '/bin/time -v python3 -c "import movies as A; A.make_movie_pid(15)"'
 sbatch -J GOWT101 -n 1 -t 4:00:00 -c 1 --mem 128000  -o slurm/GOWT101.out -e slurm/GOWT101.err --wrap '/bin/time -v python3 -c "import movies as A; A.make_movie_pid(16)"'
 sbatch -J GOWT102 -n 1 -t 4:00:00 -c 1 --mem 128000  -o slurm/GOWT102.out -e slurm/GOWT102.err --wrap '/bin/time -v python3 -c "import movies as A; A.make_movie_pid(17)"'
-sbatch -J SIM+01 -n 1 -t 4:00:00 -c 1 --mem 128000  -o slurm/SIM+01.out -e slurm/SIM+01.err --wrap '/bin/time -v python3 -c "import movies as A; A.make_movie_pid(18)"'
-sbatch -J SIM+02 -n 1 -t 4:00:00 -c 1 --mem 128000  -o slurm/SIM+02.out -e slurm/SIM+02.err --wrap '/bin/time -v python3 -c "import movies as A; A.make_movie_pid(19)"'
+sbatch -J N2DHSIM+01 -n 1 -t 4:00:00 -c 1 --mem 128000  -o slurm/N2DHSIM+01.out -e slurm/N2DHSIM+01.err --wrap '/bin/time -v python3 -c "import movies as A; A.make_movie_pid(18)"'
+sbatch -J N2DHSIM+02 -n 1 -t 4:00:00 -c 1 --mem 128000  -o slurm/N2DHSIM+02.out -e slurm/N2DHSIM+02.err --wrap '/bin/time -v python3 -c "import movies as A; A.make_movie_pid(19)"'
 sbatch -J HeLa01 -n 1 -t 4:00:00 -c 1 --mem 128000  -o slurm/HeLa01.out -e slurm/HeLa01.err --wrap '/bin/time -v python3 -c "import movies as A; A.make_movie_pid(20)"'
 sbatch -J HeLa02 -n 1 -t 4:00:00 -c 1 --mem 128000  -o slurm/HeLa02.out -e slurm/HeLa02.err --wrap '/bin/time -v python3 -c "import movies as A; A.make_movie_pid(21)"'
 sbatch -J CE01 -n 1 -t 4:00:00 -c 1 --mem 128000  -o slurm/CE01.out -e slurm/CE01.err --wrap '/bin/time -v python3 -c "import movies as A; A.make_movie_pid(22)"'
 sbatch -J CE02 -n 1 -t 4:00:00 -c 1 --mem 128000  -o slurm/CE02.out -e slurm/CE02.err --wrap '/bin/time -v python3 -c "import movies as A; A.make_movie_pid(23)"'
 sbatch -J CHO01 -n 1 -t 4:00:00 -c 1 --mem 128000  -o slurm/CHO01.out -e slurm/CHO01.err --wrap '/bin/time -v python3 -c "import movies as A; A.make_movie_pid(24)"'
 sbatch -J CHO02 -n 1 -t 4:00:00 -c 1 --mem 128000  -o slurm/CHO02.out -e slurm/CHO02.err --wrap '/bin/time -v python3 -c "import movies as A; A.make_movie_pid(25)"'
-sbatch -J SIM+01 -n 1 -t 4:00:00 -c 1 --mem 128000  -o slurm/SIM+01.out -e slurm/SIM+01.err --wrap '/bin/time -v python3 -c "import movies as A; A.make_movie_pid(26)"'
-sbatch -J SIM+02 -n 1 -t 4:00:00 -c 1 --mem 128000  -o slurm/SIM+02.out -e slurm/SIM+02.err --wrap '/bin/time -v python3 -c "import movies as A; A.make_movie_pid(27)"'
+sbatch -J N3DHSIM+01 -n 1 -t 4:00:00 -c 1 --mem 128000  -o slurm/N3DHSIM+01.out -e slurm/N3DHSIM+01.err --wrap '/bin/time -v python3 -c "import movies as A; A.make_movie_pid(26)"'
+sbatch -J N3DHSIM+02 -n 1 -t 4:00:00 -c 1 --mem 128000  -o slurm/N3DHSIM+02.out -e slurm/N3DHSIM+02.err --wrap '/bin/time -v python3 -c "import movies as A; A.make_movie_pid(27)"'
 sbatch -J DRO01 -n 1 -t 4:00:00 -c 1 --mem 128000  -o slurm/DRO01.out -e slurm/DRO01.err --wrap '/bin/time -v python3 -c "import movies as A; A.make_movie_pid(28)"'
 sbatch -J DRO02 -n 1 -t 4:00:00 -c 1 --mem 128000  -o slurm/DRO02.out -e slurm/DRO02.err --wrap '/bin/time -v python3 -c "import movies as A; A.make_movie_pid(29)"'
 sbatch -J TRIC01 -n 1 -t 4:00:00 -c 1 --mem 128000  -o slurm/TRIC01.out -e slurm/TRIC01.err --wrap '/bin/time -v python3 -c "import movies as A; A.make_movie_pid(30)"'
@@ -252,6 +285,16 @@ sbatch -J PSC01 -n 1 -t 4:00:00 -c 1 --mem 128000  -o slurm/PSC01.out -e slurm/P
 sbatch -J PSC02 -n 1 -t 4:00:00 -c 1 --mem 128000  -o slurm/PSC02.out -e slurm/PSC02.err --wrap '/bin/time -v python3 -c "import movies as A; A.make_movie_pid(35)"'
 sbatch -J TRIF01 -n 1 -t 4:00:00 -c 1 --mem 128000  -o slurm/TRIF01.out -e slurm/TRIF01.err --wrap '/bin/time -v python3 -c "import movies as A; A.make_movie_pid(36)"'
 sbatch -J TRIF02 -n 1 -t 4:00:00 -c 1 --mem 128000  -o slurm/TRIF02.out -e slurm/TRIF02.err --wrap '/bin/time -v python3 -c "import movies as A; A.make_movie_pid(37)"'
+
+# Dense - remember to toggle path names!
+
+sbatch -J dn-DRO01 -n 1 -t 4:00:00 -c 1 --mem 128000  -o slurm/DRO01.out -e slurm/DRO01.err --wrap '/bin/time -v python3 -c "import movies as A; A.make_movie_pid(28)"'
+sbatch -J dn-DRO02 -n 1 -t 4:00:00 -c 1 --mem 128000  -o slurm/DRO02.out -e slurm/DRO02.err --wrap '/bin/time -v python3 -c "import movies as A; A.make_movie_pid(29)"'
+sbatch -J dn-TRIC01 -n 1 -t 4:00:00 -c 1 --mem 128000  -o slurm/TRIC01.out -e slurm/TRIC01.err --wrap '/bin/time -v python3 -c "import movies as A; A.make_movie_pid(30)"'
+sbatch -J dn-TRIC02 -n 1 -t 4:00:00 -c 1 --mem 128000  -o slurm/TRIC02.out -e slurm/TRIC02.err --wrap '/bin/time -v python3 -c "import movies as A; A.make_movie_pid(31)"'
+sbatch -J dn-TRIF01 -n 1 -t 4:00:00 -c 1 --mem 128000  -o slurm/TRIF01.out -e slurm/TRIF01.err --wrap '/bin/time -v python3 -c "import movies as A; A.make_movie_pid(36)"'
+sbatch -J dn-TRIF02 -n 1 -t 4:00:00 -c 1 --mem 128000  -o slurm/TRIF02.out -e slurm/TRIF02.err --wrap '/bin/time -v python3 -c "import movies as A; A.make_movie_pid(37)"'
+
 """
 
 

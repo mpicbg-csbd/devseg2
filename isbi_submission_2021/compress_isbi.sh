@@ -1,4 +1,5 @@
 
+rm -rf temp
 mkdir temp
 
 cp Readme.md                     temp/
@@ -11,9 +12,11 @@ cp tracking.py                   temp/
 cp Fluo-* DIC-* BF-* PhC-*       temp/
 
 cd temp
+## this awful command requires \ as regex prefix EXCEPT FOR . (dot) character !
+# sed -i "s/\/projects\/project-broaddus\/rawdata\/isbi_challenge_out_dense\/.\+\//\.\//g" *dense.sh
+sed -i "s/\/projects\/project-broaddus\/rawdata\/isbi_challenge_out_dense/../g" *dense.sh
+sed -r -i "s/(0[12]_RES)/CSB\/\1\//g" *dense.sh
 sed -i "s/\/projects\/project-broaddus\/rawdata\/isbi_challenge_out/../g" *.sh
 sed -i "s/\/projects\/project-broaddus\/rawdata\/isbi_challenge/../g" *.sh
 cd ..
 
-zip -r isbi_submission_2021.zip temp/
-# rm -rf temp

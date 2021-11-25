@@ -122,6 +122,8 @@ if __name__=="__main__":
       radius = 7
     if "Fluo-N3DL-TRIF" in indir:
       radius = 10
+    if "Fluo-N2DH-SIM+" in indir:
+      radius = 20
 
 
     ## ignore errors when one object is within evalBorder of XY image boundary

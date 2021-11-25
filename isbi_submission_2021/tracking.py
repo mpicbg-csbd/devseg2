@@ -27,7 +27,7 @@ from matplotlib import pyplot as plt
 import numpy_indexed as ndi
 from pykdtree.kdtree import KDTree as pyKDTree
 import re
-from expand_labels_scikit import expand_labels
+
 from utils import place_label_spheres
 from types import SimpleNamespace
 from subprocess import run
@@ -488,7 +488,7 @@ def save_isbi_2(nap, radius, scale, shape=None, savedir="napri2isbi_test/"):
     # t1 = pytime(); print(f"t1:{t1}")
     m = tracklets[:,1]==i
     if m.sum()==0: 
-      imsave(np.zeros(shape,dtype=np.uint16), savedir / tifname.format(time=i), compress=4)
+      imsave(str(savedir / tifname.format(time=i)), np.zeros(shape,dtype=np.uint16), compress=4)
       continue
     sub_tracklets = tracklets[m]
     time   = sub_tracklets[0,1]

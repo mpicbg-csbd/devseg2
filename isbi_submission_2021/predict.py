@@ -318,31 +318,36 @@ def main_loop_isbi(fileglob,cpnet,segnet,params,outdir):
     print(f"i={i+1}/{len(fileglob)} , file={rawname}", flush=True)
     pts = eval_sample(rawname,cpnet,segnet,params)
     ltps.append(pts)
-  tb = tracking.nn_tracking_on_ltps(ltps, scale=params.scale, dub=params.radius*2)
+  tb = tracking.nn_tracking_on_ltps(ltps, scale=params.scale, dub=params.radius*20)
   return tb
 
+## predict & extract pts for each image independently
 def main_loop_local(fileglob,cpnet,segnet,params,outdir):
-    ## predict & extract pts for each image independently
-  extrasdir = Path(str(outdir).replace("isbi_challenge_out", "isbi_challenge_out_extra"))
-  
-  # if (extrasdir / 'ltps/ltps.npy').exists():
-  #   ltps = np.load(str(extrasdir / 'ltps/ltps.npy'), allow_pickle=1)
-  # elif (outdir / 'ltps.npy').exists():
-  #   ltps = np.load(str(outdir / 'ltps.npy'), allow_pickle=1)
-  # elif path.exists(path.join(str(outdir).replace('_2','') , 'ltps.npy')):
-  #   ltps = np.load(path.join(str(outdir).replace('_2','') , 'ltps.npy'), allow_pickle=1)
-  # else:
-  extrasdir.mkdir(parents=True,exist_ok=True)
-  (extrasdir / "ltps").mkdir(exist_ok=1)
-  ltps = []
-  for i,rawname in enumerate(fileglob):
-    print(f"i={i+1}/{len(fileglob)} , file={rawname}", flush=True)
-    pts = eval_sample(rawname,cpnet,segnet,params)
-    ltps.append(pts)
-    # np.save(str(extrasdir / 'ltps/pts.npy'), pts)
-  np.save(str(extrasdir / 'ltps/ltps.npy'), np.array(ltps,dtype=object))
 
-  tb = tracking.nn_tracking_on_ltps(ltps, scale=params.scale, dub=params.radius*2)
+  extrasdir = str(outdir)
+  if "dense" in extrasdir:
+    extrasdir = extrasdir.replace("isbi_challenge_out_dense", "isbi_challenge_out_extra")
+  else:
+    extrasdir = extrasdir.replace("isbi_challenge_out", "isbi_challenge_out_extra")
+  extrasdir = Path(extrasdir)
+  
+  if (extrasdir / 'ltps/ltps.npy').exists():
+    ltps = np.load(str(extrasdir / 'ltps/ltps.npy'), allow_pickle=1)
+  elif (outdir / 'ltps.npy').exists():
+    ltps = np.load(str(outdir / 'ltps.npy'), allow_pickle=1)
+  else:
+    extrasdir.mkdir(parents=True,exist_ok=True)
+    (extrasdir / "ltps").mkdir(exist_ok=1)
+    ltps = []
+    # fileglob = fileglob[400:500]
+    for i,rawname in enumerate(fileglob):
+      print(f"i={i+1}/{len(fileglob)} , file={rawname}", flush=True)
+      pts = eval_sample(rawname,cpnet,segnet,params)
+      ltps.append(pts)
+      # np.save(str(extrasdir / 'ltps/pts.npy'), pts)
+    np.save(str(extrasdir / 'ltps/ltps.npy'), np.array(ltps,dtype=object))
+
+  tb = tracking.nn_tracking_on_ltps(ltps, scale=params.scale, dub=params.radius*20)
   return tb
 
 
@@ -375,10 +380,12 @@ def eval_sample(rawname,cpnet,segnet,params):
   # Path(newdir).parent.mkdir(parents=True,exist_ok=True)
   # imsave(newdir, pred)
 
+  print(f"predmax={pred.max()}")
   ## renormalize intensity
-  # _peaks = pred/pred.max()
+  if pred.max() < 0.1: return []
+  _peaks = pred/pred.max()
   ## TODO: make a decision here...
-  _peaks = pred
+  # _peaks = pred
 
   ## extract points from predicted image
   pts = peak_local_max(_peaks,threshold_abs=.2,exclude_border=False,footprint=np.ones(params.nms_footprint))
@@ -397,7 +404,7 @@ def eval_sample(rawname,cpnet,segnet,params):
   if len(pts2) < len(pts):
     print(f"{len(pts) - len(pts2)} obj removed by Field of Interest filter.")
 
-  if len(pts)>20: ipdb.set_trace()
+  # if len(pts)>20: ipdb.set_trace()
 
   return pts2
 
@@ -449,3 +456,96 @@ if __name__ == '__main__':
 
 
 
+## NOTE: You must run these jobs from an _active_ virtualenv in the local dir.
+
+"""
+sbatch -J pr-HSC-01           -p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 -o slurm_out/BF-C2DL-HSC-01.txt        -e slurm_err/BF-C2DL-HSC-01.txt         --wrap '/bin/time -v ./BF-C2DL-HSC-01.sh       '
+sbatch -J pr-HSC-02           -p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 -o slurm_out/BF-C2DL-HSC-02.txt        -e slurm_err/BF-C2DL-HSC-02.txt         --wrap '/bin/time -v ./BF-C2DL-HSC-02.sh       '
+sbatch -J pr-MuSC-01          -p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 -o slurm_out/BF-C2DL-MuSC-01.txt       -e slurm_err/BF-C2DL-MuSC-01.txt        --wrap '/bin/time -v ./BF-C2DL-MuSC-01.sh      '
+sbatch -J pr-MuSC-02          -p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 -o slurm_out/BF-C2DL-MuSC-02.txt       -e slurm_err/BF-C2DL-MuSC-02.txt        --wrap '/bin/time -v ./BF-C2DL-MuSC-02.sh      '
+sbatch -J pr-HeLa-01          -p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 -o slurm_out/DIC-C2DH-HeLa-01.txt      -e slurm_err/DIC-C2DH-HeLa-01.txt       --wrap '/bin/time -v ./DIC-C2DH-HeLa-01.sh     '
+sbatch -J pr-HeLa-02          -p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 -o slurm_out/DIC-C2DH-HeLa-02.txt      -e slurm_err/DIC-C2DH-HeLa-02.txt       --wrap '/bin/time -v ./DIC-C2DH-HeLa-02.sh     '
+sbatch -J pr-MSC-01           -p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 -o slurm_out/Fluo-C2DL-MSC-01.txt      -e slurm_err/Fluo-C2DL-MSC-01.txt       --wrap '/bin/time -v ./Fluo-C2DL-MSC-01.sh     '
+sbatch -J pr-MSC-02           -p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 -o slurm_out/Fluo-C2DL-MSC-02.txt      -e slurm_err/Fluo-C2DL-MSC-02.txt       --wrap '/bin/time -v ./Fluo-C2DL-MSC-02.sh     '
+sbatch -J pr-A549-01          -p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 -o slurm_out/Fluo-C3DH-A549-01.txt     -e slurm_err/Fluo-C3DH-A549-01.txt      --wrap '/bin/time -v ./Fluo-C3DH-A549-01.sh    '
+sbatch -J pr-A549-02          -p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 -o slurm_out/Fluo-C3DH-A549-02.txt     -e slurm_err/Fluo-C3DH-A549-02.txt      --wrap '/bin/time -v ./Fluo-C3DH-A549-02.sh    '
+sbatch -J pr-A549-SIM-01      -p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 -o slurm_out/Fluo-C3DH-A549-SIM-01.txt -e slurm_err/Fluo-C3DH-A549-SIM-01.txt  --wrap '/bin/time -v ./Fluo-C3DH-A549-SIM-01.sh'
+sbatch -J pr-A549-SIM-02      -p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 -o slurm_out/Fluo-C3DH-A549-SIM-02.txt -e slurm_err/Fluo-C3DH-A549-SIM-02.txt  --wrap '/bin/time -v ./Fluo-C3DH-A549-SIM-02.sh'
+sbatch -J pr-H157-01          -p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 -o slurm_out/Fluo-C3DH-H157-01.txt     -e slurm_err/Fluo-C3DH-H157-01.txt      --wrap '/bin/time -v ./Fluo-C3DH-H157-01.sh    '
+sbatch -J pr-H157-02          -p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 -o slurm_out/Fluo-C3DH-H157-02.txt     -e slurm_err/Fluo-C3DH-H157-02.txt      --wrap '/bin/time -v ./Fluo-C3DH-H157-02.sh    '
+sbatch -J pr-MDA231-01        -p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 -o slurm_out/Fluo-C3DL-MDA231-01.txt   -e slurm_err/Fluo-C3DL-MDA231-01.txt    --wrap '/bin/time -v ./Fluo-C3DL-MDA231-01.sh  '
+sbatch -J pr-MDA231-02        -p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 -o slurm_out/Fluo-C3DL-MDA231-02.txt   -e slurm_err/Fluo-C3DL-MDA231-02.txt    --wrap '/bin/time -v ./Fluo-C3DL-MDA231-02.sh  '
+sbatch -J pr-GOWT1-01         -p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 -o slurm_out/Fluo-N2DH-GOWT1-01.txt    -e slurm_err/Fluo-N2DH-GOWT1-01.txt     --wrap '/bin/time -v ./Fluo-N2DH-GOWT1-01.sh   '
+sbatch -J pr-GOWT1-02         -p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 -o slurm_out/Fluo-N2DH-GOWT1-02.txt    -e slurm_err/Fluo-N2DH-GOWT1-02.txt     --wrap '/bin/time -v ./Fluo-N2DH-GOWT1-02.sh   '
+sbatch -J pr-N2DH-SIM+-01     -p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 -o slurm_out/Fluo-N2DH-SIM+-01.txt     -e slurm_err/Fluo-N2DH-SIM+-01.txt      --wrap '/bin/time -v ./Fluo-N2DH-SIM+-01.sh    '
+sbatch -J pr-N2DH-SIM+-02     -p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 -o slurm_out/Fluo-N2DH-SIM+-02.txt     -e slurm_err/Fluo-N2DH-SIM+-02.txt      --wrap '/bin/time -v ./Fluo-N2DH-SIM+-02.sh    '
+sbatch -J pr-HeLa-01          -p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 -o slurm_out/Fluo-N2DL-HeLa-01.txt     -e slurm_err/Fluo-N2DL-HeLa-01.txt      --wrap '/bin/time -v ./Fluo-N2DL-HeLa-01.sh    '
+sbatch -J pr-HeLa-02          -p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 -o slurm_out/Fluo-N2DL-HeLa-02.txt     -e slurm_err/Fluo-N2DL-HeLa-02.txt      --wrap '/bin/time -v ./Fluo-N2DL-HeLa-02.sh    '
+sbatch -J pr-CE-01            -p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 -o slurm_out/Fluo-N3DH-CE-01.txt       -e slurm_err/Fluo-N3DH-CE-01.txt        --wrap '/bin/time -v ./Fluo-N3DH-CE-01.sh      '
+sbatch -J pr-CE-02            -p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 -o slurm_out/Fluo-N3DH-CE-02.txt       -e slurm_err/Fluo-N3DH-CE-02.txt        --wrap '/bin/time -v ./Fluo-N3DH-CE-02.sh      '
+sbatch -J pr-CHO-01           -p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 -o slurm_out/Fluo-N3DH-CHO-01.txt      -e slurm_err/Fluo-N3DH-CHO-01.txt       --wrap '/bin/time -v ./Fluo-N3DH-CHO-01.sh     '
+sbatch -J pr-CHO-02           -p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 -o slurm_out/Fluo-N3DH-CHO-02.txt      -e slurm_err/Fluo-N3DH-CHO-02.txt       --wrap '/bin/time -v ./Fluo-N3DH-CHO-02.sh     '
+sbatch -J prN3DH-SIM+-01      -p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 -o slurm_out/Fluo-N3DH-SIM+-01.txt     -e slurm_err/Fluo-N3DH-SIM+-01.txt      --wrap '/bin/time -v ./Fluo-N3DH-SIM+-01.sh    '
+sbatch -J prN3DH-SIM+-02      -p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 -o slurm_out/Fluo-N3DH-SIM+-02.txt     -e slurm_err/Fluo-N3DH-SIM+-02.txt      --wrap '/bin/time -v ./Fluo-N3DH-SIM+-02.sh    '
+sbatch -J pr-DRO-01           -p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 -o slurm_out/Fluo-N3DL-DRO-01.txt      -e slurm_err/Fluo-N3DL-DRO-01.txt       --wrap '/bin/time -v ./Fluo-N3DL-DRO-01.sh     '
+sbatch -J pr-DRO-02           -p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 -o slurm_out/Fluo-N3DL-DRO-02.txt      -e slurm_err/Fluo-N3DL-DRO-02.txt       --wrap '/bin/time -v ./Fluo-N3DL-DRO-02.sh     '
+sbatch -J pr-TRIC-01          -p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 -o slurm_out/Fluo-N3DL-TRIC-01.txt     -e slurm_err/Fluo-N3DL-TRIC-01.txt      --wrap '/bin/time -v ./Fluo-N3DL-TRIC-01.sh    '
+sbatch -J pr-TRIC-02          -p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 -o slurm_out/Fluo-N3DL-TRIC-02.txt     -e slurm_err/Fluo-N3DL-TRIC-02.txt      --wrap '/bin/time -v ./Fluo-N3DL-TRIC-02.sh    '
+sbatch -J pr-TRIF-01          -p gpu --gres gpu:1 -n 1 -c 1 -t 36:00:00 --mem 128000 -o slurm_out/Fluo-N3DL-TRIF-01.txt    -e slurm_err/Fluo-N3DL-TRIF-01.txt      --wrap '/bin/time -v ./Fluo-N3DL-TRIF-01.sh    '
+sbatch -J pr-TRIF-02          -p gpu --gres gpu:1 -n 1 -c 1 -t 36:00:00 --mem 128000 -o slurm_out/Fluo-N3DL-TRIF-02.txt    -e slurm_err/Fluo-N3DL-TRIF-02.txt      --wrap '/bin/time -v ./Fluo-N3DL-TRIF-02.sh    '
+sbatch -J pr-U373-01          -p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 -o slurm_out/PhC-C2DH-U373-01.txt      -e slurm_err/PhC-C2DH-U373-01.txt       --wrap '/bin/time -v ./PhC-C2DH-U373-01.sh     '
+sbatch -J pr-U373-02          -p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 -o slurm_out/PhC-C2DH-U373-02.txt      -e slurm_err/PhC-C2DH-U373-02.txt       --wrap '/bin/time -v ./PhC-C2DH-U373-02.sh     '
+sbatch -J pr-PSC-01           -p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 -o slurm_out/PhC-C2DL-PSC-01.txt       -e slurm_err/PhC-C2DL-PSC-01.txt        --wrap '/bin/time -v ./PhC-C2DL-PSC-01.sh      '
+sbatch -J pr-PSC-02           -p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 -o slurm_out/PhC-C2DL-PSC-02.txt       -e slurm_err/PhC-C2DL-PSC-02.txt        --wrap '/bin/time -v ./PhC-C2DL-PSC-02.sh      '
+
+## Dense
+
+sbatch -J prD-TRIF01   -p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 -o slurm_out/Fluo-N3DL-TRIF-01-dense.txt      -e slurm_err/Fluo-N3DL-TRIF-01-dense.txt       --wrap '/bin/time -v ./Fluo-N3DL-TRIF-01-dense.sh     '
+sbatch -J prD-TRIF02   -p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 -o slurm_out/Fluo-N3DL-TRIF-02-dense.txt      -e slurm_err/Fluo-N3DL-TRIF-02-dense.txt       --wrap '/bin/time -v ./Fluo-N3DL-TRIF-02-dense.sh     '
+sbatch -J prD-TRIC01   -p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 -o slurm_out/Fluo-N3DL-TRIC-01-dense.txt      -e slurm_err/Fluo-N3DL-TRIC-01-dense.txt       --wrap '/bin/time -v ./Fluo-N3DL-TRIC-01-dense.sh     '
+sbatch -J prD-TRIC02   -p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 -o slurm_out/Fluo-N3DL-TRIC-02-dense.txt      -e slurm_err/Fluo-N3DL-TRIC-02-dense.txt       --wrap '/bin/time -v ./Fluo-N3DL-TRIC-02-dense.sh     '
+sbatch -J prD-DRO01    -p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 -o slurm_out/Fluo-N3DL-DRO-01-dense.txt       -e slurm_err/Fluo-N3DL-DRO-01-dense.txt        --wrap '/bin/time -v ./Fluo-N3DL-DRO-01-dense.sh     '
+sbatch -J prD-DRO02    -p gpu --gres gpu:1 -n 1 -c 1 -t 3:30:00 --mem 128000 -o slurm_out/Fluo-N3DL-DRO-02-dense.txt       -e slurm_err/Fluo-N3DL-DRO-02-dense.txt        --wrap '/bin/time -v ./Fluo-N3DL-DRO-02-dense.sh     '
+
+"""
+
+## ISBI Challenge data prediction timings
+
+# 7:07  Fluo-N3DL-TRIF-01
+# 4:19  Fluo-N3DL-TRIF-02
+# 1:02  Fluo-N3DL-TRIC-02
+# 0:47  Fluo-C3DH-H157-02
+# 0:46  Fluo-C3DH-H157-01
+# 0:37  Fluo-N3DL-TRIC-01
+# 0:32  Fluo-N3DL-DRO-01
+# 0:32  Fluo-N3DL-DRO-02
+# 0:13  Fluo-N3DH-SIM+-01
+# 0:11  Fluo-N3DH-SIM+-02
+# 0:10  Fluo-N3DH-CHO-01
+# 0:08  Fluo-N3DH-CE-01
+# 0:07  BF-C2DL-HSC-02
+# 0:07  BF-C2DL-HSC-01
+# 0:07  Fluo-N3DH-CE-02
+# 0:06  BF-C2DL-MuSC-02
+# 0:06  BF-C2DL-MuSC-01
+# 0:03  Fluo-N3DH-CHO-02
+# 0:03  PhC-C2DL-PSC-02
+# 0:03  PhC-C2DL-PSC-01
+# 0:02  Fluo-C3DH-A549-SIM-02
+# 0:02  Fluo-C3DH-A549-02
+# 0:02  Fluo-C3DH-A549-SIM-01
+# 0:02  Fluo-C3DL-MDA231-02
+# 0:02  PhC-C2DH-U373-02
+# 0:02  PhC-C2DH-U373-01
+# 0:02  Fluo-C3DH-A549-01
+# 0:02  Fluo-C3DL-MDA231-01
+# 0:02  Fluo-N2DH-GOWT1-02
+# 0:02  Fluo-N2DH-SIM+-02
+# 0:02  Fluo-N2DL-HeLa-02
+# 0:02  Fluo-N2DH-SIM+-01
+# 0:02  Fluo-N2DL-HeLa-01
+# 0:02  Fluo-N2DH-GOWT1-01
+# 0:02  DIC-C2DH-HeLa-01
+# 0:02  DIC-C2DH-HeLa-02
+# 0:02  Fluo-C2DL-MSC-02
+# 0:01  Fluo-C2DL-MSC-01
