@@ -182,10 +182,13 @@ def tile1d(end,length,border):
 def tile1d_random(sz_container,sz_outer,sz_inner):
   """
   The input array and target container are the same size.
-  Returns a,b,c (input, container, local-patch-coords).
-  For use in lines like:
-  `container[b] = f(img[a])[c]`
-  Ensures that img[a] has shape divisible by 8 in each dim with sz_outer > 8.
+  Returns a,b,c (input, container, local-patch-coords) for use in `container[b] = f(img[a])[c]`.
+  Does NOT enforce divisibility constraints.
+  Useful for training data generation where we want non-overlapping patches, but doesn't work when we need a prediction on every pixel.
+  - non-overlapping patches (pixel coverage always <= 1)
+  - no need to store pixel mask to ensure coverage <= 1
+  - probabilistic, so border regions on all sides are probably somewhat represented in the training data
+
   """
   # inner = sz_outer-2*sz_inner
   
@@ -213,8 +216,11 @@ def tile1d_random(sz_container,sz_outer,sz_inner):
   # ipdb.set_trace()
   return res
 
+"""
+generate patch coords from image,box,patch shapes. 
+returns a list of coords. each coords is Dx4 = (top-left-box , top-left)
+"""
 def tileND_random(img_shape,outer_shape,inner_shape,):
-  "generates all the patch coords for iterating over large dims.  ## list of coords. each coords is Dx4. "
   # if inner_shape is None: inner_shape = (0,)*len(img_shape)
   r = [tile1d_random(a,b,c) for a,b,c in zip(img_shape,outer_shape,inner_shape)] ## D x many x 3
   D = len(r) ## dimension

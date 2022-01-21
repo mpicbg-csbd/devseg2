@@ -45,7 +45,7 @@ import shutil
 import ipdb
 from time import time
 
-from segtools import torch_models
+# from segtools import torch_models
 import inspect
 
 from e26_utils import *
@@ -82,6 +82,8 @@ from joblib import Memory
 #   #     print("FAIL on pids", [p0,p1,p2,p3])
 
 
+## Local Utils 
+
 def pid2params(pid):
   (p0,p1),pid = parse_pid(pid,[19,2])
   # savedir_local = savedir / f'e24_isbidet_AOT/v01/pid{pid:03d}/'
@@ -112,8 +114,6 @@ def samples2pngSN(samples):
     s.__dict__[f't{sam.time}_t'] = img2png(sam.target.copy())
   return s
 
-
-
 def patch_shapes_and_centers_from_slices(slices):
   starts = np.array([[s.start for s in _slices] for _slices in slices])
   stops  = np.array([[s.stop for s in _slices] for _slices in slices])
@@ -128,7 +128,7 @@ def norm_samples_raw(fullsamples):
     s.raw = norm_affine01(s.raw,p2,p99)
   return fullsamples
 
-## Advanced printing
+### Advanced printing
 
 def describe_virtual_samples(df):
   sizes  = Counter(df['shape'])
@@ -259,6 +259,8 @@ def cpnet_ISBIdata_specialization(params,info):
   # if isbiname == 'Fluo-N3DL-TRIF':
   #   p.subsample_traintimes = slice(0,None,4)
 
+
+
 ## Stable. Create Dataframe of Virtual Images. 
 
 def build_imgFrame_and_params(pid=0):
@@ -286,7 +288,8 @@ def build_imgFrame_and_params(pid=0):
   # save(params, dPID.savedir_local / 'params.pkl')
   return imgFrame, params
 
-#### Used by build_imgFrame_and_params
+
+### Used by build_imgFrame_and_params
 
 def pid2ImgFrame(info):
   image_names,ltps_name = isbiInfo_to_filenames(info)
@@ -314,6 +317,7 @@ def addRescalingInfo2ImgFrame(imgFrame,_zoom):
 
 
 ## Stable. Create DataFrame of Virtual Patches, and reify them.
+## Main API entry point.
 
 # @memory.cache
 def build_patchFrame(pid=0):
@@ -366,7 +370,7 @@ def build_patchFrame(pid=0):
   # save(pngs, dPID.savedir_local / 'sample_pngs')
   return df, params, pngs
 
-#### Used by build_patchFrame
+### Used by build_patchFrame
 
 def processOneTimepoint(time,patchFrame,imgFrame,params):
   """
@@ -404,16 +408,23 @@ def processOneTimepoint(time,patchFrame,imgFrame,params):
 
   return df
 
+## determine patch and box sizes (not locations!)
 def conform_szPatch(sz_img,sz_patch,divisible=8):
-  """
-  Ensure that patch size and box size are smaller than image and that patch_size is divisible by 8
-  """
+  ## patches must be smaller than the containing image
   sz_patch = np.minimum(sz_patch, sz_img).astype(int)
+  ## patches must be divisible along each dimension
   sz_patch = (np.floor(sz_patch/divisible)*divisible).astype(int)
+  ## boxes are (slightly) larger than patches. we sample patches form boxes. boxes don't overlap and have no divisibility requirements.
   sz_box   = np.minimum(sz_patch*1.2, sz_img).astype(int)
   return sz_patch,sz_box
 
+
 def get_slices2(pts, sz_img, sz_patch):
+  """
+  pts      :: comes from hand-annotated GT.
+  sz_img   :: is the real label iamge size
+  sz_patch :: is the "desired" patch size?
+  """
 
   sz_patch_resolved,sz_box = conform_szPatch(sz_img, sz_patch, divisible=(1,8,8)[-len(sz_img):])
   slices  = dgen.tileND_random(sz_img, sz_box, sz_patch_resolved) #, (4,10,10)[-raw.ndim:])
