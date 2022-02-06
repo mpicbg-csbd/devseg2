@@ -129,11 +129,9 @@ def _init_unet_params(ndim):
   return T
 
 def build_augmend(ndim):
-
   """
   Three args to aug(raw,target,weights).
   """
-
   aug = Augmend()
   ax = {2:(0,1), 3:(1,2)}[ndim]
   if ndim==3:

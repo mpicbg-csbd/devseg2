@@ -43,7 +43,7 @@ def run(pid=0):
   v01 : new
   """
 
-  (p0,p1,p2,p3),pid = parse_pid(pid,[2,19,2,5])
+  # (p0,p1,p2,p3),pid = parse_pid(pid,[2,19,2,5])
   savedir_local = savedir / f'e23_mauricio/v01/pid{pid:03d}/'
   print("Running e23 with savedir: \n", savedir_local, flush=True)
   
@@ -105,9 +105,9 @@ class CPNetMau(CenterpointModel):
 
   def dataloader(self):
     # info  = self.info
-    n_raw  = "/projects/project-broaddus/rawdata/ZFishMau2021/coleman/2021_01_21_localphototoxicity_h2brfp_lap2bgfp_G2_Subset_Average_DualSideFusion_max_Subset_forcoleman_T{time}.tif"
-    n_pts  = "/projects/project-broaddus/rawdata/ZFishMau2021/anno/t{time:03d}.pkl"
-    n_class  = "/projects/project-broaddus/rawdata/ZFishMau2021/anno/class{time}.pkl"
+    n_raw   = "/projects/project-broaddus/rawdata/ZFishMau2021/coleman/2021_01_21_localphototoxicity_h2brfp_lap2bgfp_G2_Subset_Average_DualSideFusion_max_Subset_forcoleman_T{time}.tif"
+    n_pts   = "/projects/project-broaddus/rawdata/ZFishMau2021/anno/t{time:03d}.pkl"
+    n_class = "/projects/project-broaddus/rawdata/ZFishMau2021/anno/class{time}.pkl"
 
     def f(i):
       raw = load(n_raw.format(time=i)).transpose([1,0,2,3])
@@ -213,7 +213,7 @@ def pred_centerpoint(CPNet,times,dirname='pred',savedir=None):
 
   def _save_preds(d,i):
     # _best_f1_score = matching.f1
-    save(d.raw.astype(np.float16).max(0), savedir/f"{dirname}/d{i:04d}/raw.tif")
+    # save(d.raw.astype(np.float16).max(0), savedir/f"{dirname}/d{i:04d}/raw.tif")
     save(d.pred.astype(np.float16).max(0), savedir/f"{dirname}/d{i:04d}/pred.tif")
     save(d.target.astype(np.float16).max(0), savedir/f"{dirname}/d{i:04d}/target.tif")
     save(d.cropped_yp.astype(np.float16), savedir/f"{dirname}/d{i:04d}/cropped_yp.tif")
