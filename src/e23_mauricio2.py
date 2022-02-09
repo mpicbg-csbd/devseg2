@@ -15,8 +15,8 @@ from skimage.feature  import peak_local_max
 from matplotlib import pyplot as plt
 
 ## 3rd party 
-import augmend
-from augmend import Augmend, FlipRot90, Elastic, Rotate, Scale, IntensityScaleShift, Identity
+# import augmend
+# from augmend import Augmend, FlipRot90, Elastic, Rotate, Scale, IntensityScaleShift, Identity
 from pykdtree.kdtree import KDTree as pyKDTree
 
 ## segtools
@@ -25,6 +25,7 @@ from segtools import point_matcher
 from segtools import torch_models
 from segtools.numpy_utils import normalize3
 from segtools.ns2dir import load,save ## FIXME
+# from segtools.math_utils import place_gaussian_at_pts
 
 ## local
 from datagen import place_gaussian_at_pts
@@ -50,15 +51,25 @@ from e26_utils import img2png
 
 
 ## RUN ON SLURM
-## sbatch -J e23-mau -p gpu --gres gpu:1 -n 1 -t  6:00:00 -c 1 --mem 128000 -o slurm_out/e23-mau.out -e slurm_err/e23-mau.out --wrap '/bin/time -v e23_mauricio.py'
+## sbatch -J e23-mau -p gpu --gres gpu:1 -n 1 -t  6:00:00 -c 1 --mem 128000 -o slurm_out/e23-mau.out -e slurm_err/e23-mau.out --wrap '/bin/time -v python e23_mauricio2.py'
 
+
+# savedir = Path("/Users/broaddus/Desktop/mpi-remote/project-broaddus/devseg_2/expr/e23_mauricio/v02/")
+# savedir = Path("/Users/broaddus/Desktop/work/bioimg-collab/mau-2021/data-experiment/")
 savedir = Path("/projects/project-broaddus/devseg_2/expr/e23_mauricio/v02/")
+
 
 def wipedir(path):
   path = Path(path)
   if path.exists(): shutil.rmtree(path)
   path.mkdir(parents=True, exist_ok=True)
 
+
+"""
+Tiling patches.
+No overlap. no border. same for raw and target. 
+variable size. no size-divisibility constraints (enforce at site of net application during train()).
+"""
 def data():
 
   D = SimpleNamespace()
@@ -73,7 +84,6 @@ def data():
   n_pts   = "/projects/project-broaddus/rawdata/ZFishMau2021/anno/t{time:03d}.pkl"
   n_class = "/projects/project-broaddus/rawdata/ZFishMau2021/anno/class{time}.pkl"
 
-  ## no overlap. no border. same for raw and target. variable size. no divisibility constraints (enforce at site of net application).
   def shape2slicelist(imgshape,):
     # divisible=(1,4,4)
     ## use `ceil` so patches have a maximum size of `D.patch`
@@ -136,6 +146,7 @@ def data():
 
   return D
 
+
 def train(dataset=None,continue_training=False):
 
   CONTINUE = continue_training
@@ -191,18 +202,12 @@ def train(dataset=None,continue_training=False):
   ## aug acts like a function i.e. `aug(raw,target,weights)`
   def build_augmend(ndim):
     aug = Augmend()
-    ax = {2:(0,1), 3:(1,2)}[ndim]
-    if ndim==3:
-      aug.add([FlipRot90(axis=0), FlipRot90(axis=0), FlipRot90(axis=0),], probability=1)
-      aug.add([FlipRot90(axis=(1,2)), FlipRot90(axis=(1,2)), FlipRot90(axis=(1,2))], probability=1)
-    else:
-      aug.add([FlipRot90(axis=(0,1)), FlipRot90(axis=(0,1)), FlipRot90(axis=(0,1)),], probability=1)
-
+    aug.add([FlipRot90(axis=0), FlipRot90(axis=0), FlipRot90(axis=0),], probability=1)
+    aug.add([FlipRot90(axis=(1,2)), FlipRot90(axis=(1,2)), FlipRot90(axis=(1,2))], probability=1)
     aug.add([IntensityScaleShift(), Identity(), Identity()], probability=1)
-
-    # aug.add([Rotate(axis=ax, order=1),
-    #          Rotate(axis=ax, order=1),],
-    #         probability=0.5)
+    ## continuous rotations that introduce black regions
+    ## this will make our weights non-binary, but that's OK.
+    aug.add([Rotate(axis=(1,2), order=1), Rotate(axis=(1,2), order=1), Rotate(axis=(1,2), order=1)], probability=0.5)
     return aug
 
   f_aug = build_augmend(D.ndim)
@@ -271,6 +276,16 @@ def train(dataset=None,continue_training=False):
       w  = w[ss]
 
       x,yt,w = f_aug([x,yt,w])
+
+      # ## glance at patches after augmentation
+      # r = img2png(x)
+      # p = img2png(yt,colors=plt.cm.magma)
+      # # t = img2png(w,colors=plt.cm.magma)
+      # composite = np.round(r/2 + p/2).astype(np.uint8).clip(min=0,max=255)
+      # # m = np.any(t[:,:,:3]!=0 , axis=2)
+      # # composite[m] = t[m]
+      # save(composite,savedir/f'train/glance_augmented/a{s.time:03d}_{i:03d}.png')
+
       y,l = mse_loss(x,yt,w)
       l.backward()
       opt.step()
@@ -288,6 +303,8 @@ def train(dataset=None,continue_training=False):
     yt = s.target.copy()
     w  = s.weights.copy()
 
+    x,yt,w = f_aug([x,yt,w])
+
     ## remove the border regions that make our patches a bad size
     divis = (1,8,8)
     ss = [[None,None,None],[None,None,None],[None,None,None],]
@@ -302,14 +319,11 @@ def train(dataset=None,continue_training=False):
     yt = yt[ss]
     w  = w[ss]
 
-    # if np.any(np.array(x.shape)%(1,8,8) != (0,0,0)): 
-    #   return SimpleNamespace(pred=None,scores=(0,0,0))
-
     with torch.no_grad(): y,l = mse_loss(x,yt,w)
 
     y = y.cpu().numpy()
     l = float(l.cpu().numpy())
-    
+  
     _peaks = y #.copy() #y/y.max()
     pts      = peak_local_max(_peaks,threshold_abs=.5,exclude_border=False,footprint=np.ones(P.nms_footprint))
     s_pts    = peak_local_max(s.target.astype(np.float32),threshold_abs=.5,exclude_border=False,footprint=np.ones(P.nms_footprint))
@@ -361,8 +375,8 @@ def train(dataset=None,continue_training=False):
       composite[m] = t[m]
       save(composite,savedir/f'train/glance_output_train/a{time:03d}_{i:03d}.png')
 
-    # ids = [0,N_vali//2,N_vali-1]
     # ids = [1,N_vali//2-1,N_vali-1-1]
+    # ids = [0,N_vali//2,N_vali-1]
     ids = range(N_vali)
     for i in ids:
       res = validate_single(validata[i])
@@ -392,6 +406,7 @@ def train(dataset=None,continue_training=False):
     print("\033[F",end='') ## move cursor UP one line 
     print(f"finished epoch {ep+1}/{N_epochs}, loss={history.lossmeans[-1]:4f}, dt={dt:4f}, rate={n_pix/dt:5f} Mpix/s", end='\n',flush=True)
 
+## weights are 'latest','loss','f1','height'
 def pred():
   # gtpts = load(f"/projects/project-broaddus/rawdata/{info.myname}/traj/{info.isbiname}/{info.dataset}_traj.pkl")
   # gtpts = [d.pts for d in data]
@@ -407,7 +422,6 @@ def pred():
   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
   net = torch_models.Unet3(16, [[1],[1]], pool=(1,2,2),   kernsize=(3,5,5),   finallayer=torch_models.nn.Sequential).cuda()
   net = net.to(device)
-  net.load_state_dict(torch.load(savedir / f'train/m/best_weights_latest.pt'))
 
   D = SimpleNamespace()
   D.patch = (8,64,64)
@@ -416,6 +430,9 @@ def pred():
   D.patch = (16,128,128)
   D.nms_footprint = [3,9,9]
   D.ndim  = 3
+
+  ## variable
+  # weights = "CHANGE-ME"
 
   def predsingle(time):
     raw = load(n_raw.format(time=i)).transpose([1,0,2,3])[1]
@@ -434,6 +451,7 @@ def pred():
     pts = pts/D.zoom
     matching = point_matcher.match_unambiguous_nearestNeib(gtpts,pts,dub=100,scale=[3,1,1])
     print(dedent(f"""
+        weights : {weights}
            time : {time:03d}
              f1 : {matching.f1:.3f}
       precision : {matching.precision:.3f}
@@ -475,7 +493,7 @@ def pred():
   def save_preds(d,i):
     # _best_f1_score = matching.f1
     # save(d.raw.astype(np.float16).max(0), savedir_local/f"t{i:04d}/raw.tif")
-    save(img2png(d.pred.max(0)), savedir/f"pred/t{i:04d}.png")
+    save(img2png(d.pred.max(0)), savedir/f"pred/t{i:04d}-{weights}.png")
     # save(d.target.astype(np.float16).max(0), savedir_local/f"t{i:04d}/target.tif")
     # save(d.cropped_yp.astype(np.float16), savedir_local/f"t{i:04d}/cropped_yp.tif")
     # save(d.cropped_gt.astype(np.float16), savedir_local/f"t{i:04d}/cropped_gt.tif")
@@ -486,10 +504,24 @@ def pred():
     # save(fp, savedir/f"errors/t{i:04d}/fp.pkl")
     # save(fn, savedir/f"errors/t{i:04d}/fn.pkl")
 
+  for weights in ['latest','loss','f1','height']:
+
+    res_min = {0:[],109:[]}
+    net.load_state_dict(torch.load(savedir / f'train/m/best_weights_{weights}.pt'))
+
+    for i in [0,109]:
+      d = predsingle(i)
+      # if weights!='height':
+      res_min[i].append(d.pred)
+      save_preds(d,i)
 
   for i in [0,109]:
-    d = predsingle(i)
-    save_preds(d,i)
+    res_t = np.array(res_min[i]).max(axis=0)
+    save(img2png(res_t.max(0)), savedir/f"pred/t{i:04d}-res_max.png")
+    res_t = np.array(res_min[i]).min(axis=0)
+    save(img2png(res_t.max(0)), savedir/f"pred/t{i:04d}-res_min.png")
+
+
 
   # def _f(i): ## i is time
   #   d = predsingle(i)
@@ -504,5 +536,5 @@ def pred():
 
 if __name__=="__main__":
   D = data()
-  train(D,continue_training=0)
+  train(D,continue_training=1)
   pred()
