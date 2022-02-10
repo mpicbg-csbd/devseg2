@@ -26,6 +26,7 @@ from segtools import point_matcher
 from segtools import torch_models
 from segtools.numpy_utils import normalize3
 from segtools.ns2dir import load,save ## FIXME
+from segtools.math_utils import place_gaussian_at_pts
 
 ## local
 from e26_utils import img2png
@@ -41,7 +42,7 @@ sbatch -J e23-mau -p gpu --gres gpu:1 -n 1 -t  6:00:00 -c 1 --mem 128000 -o slur
 
 # savedir = Path("/Users/broaddus/Desktop/mpi-remote/project-broaddus/devseg_2/expr/e23_mauricio/v02/")
 # savedir = Path("/Users/broaddus/Desktop/work/bioimg-collab/mau-2021/data-experiment/")
-savedir = Path("/projects/project-broaddus/devseg_2/expr/e23_mauricio/v03/")
+savedir = Path("/projects/project-broaddus/devseg_2/expr/e23_mauricio_jit/v01/")
 
 
 def wipedir(path):
@@ -54,23 +55,23 @@ def wipedir(path):
 UTILITIES
 """
 
-def place_gaussian_at_pts(pts,sigmas=[3,3],shape=[64,64]):
-  """
-  sigmas = sigma for gaussian
-  shape = target/container shape
-  """
-  s  = np.array(sigmas)
-  ks = (7*s).astype(int)
-  ks = ks - ks%2 + 1## enfore ODD shape so kernel is centered! (grow even dims by 1 pix)
-  sh = shape
+# def place_gaussian_at_pts(pts,sigmas=[3,3],shape=[64,64]):
+#   """
+#   sigmas = sigma for gaussian
+#   shape = target/container shape
+#   """
+#   s  = np.array(sigmas)
+#   ks = (7*s).astype(int)
+#   ks = ks - ks%2 + 1## enfore ODD shape so kernel is centered! (grow even dims by 1 pix)
+#   sh = shape
 
-  def f(x):
-    x = x - (ks-1)/2
-    return np.exp(-(x*x/s/s).sum()/2)
-  kern = np.array([f(x) for x in np.indices(ks).reshape((len(ks),-1)).T]).reshape(ks)
-  kern = kern / kern.max()
-  target = conv_at_pts4(pts,kern,sh,lambda a,b:np.maximum(a,b))
-  return target
+#   def f(x):
+#     x = x - (ks-1)/2
+#     return np.exp(-(x*x/s/s).sum()/2)
+#   kern = np.array([f(x) for x in np.indices(ks).reshape((len(ks),-1)).T]).reshape(ks)
+#   kern = kern / kern.max()
+#   target = conv_at_pts4(pts,kern,sh,lambda a,b:np.maximum(a,b))
+#   return target
 
 
 """
@@ -243,6 +244,125 @@ def data():
 
   return D
 
+## invert list of SimpleNamespace into SimpleNamespace of list
+def invert(l):
+
+  ## initialize an new SimpleNamespace with keys pointing to empty lists 
+  res = SimpleNamespace()
+  for key in l[0].__dict__:
+    res.__dict__[key] = []
+
+  for sn in l:
+    for key in sn.__dict__:
+      res.__dict__[key].append(sn.__dict__[key])
+
+  # for key in l[0].__dict__
+  #   res.__dict__[key] = []
+  return res
+
+
+"""
+Tiling patches.
+No overlap. no border. same for raw and target. 
+variable size. no size-divisibility constraints (enforce at site of net application during train()).
+"""
+def data_jit():
+
+  D = SimpleNamespace()
+  D.zoom  = (1,1,1)
+  D.kern  = [2,5,5]
+  D.patch = (8,64,64)
+  D.nms_footprint = [3,9,9]
+  D.ndim  = 3
+
+  n_raw   = "/projects/project-broaddus/rawdata/ZFishMau2021/coleman/2021_01_21_localphototoxicity_h2brfp_lap2bgfp_G2_Subset_Average_DualSideFusion_max_Subset_forcoleman_T{time}.tif"
+  n_pts   = "/projects/project-broaddus/rawdata/ZFishMau2021/anno/t{time:03d}.pkl"
+  n_class = "/projects/project-broaddus/rawdata/ZFishMau2021/anno/class{time}.pkl"
+
+  def shape2slicelist(imgshape,):
+    # divisible=(1,4,4)
+    ## use `ceil` so patches have a maximum size of `D.patch`
+    ## list of slice starting coordinates
+    ns = np.ceil(np.array(imgshape) / D.patch).astype(int)
+    start = (np.indices(ns).T * D.patch).reshape([-1,D.ndim])
+    # pad = [(0,0),(0,0),(0,0)]
+
+    ## make sure slice end is inside shape
+    def _f(st,i): 
+      low  = st[i]
+      high = min(st[i]+D.patch[i],imgshape[i])
+      # high = low + floor((high-low)/divisible[i])*divisible[i] ## divisibility constraints
+      return slice(low, high)
+
+    ss = [tuple(_f(st,i) for i in range(D.ndim)) for st in start]
+    return ss
+
+  def f(i):
+    raw = load(n_raw.format(time=i)).transpose([1,0,2,3])
+    # raw = zoom(raw,(1,) + D.zoom,order=1)
+    raw = normalize3(raw,2,99.4,axs=(1,2,3),clip=False)
+    raw = raw[1]
+    pts = load(n_pts.format(time=i))
+    classes = load(n_class.format(time=i))
+    pts = [p for i,p in enumerate(pts) if classes[i] in ['p','pm']]
+    pts = (np.array(pts) * D.zoom).astype(np.int)
+    target = place_gaussian_at_pts(pts,sigmas=D.kern,shape=raw.shape)
+
+    return SimpleNamespace(pts=pts,raw=raw,target=target,time=i)
+
+    # slices = shape2slicelist(raw.shape[1:])
+    # s_raw    = [raw[1][ss].copy() for ss in slices]
+    # s_target = [target[ss].copy() for ss in slices]
+    # tmax = [target[s].max() for s in slices]
+    # return SimpleNamespace(pts=pts,raw=s_raw,target=s_target,slices=slices,tmax=tmax,time=i)
+
+  # D = SimpleNamespace()
+  D.containers = [f(i) for i in [0,109]]
+
+  def sample(key,train=1):
+    c = D.containers
+    ix = 0 if train else 1
+    sh = c[ix].raw.shape
+    pt = (np.random.rand(3) * (sh - np.array(D.patch))).astype(int)
+    # ipdb.set_trace()
+    if np.random.rand()<0.5:
+      npts = c[ix].pts.shape[0]
+      p_ix = np.random.randint(npts)
+      pt = c[ix].pts[p_ix]
+      jitter = (np.random.rand(3)*.8 - 0.4) * D.patch
+      pt = (pt+jitter).astype(int).clip(min=(0,0,0), max=(sh - np.array(D.patch)))
+
+    ss = tuple([slice( pt[i] , pt[i]+D.patch[i] ) for i in [0,1,2]])
+    sam = SimpleNamespace()
+    sam.raw     = c[ix].raw[ss]
+    sam.target  = c[ix].target[ss]
+    sam.time    = c[ix].time
+    sam.weights = np.ones(sam.target.shape)
+    return sam
+
+  class Train:
+    def __len__(self): return 300 ## length of an epoch
+    def __getitem__(self,key): return sample(key,train=1)
+    pix_per_patch = np.prod(sample(0,train=1).raw.shape)
+  D.trainset = Train()
+
+  class Vali:
+    def __len__(self): return 80
+    def __getitem__(self,key): return sample(key,train=0)
+    pix_per_patch = np.prod(sample(0,train=0).raw.shape)
+  D.validata = Vali()
+
+  ## save train/vali/test data
+  wipedir(savedir/"data/png/")
+  for i in range(len(D.trainset)):
+    s = D.trainset[i]
+    # l = D.labels[i]
+    r = img2png(s.raw)
+    t = img2png(s.target, colors=plt.cm.magma)
+    composite = r//2 + t//2 
+    save(composite, savedir/f'data/png/train-t{s.time}-d{i:04d}.png')
+
+  return D
 
 
 
@@ -282,26 +402,26 @@ def train(dataset=None,continue_training=False):
   # net.load_state_dict(torch.load(savedir / f'train/m/best_weights_latest.pt'))
   
   if CONTINUE:
-    labels = load(savedir / "train/labels.pkl")
+    # labels = load(savedir / "train/labels.pkl")
     net.load_state_dict(torch.load(savedir / f'train/m/best_weights_latest.pt'))
     history = load(savedir / 'train/history.pkl')
   else:
-    N = len(D.samples)
-    a,b = N*5//8,N*7//8  ## MYPARAM train / vali / test fractions
-    labels = np.zeros(N,dtype=np.uint8)
-    labels[a:b]=1; labels[b:]=2 ## 0=train 1=vali 2=test
-    np.random.shuffle(labels)
-    save(labels, savedir / "train/labels.pkl")
+    # N = len(D.samples)
+    # a,b = N*5//8,N*7//8  ## MYPARAM train / vali / test fractions
+    # labels = np.zeros(N,dtype=np.uint8)
+    # labels[a:b]=1; labels[b:]=2 ## 0=train 1=vali 2=test
+    # np.random.shuffle(labels)
+    # save(labels, savedir / "train/labels.pkl")
     history = SimpleNamespace(lossmeans=[],valimeans=[],)
     wipedir(savedir/'train/m')
     wipedir(savedir/"train/glance_output_train/")
     wipedir(savedir/"train/glance_output_vali/")
 
   ## post-load configuration
-  assert len(D.samples)>8
-  assert len(labels)==len(D.samples)
+  # assert len(D.samples)>8
+  # assert len(labels)==len(D.samples)
   opt = torch.optim.Adam(net.parameters(), lr = 1e-4)
-  D.labels = labels
+  # D.labels = labels
 
   ## aug acts like a function i.e. `aug(raw,target,weights)`
   def build_augmend(ndim):
@@ -320,13 +440,13 @@ def train(dataset=None,continue_training=False):
 
   from skimage.morphology.binary import binary_dilation
 
-  def addweights(D):
-    for d in D.samples:
-      d.weights = np.ones(d.target.shape)
-      # d.weights = binary_dilation(d.target>0 , np.ones((1,7,7)))
-      # d.weights = (d.target > 0)
-      # print("{:.3f}".format(d.weights.mean()),end="  ")
-  addweights(D)
+  # def addweights(D):
+  #   for d in D.samples:
+  #     d.weights = np.ones(d.target.shape)
+  #     # d.weights = binary_dilation(d.target>0 , np.ones((1,7,7)))
+  #     # d.weights = (d.target > 0)
+  #     # print("{:.3f}".format(d.weights.mean()),end="  ")
+  # addweights(D)
 
   # if P.sparse:
   #   # w0 = dgen.weights__decaying_bg_multiplier(s.target,0,thresh=np.exp(-0.5*(3)**2),decayTime=None,bg_weight_multiplier=0.0)
@@ -351,15 +471,18 @@ def train(dataset=None,continue_training=False):
     return y,loss
 
   # trainset = df[(df.labels==0) & (df.npts>0)] ## MYPARAM subsample trainset ?
-  tmax = np.array([s.tmax for s in D.samples])
-  trainset = D.samples[(D.labels==0) & (tmax > 0.99)]
-  validata = D.samples[(D.labels==1) & (tmax > 0.99)]
+  # tmax = np.array([s.tmax for s in D.samples])
+  # trainset = D.samples[(D.labels==0) & (tmax > 0.99)]
+  # validata = D.samples[(D.labels==1) & (tmax > 0.99)]
   # if s.tmax < 0.99 and np.random.rand()<0.99: continue
   # N_total = len(D.samples)
+
+  trainset = D.trainset ## JIT ONLY
+  validata = D.validata ## JIT ONLY
   N_train = len(trainset)
-  N_vali = len(validata)
+  N_vali  = len(validata)
+
   print(f"""
-    Data filtered from N={len(D.samples)} to 
     N_train={N_train} , N_vali={N_vali}
     """)
 
@@ -499,7 +622,7 @@ def train(dataset=None,continue_training=False):
     # ids = ids[-4:]
 
     for i in ids:
-      res = validate_single(D.samples[i])
+      res = validate_single(validata[i])
       pred = res.pred
       r = img2png(res.x)
       p = img2png(pred,colors=plt.cm.magma)
@@ -509,22 +632,23 @@ def train(dataset=None,continue_training=False):
       composite[m] = t[m]
       save(composite,savedir/f'train/glance_output_vali/a{time:03d}_{i:03d}.png')
 
-  n_pix = np.sum([np.prod(d.raw.shape) for d in trainset]) / 1_000_000 ## Megapixels of raw data in trainset
+  # n_Mpix = np.sum([np.prod(d.raw.shape) for d in trainset]) / 1_000_000 ## Megapixels of raw data in trainset
+  n_Mpix = len(trainset)*trainset.pix_per_patch / 1_000_000
   N_epochs=300 ## MYPARAM
-  print(f"Estimated Time: {n_pix} Mpix * 1s/Mpix = {300*n_pix/60:.2f}m = {300*n_pix/60/60:.2f}h \n")
+  print(f"Estimated Time: {n_Mpix} Mpix * 1s/Mpix = {300*n_Mpix/60:.2f}m = {300*n_Mpix/60/60:.2f}h \n")
   print(f"\nBegin training for {N_epochs} epochs...\n\n")
   
   for ep in range(N_epochs):
-
+  
     tic = time()
     backprop_n_samples_into_net()
     validate_many()
     save(history, savedir / "train/history.pkl")
     if ep in range(10) or ep%10==0: pred_glances(ep)
-    dt  = time() - tic    
-
+    dt  = time() - tic
+    
     print("\033[F",end='') ## move cursor UP one line 
-    print(f"finished epoch {ep+1}/{N_epochs}, loss={history.lossmeans[-1]:4f}, dt={dt:4f}, rate={n_pix/dt:5f} Mpix/s", end='\n',flush=True)
+    print(f"finished epoch {ep+1}/{N_epochs}, loss={history.lossmeans[-1]:4f}, dt={dt:4f}, rate={n_Mpix/dt:5f} Mpix/s", end='\n',flush=True)
 
 
 
@@ -630,7 +754,7 @@ def pred():
     # save(fp, savedir/f"errors/t{i:04d}/fp.pkl")
     # save(fn, savedir/f"errors/t{i:04d}/fn.pkl")
 
-  for weights in ['latest','loss','f1','height']:
+  for weights in ['loss','f1']:
 
     res_min = {0:[],109:[]}
     net.load_state_dict(torch.load(savedir / f'train/m/best_weights_{weights}.pt'))
@@ -641,11 +765,11 @@ def pred():
       res_min[i].append(d.pred)
       save_preds(d,i)
 
-  for i in [0,109]:
-    res_t = np.array(res_min[i]).max(axis=0)
-    save(img2png(res_t.max(0)), savedir/f"pred/t{i:04d}-res_max.png")
-    res_t = np.array(res_min[i]).min(axis=0)
-    save(img2png(res_t.max(0)), savedir/f"pred/t{i:04d}-res_min.png")
+  # for i in [0,109]:
+  #   res_t = np.array(res_min[i]).max(axis=0)
+  #   save(img2png(res_t.max(0)), savedir/f"pred/t{i:04d}-res_max.png")
+  #   res_t = np.array(res_min[i]).min(axis=0)
+  #   save(img2png(res_t.max(0)), savedir/f"pred/t{i:04d}-res_min.png")
 
 
 
