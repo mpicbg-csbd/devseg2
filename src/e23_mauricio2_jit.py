@@ -42,7 +42,7 @@ sbatch -J e23-mau -p gpu --gres gpu:1 -n 1 -t  6:00:00 -c 1 --mem 128000 -o slur
 
 # savedir = Path("/Users/broaddus/Desktop/mpi-remote/project-broaddus/devseg_2/expr/e23_mauricio/v02/")
 # savedir = Path("/Users/broaddus/Desktop/work/bioimg-collab/mau-2021/data-experiment/")
-savedir = Path("/projects/project-broaddus/devseg_2/expr/e23_mauricio_jit/v01/")
+savedir = Path("/projects/project-broaddus/devseg_2/expr/e23_mauricio_jit/v02/")
 
 
 def wipedir(path):
@@ -74,175 +74,6 @@ UTILITIES
 #   return target
 
 
-"""
-Tiling patches.
-No overlap. no border. same for raw and target. 
-variable size. no size-divisibility constraints (enforce at site of net application during train()).
-"""
-def data_v02():
-
-  D = SimpleNamespace()
-  D.zoom  = (1,1,1)
-  D.kern  = [2,5,5]
-  D.patch = (8,64,64)
-  D.nms_footprint = [3,9,9]
-  D.ndim  = 3
-
-  n_raw   = "/projects/project-broaddus/rawdata/ZFishMau2021/coleman/2021_01_21_localphototoxicity_h2brfp_lap2bgfp_G2_Subset_Average_DualSideFusion_max_Subset_forcoleman_T{time}.tif"
-  n_pts   = "/projects/project-broaddus/rawdata/ZFishMau2021/anno/t{time:03d}.pkl"
-  n_class = "/projects/project-broaddus/rawdata/ZFishMau2021/anno/class{time}.pkl"
-
-  def shape2slicelist(imgshape,):
-    # divisible=(1,4,4)
-    ## use `ceil` so patches have a maximum size of `D.patch`
-    ## list of slice starting coordinates
-    ns = np.ceil(np.array(imgshape) / D.patch).astype(int)
-    start = (np.indices(ns).T * D.patch).reshape([-1,D.ndim])
-    # pad = [(0,0),(0,0),(0,0)]
-
-    ## make sure slice end is inside shape
-    def _f(st,i): 
-      low  = st[i]
-      high = min(st[i]+D.patch[i],imgshape[i])
-      # high = low + floor((high-low)/divisible[i])*divisible[i] ## divisibility constraints
-      return slice(low, high)
-
-    ss = [tuple(_f(st,i) for i in range(D.ndim)) for st in start]
-    return ss
-
-  def f(i):
-    raw = load(n_raw.format(time=i)).transpose([1,0,2,3])
-    # raw = zoom(raw,(1,) + D.zoom,order=1)
-    raw = normalize3(raw,2,99.4,axs=(1,2,3),clip=False)
-    pts = load(n_pts.format(time=i))
-    classes = load(n_class.format(time=i))
-    pts = [p for i,p in enumerate(pts) if classes[i] in ['p','pm']]
-    pts = (np.array(pts) * D.zoom).astype(np.int)
-    target = place_gaussian_at_pts(pts,sigmas=D.kern,shape=raw.shape[1:])
-    slices = shape2slicelist(raw.shape[1:])
-    s_raw    = [raw[1][ss].copy() for ss in slices]
-    s_target = [target[ss].copy() for ss in slices]
-    tmax = [target[s].max() for s in slices]
-    return SimpleNamespace(pts=pts,raw=s_raw,target=s_target,slices=slices,tmax=tmax,time=i)
-    # hi,low = partition(lambda s: target[s].max()>0.99, slices)
-    # return SimpleNamespace(raw=raw,pts=pts,target=target,hi=hi,low=low)
-
-  # return pickle.load(open(str(savedir / 'data/filtered.pkl'), 'rb'))
-
-  D.samples = []
-  D.pts = []
-  for i in [0,109]:
-    dat = f(i)
-    D.pts.append(dat.pts)
-    for j in range(len(dat.slices)):
-      # if dat.tmax[j]==0.0: continue ## FILTER
-      D.samples.append(SimpleNamespace(raw=dat.raw[j],target=dat.target[j],tmax=dat.tmax[j],time=dat.time))
-  D.samples = np.array(D.samples, dtype=object)
-
-  # save(D, savedir / f'data/unfiltered.pkl') ## remove tmax==0
-  # save(D, savedir / f'data/unfiltered-.5.pkl') ## remove tmax<0.5
-
-  ## save train/vali/test data
-  wipedir(savedir/"data/png/")
-  for i in range(len(D.samples)):
-    s = D.samples[i]
-    # l = D.labels[i]
-    r = img2png(s.raw)
-    t = img2png(s.target, colors=plt.cm.magma)
-    composite = r//2 + t//2 
-    save(composite, savedir/f'data/png/t{s.time}-d{i:04d}.png')
-
-  return D
-
-
-"""
-Patches centered around point annotations.
-Some background patches sampled for balance.
-"""
-def data():
-
-  D = SimpleNamespace()
-  D.zoom  = (1,1,1)
-  D.kern  = [2,5,5]
-  D.patch = (8,64,64)
-  D.nms_footprint = [3,9,9]
-  D.ndim  = 3
-
-  n_raw   = "/projects/project-broaddus/rawdata/ZFishMau2021/coleman/2021_01_21_localphototoxicity_h2brfp_lap2bgfp_G2_Subset_Average_DualSideFusion_max_Subset_forcoleman_T{time}.tif"
-  n_pts   = "/projects/project-broaddus/rawdata/ZFishMau2021/anno/t{time:03d}.pkl"
-  n_class = "/projects/project-broaddus/rawdata/ZFishMau2021/anno/class{time}.pkl"
-
-  ## potential overlap
-  ## shift to keep inbounds
-  ## same for raw and target
-  ## const size
-  ## one per annotation
-  ## divisibile by 8 in XY 
-  def shape2slicelist(imgshape,pts):
-    imgshape=np.array(imgshape)
-    slices = []
-    half = (4,32,32)
-    ## jitter to prevent net just guessing the patch center
-    pts_jitter = pts + (np.random.rand(*pts.shape)*2 - 1)*(2,10,10) 
-    for p in pts_jitter:
-      p  = p.clip(min=half,max=imgshape-half).astype(int)
-      slices.append(tuple([slice(p[i]-half[i],p[i]+half[i]) for i in [0,1,2]]))
-    return slices
-
-  def f(i):
-    raw = load(n_raw.format(time=i)).transpose([1,0,2,3])
-    # raw = zoom(raw,(1,) + D.zoom,order=1)
-    raw = normalize3(raw,2,99.4,axs=(1,2,3),clip=False)
-    
-    imshape = np.array(raw.shape[1:])
-
-    pts = load(n_pts.format(time=i))
-    classes = load(n_class.format(time=i))
-    pts = np.array([p for i,p in enumerate(pts) if classes[i] in ['p','pm']]).astype(int)
-    # pts = (np.random.rand(100,3)*imshape).clip(min=(4,32,32),max=imshape-(4,32,32)).astype(int)
-    
-    target = place_gaussian_at_pts(pts,sigmas=D.kern,shape=imshape)
-
-    pts_random = (np.random.rand(100,3)*imshape).clip(min=(4,32,32),max=imshape-(4,32,32)).astype(int)
-    patch_centers = np.concatenate([pts,pts_random],axis=0)
-    # pts = (np.array(pts) * D.zoom).astype(np.int) ## FIXME no zoom
-    patch_type = np.zeros(len(patch_centers)) ## annotated points are 0
-    patch_type[-len(pts_random):] = 1 ## random points are 1
-
-    slices = shape2slicelist(imshape,patch_centers)
-    s_raw    = [raw[1][ss].copy() for ss in slices]
-    s_target = [target[ss].copy() for ss in slices]
-    tmax = [target[s].max() for s in slices]
-    return SimpleNamespace(pts=pts,raw=s_raw,target=s_target,slices=slices,tmax=tmax,time=i,patch_type=patch_type)
-    # hi,low = partition(lambda s: target[s].max()>0.99, slices)
-    # return SimpleNamespace(raw=raw,pts=pts,target=target,hi=hi,low=low)
-
-  # return pickle.load(open(str(savedir / 'data/filtered.pkl'), 'rb'))
-
-  D.samples = []
-  D.pts = []
-  for i in [0,109]:
-    dat = f(i)
-    D.pts.append(dat.pts)
-    for j in range(len(dat.slices)):
-      # if dat.tmax[j]==0.0: continue ## FILTER
-      D.samples.append(SimpleNamespace(raw=dat.raw[j],target=dat.target[j],tmax=dat.tmax[j],time=dat.time,patch_type=dat.patch_type[j]))
-  D.samples = np.array(D.samples, dtype=object)
-
-  save(D, savedir / f'data/dataset.pkl') ## remove tmax==0
-  # save(D, savedir / f'data/filtered-.5.pkl') ## remove tmax<0.5
-
-  # save train/vali/test data
-  wipedir(savedir/"data/png/")
-  for i in range(len(D.samples)):
-    s = D.samples[i]
-    # l = D.labels[i]
-    r = img2png(s.raw)
-    t = img2png(s.target, colors=plt.cm.magma)
-    composite = r//2 + t//2 
-    save(composite, savedir/f'data/png/t{s.time}-d{i:04d}.png')
-
-  return D
 
 ## invert list of SimpleNamespace into SimpleNamespace of list
 def invert(l):
@@ -260,7 +91,6 @@ def invert(l):
   #   res.__dict__[key] = []
   return res
 
-
 """
 Tiling patches.
 No overlap. no border. same for raw and target. 
@@ -271,7 +101,7 @@ def data_jit():
   D = SimpleNamespace()
   D.zoom  = (1,1,1)
   D.kern  = [2,5,5]
-  D.patch = (8,64,64)
+  D.patch = (8,32,32)
   D.nms_footprint = [3,9,9]
   D.ndim  = 3
 
@@ -307,6 +137,7 @@ def data_jit():
     pts = [p for i,p in enumerate(pts) if classes[i] in ['p','pm']]
     pts = (np.array(pts) * D.zoom).astype(np.int)
     target = place_gaussian_at_pts(pts,sigmas=D.kern,shape=raw.shape)
+    target = (target>0.2).astype(np.float32)
 
     return SimpleNamespace(pts=pts,raw=raw,target=target,time=i)
 
@@ -325,7 +156,7 @@ def data_jit():
     sh = c[ix].raw.shape
     pt = (np.random.rand(3) * (sh - np.array(D.patch))).astype(int)
     # ipdb.set_trace()
-    if np.random.rand()<0.5:
+    if np.random.rand()<1.0:
       npts = c[ix].pts.shape[0]
       p_ix = np.random.randint(npts)
       pt = c[ix].pts[p_ix]
@@ -365,8 +196,6 @@ def data_jit():
   return D
 
 
-
-
 """
 NOTE: train() includes additional data filtering.
 """
@@ -394,7 +223,7 @@ def train(dataset=None,continue_training=False):
 
   ## loss and network
   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-  net = torch_models.Unet3(16, [[1],[1]], pool=(1,2,2),   kernsize=(3,5,5),   finallayer=torch_models.nn.Sequential).cuda()
+  net = torch_models.Unet2(16, [[1],[1]], pool=(1,2,2),   kernsize=(3,5,5),   finallayer=torch_models.nn.Sigmoid).cuda()
   net = net.to(device)
   torch_models.init_weights(net)
   
@@ -465,9 +294,20 @@ def train(dataset=None,continue_training=False):
 
     y  = net(x[None,None])[0,0]
 
-    ## Introduce ss.b masking to ensure that backproped pixels do not overlap between train/vali/test
-    
+    ## Introduce ss.boundary masking to ensure that backproped pixels do not overlap between train/vali/test
+  
     loss = torch.abs((w*(y-yt)**2)).mean()
+    return y,loss
+
+  def bce_loss(x,yt,w):
+
+    x  = torch.from_numpy(x.copy() ).float().to(device, non_blocking=True)
+    yt = torch.from_numpy(yt.copy()).float().to(device, non_blocking=True)
+    w  = torch.from_numpy(w.copy() ).float().to(device, non_blocking=True)
+
+    y  = net(x[None,None])[0,0]
+    
+    loss = (-w*(yt*torch.log(y) + (1-yt)*torch.log(1-y))).mean()
     return y,loss
 
   # trainset = df[(df.labels==0) & (df.npts>0)] ## MYPARAM subsample trainset ?
@@ -523,7 +363,7 @@ def train(dataset=None,continue_training=False):
       # # composite[m] = t[m]
       # save(composite,savedir/f'train/glance_augmented/a{s.time:03d}_{i:03d}.png')
 
-      y,l = mse_loss(x,yt,w)
+      y,l = bce_loss(x,yt,w)
       l.backward()
       opt.step()
       opt.zero_grad()
@@ -556,7 +396,7 @@ def train(dataset=None,continue_training=False):
     yt = yt[ss]
     w  = w[ss]
 
-    with torch.no_grad(): y,l = mse_loss(x,yt,w)
+    with torch.no_grad(): y,l = bce_loss(x,yt,w)
 
     y = y.cpu().numpy()
     l = float(l.cpu().numpy())
@@ -673,7 +513,7 @@ def pred():
   n_class = "/projects/project-broaddus/rawdata/ZFishMau2021/anno/class{time}.pkl"
 
   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-  net = torch_models.Unet3(16, [[1],[1]], pool=(1,2,2),   kernsize=(3,5,5),   finallayer=torch_models.nn.Sequential).cuda()
+  net = torch_models.Unet2(16, [[1],[1]], pool=(1,2,2),   kernsize=(3,5,5),   finallayer=torch_models.nn.Sigmoid).cuda()
   net = net.to(device)
 
   D = SimpleNamespace()
