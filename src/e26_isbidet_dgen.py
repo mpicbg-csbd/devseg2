@@ -89,7 +89,7 @@ def pid2params(pid):
   # savedir_local = savedir / f'e24_isbidet_AOT/v01/pid{pid:03d}/'
   myname, isbiname = isbi_datasets[p0] # v05
   trainset = ["01","02"][p1] # v06
-  info = get_isbi_info(myname,isbiname,trainset)
+  info = get_isbi_info(isbiname,trainset)
   return SimpleNamespace(**locals())
 
 def isbiInfo_to_filenames(info):
@@ -215,7 +215,7 @@ def cpnet_ISBIdata_specialization(params,info):
   if isbiname=="Fluo-C3DH-H157":
     p.zoom = (1/4,1/8,1/8)
     p.kern = (1,3,3)
-    p.match_dub = 30 ## in full size space
+    p.match_dub = 30 ## units in full size space
   if isbiname in ["Fluo-C3DH-A549", "Fluo-C3DH-A549-SIM"]:
     # p.zoom = (1,1/4,1/4)
     p.zoom = (1,1/2,1/2)
@@ -264,17 +264,23 @@ def cpnet_ISBIdata_specialization(params,info):
 ## Stable. Create Dataframe of Virtual Images. 
 
 def build_imgFrame_and_params(pid=0):
+# def build_imgFrame_and_params(isbiname,dataset):
   dPID = pid2params(pid)
   info = dPID.info
+  # info = get_isbi_info(isbiname,dataset)
   
-  print(f"""
-    Begin `build_imgFrame_and_params()` on pid {pid} ... {info.isbiname} / {info.dataset}.
-    """)
+  # print(f"""
+  #   Begin `build_imgFrame_and_params()` on pid {pid} ... {info.isbiname} / {info.dataset}.
+  #   """)
   # Savedir is IRRELEVANT ~~{dPID.savedir_local}~~
 
   imgFrame = pid2ImgFrame(info)
   params  = init_params(info.ndim)
   cpnet_ISBIdata_specialization(params,info,)
+  print(info.isbiname, info.dataset)
+  for k,v in params.__dict__.items():
+    print(k, v)
+  return
 
   ## train = 0; test = 1
   labels = np.ones(len(imgFrame),dtype=np.uint8)
@@ -319,13 +325,20 @@ def addRescalingInfo2ImgFrame(imgFrame,_zoom):
 ## Stable. Create DataFrame of Virtual Patches, and reify them.
 ## Main API entry point.
 
+def readAllOldPatches():
+  for pid in range(2*19):
+    build_imgFrame_and_params(pid)
+
+
 # @memory.cache
 def build_patchFrame(pid=0):
   dPID = pid2params(pid)
   info = dPID.info
 
-  imgFrame, params = build_imgFrame_and_params(dPID.pid)
+  imgFrame, params = build_imgFrame_and_params(pid)
   imgFrame = imgFrame[imgFrame.labels==0]
+  print(params)
+  return
 
   def build_patches(time,pts,sz_img):
     df = virtualPatches(pts, sz_img, params.patch)
@@ -372,10 +385,8 @@ def build_patchFrame(pid=0):
 
 ### Used by build_patchFrame
 
+## Load images from disk and crop out patch data.
 def processOneTimepoint(time,patchFrame,imgFrame,params):
-  """
-  Load images from disk and crop out patch data.
-  """
   print(f"Processing {time} ...",end="\r")
   df = patchFrame
   # ipdb.set_trace()
@@ -414,7 +425,7 @@ def conform_szPatch(sz_img,sz_patch,divisible=8):
   sz_patch = np.minimum(sz_patch, sz_img).astype(int)
   ## patches must be divisible along each dimension
   sz_patch = (np.floor(sz_patch/divisible)*divisible).astype(int)
-  ## boxes are (slightly) larger than patches. we sample patches form boxes. boxes don't overlap and have no divisibility requirements.
+  ## boxes are (slightly) larger than patches. we sample patches from boxes. boxes don't overlap and have no divisibility requirements.
   sz_box   = np.minimum(sz_patch*1.2, sz_img).astype(int)
   return sz_patch,sz_box
 
@@ -426,7 +437,7 @@ def get_slices2(pts, sz_img, sz_patch):
   sz_patch :: is the "desired" patch size?
   """
 
-  sz_patch_resolved,sz_box = conform_szPatch(sz_img, sz_patch, divisible=(1,8,8)[-len(sz_img):])
+  sz_patch_resolved, sz_box = conform_szPatch(sz_img, sz_patch, divisible=(1,8,8)[-len(sz_img):])
   slices  = dgen.tileND_random(sz_img, sz_box, sz_patch_resolved) #, (4,10,10)[-raw.ndim:])
 
   return slices , 'inner'

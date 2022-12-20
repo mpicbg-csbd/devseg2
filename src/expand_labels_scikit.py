@@ -90,3 +90,10 @@ def expand_labels(label_image, distance=1, sampling=None):
     nearest_labels = label_image[tuple(masked_nearest_label_coords)]
     labels_out[dilate_mask] = nearest_labels
     return labels_out
+
+
+def test():
+    img = np.zeros((101,101,101),dtype=np.uint16)
+    img[50,50,50] = 1
+    img2 = expand_labels(img,distance=30,sampling=(4,1,1))
+    return img2

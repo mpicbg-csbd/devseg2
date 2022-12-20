@@ -44,7 +44,6 @@ sbatch -J e23-n2v -p gpu --gres gpu:1 -n 1 -t  6:00:00 -c 1 --mem 128000 -o slur
 # savedir = Path("/Users/broaddus/Desktop/work/bioimg-collab/mau-2021/data-experiment/")
 savedir = Path("/projects/project-broaddus/devseg_2/expr/e23_mauricio_n2v/v01/")
 
-
 def wipedir(path):
   path = Path(path)
   if path.exists(): shutil.rmtree(path)
@@ -54,24 +53,6 @@ def wipedir(path):
 """
 UTILITIES
 """
-
-# def place_gaussian_at_pts(pts,sigmas=[3,3],shape=[64,64]):
-#   """
-#   sigmas = sigma for gaussian
-#   shape = target/container shape
-#   """
-#   s  = np.array(sigmas)
-#   ks = (7*s).astype(int)
-#   ks = ks - ks%2 + 1## enfore ODD shape so kernel is centered! (grow even dims by 1 pix)
-#   sh = shape
-
-#   def f(x):
-#     x = x - (ks-1)/2
-#     return np.exp(-(x*x/s/s).sum()/2)
-#   kern = np.array([f(x) for x in np.indices(ks).reshape((len(ks),-1)).T]).reshape(ks)
-#   kern = kern / kern.max()
-#   target = conv_at_pts4(pts,kern,sh,lambda a,b:np.maximum(a,b))
-#   return target
 
 
 """
@@ -151,99 +132,6 @@ def data_v02():
   #   save(composite, savedir/f'data/png/t{s.time}-d{i:04d}.png')
 
   return D
-
-
-"""
-Patches centered around point annotations.
-Some background patches sampled for balance.
-"""
-# def data():
-
-#   D = SimpleNamespace()
-#   D.zoom  = (1,1,1)
-#   D.kern  = [2,5,5]
-#   D.patch = (8,64,64)
-#   D.nms_footprint = [3,9,9]
-#   D.ndim  = 3
-
-#   n_raw   = "/projects/project-broaddus/rawdata/ZFishMau2021/coleman/2021_01_21_localphototoxicity_h2brfp_lap2bgfp_G2_Subset_Average_DualSideFusion_max_Subset_forcoleman_T{time}.tif"
-#   n_pts   = "/projects/project-broaddus/rawdata/ZFishMau2021/anno/t{time:03d}.pkl"
-#   n_class = "/projects/project-broaddus/rawdata/ZFishMau2021/anno/class{time}.pkl"
-
-#   ## potential overlap
-#   ## shift to keep inbounds
-#   ## same for raw and target
-#   ## const size
-#   ## one per annotation
-#   ## divisibile by 8 in XY 
-#   def shape2slicelist(imgshape,pts):
-#     imgshape=np.array(imgshape)
-#     slices = []
-#     half = (4,32,32)
-#     ## jitter to prevent net just guessing the patch center
-#     pts_jitter = pts + (np.random.rand(*pts.shape)*2 - 1)*(2,10,10) 
-#     for p in pts_jitter:
-#       p  = p.clip(min=half,max=imgshape-half).astype(int)
-#       slices.append(tuple([slice(p[i]-half[i],p[i]+half[i]) for i in [0,1,2]]))
-#     return slices
-
-#   def f(i):
-#     raw = load(n_raw.format(time=i)).transpose([1,0,2,3])
-#     # raw = zoom(raw,(1,) + D.zoom,order=1)
-#     raw = normalize3(raw,2,99.4,axs=(1,2,3),clip=False)
-    
-#     imshape = np.array(raw.shape[1:])
-
-#     pts = load(n_pts.format(time=i))
-#     classes = load(n_class.format(time=i))
-#     pts = np.array([p for i,p in enumerate(pts) if classes[i] in ['p','pm']]).astype(int)
-#     # pts = (np.random.rand(100,3)*imshape).clip(min=(4,32,32),max=imshape-(4,32,32)).astype(int)
-    
-#     target = place_gaussian_at_pts(pts,sigmas=D.kern,shape=imshape)
-
-#     pts_random = (np.random.rand(100,3)*imshape).clip(min=(4,32,32),max=imshape-(4,32,32)).astype(int)
-#     patch_centers = np.concatenate([pts,pts_random],axis=0)
-#     # pts = (np.array(pts) * D.zoom).astype(np.int) ## FIXME no zoom
-#     patch_type = np.zeros(len(patch_centers)) ## annotated points are 0
-#     patch_type[-len(pts_random):] = 1 ## random points are 1
-
-#     slices = shape2slicelist(imshape,patch_centers)
-#     s_raw    = [raw[1][ss].copy() for ss in slices]
-#     s_target = [target[ss].copy() for ss in slices]
-#     tmax = [target[s].max() for s in slices]
-#     return SimpleNamespace(pts=pts,raw=s_raw,target=s_target,slices=slices,tmax=tmax,time=i,patch_type=patch_type)
-#     # hi,low = partition(lambda s: target[s].max()>0.99, slices)
-#     # return SimpleNamespace(raw=raw,pts=pts,target=target,hi=hi,low=low)
-
-#   # return pickle.load(open(str(savedir / 'data/filtered.pkl'), 'rb'))
-
-#   D.samples = []
-#   D.pts = []
-#   for i in [0,109]:
-#     dat = f(i)
-#     D.pts.append(dat.pts)
-#     for j in range(len(dat.slices)):
-#       # if dat.tmax[j]==0.0: continue ## FILTER
-#       D.samples.append(SimpleNamespace(raw=dat.raw[j],target=dat.target[j],tmax=dat.tmax[j],time=dat.time,patch_type=dat.patch_type[j]))
-#   D.samples = np.array(D.samples, dtype=object)
-
-#   save(D, savedir / f'data/dataset.pkl') ## remove tmax==0
-#   # save(D, savedir / f'data/filtered-.5.pkl') ## remove tmax<0.5
-
-#   # save train/vali/test data
-#   wipedir(savedir/"data/png/")
-#   for i in range(len(D.samples)):
-#     s = D.samples[i]
-#     # l = D.labels[i]
-#     r = img2png(s.raw)
-#     t = img2png(s.target, colors=plt.cm.magma)
-#     composite = r//2 + t//2 
-#     save(composite, savedir/f'data/png/t{s.time}-d{i:04d}.png')
-
-#   return D
-
-
-
 
 
 """

@@ -27,7 +27,7 @@ def run():
 
   modulesnames = [Path(fi).stem for fi in pyfiles]
   modulesnames = [m for m in modulesnames if '_copy' not in m]
-  ipdb.set_trace()
+  # ipdb.set_trace()
 
   listOfImports = []
   for fi in pyfiles:
@@ -46,7 +46,7 @@ def analyze_py(filename, modulesnames):
     for m in modulesnames:
       pattern = r'\bXXX\b'.replace('XXX',str(m))
       s = re.search(pattern, currentLine)
-      ipdb.set_trace()
+      # ipdb.set_trace()
       if s: matchedMods.append(m)
     if len(matchedMods)>0:
       lines2.append("{:20s}\t{:30s}\t{}".format(thisname, str(matchedMods), currentLine))
@@ -55,4 +55,6 @@ def analyze_py(filename, modulesnames):
   return lines2
 
 
+if __name__ == "__main__":
+  run()
 

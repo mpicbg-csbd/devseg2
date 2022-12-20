@@ -75,7 +75,9 @@ isbi_scales = {
   "Fluo-N2DH-SIM+" :     (0.125 ,0.125),
   }
 
-def get_isbi_info(myname,isbiname,dataset):
+# def get_isbi_info(myname,isbiname,dataset):
+def get_isbi_info(isbiname,dataset):
+  myname = [n[0] for n in isbi_datasets if isbiname==n[1]][0]
   d = SimpleNamespace()
   d.index = [x[1] for x in isbi_datasets].index(isbiname)
   d.myname     = myname

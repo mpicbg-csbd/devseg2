@@ -19,6 +19,7 @@ from math import floor,ceil
 import re
 from pathlib import Path
 import ipdb
+from collections import Counter
 
 import shutil
 from skimage.feature  import peak_local_max
@@ -32,29 +33,22 @@ try:
 except Exception as e:
     print("GPUTOOLS ERROR \n", e)
 
-from experiments_common import rchoose, partition, shuffle_and_split, parse_pid, iterdims, savedir_global
-import datagen
-from isbi_tools import get_isbi_info, isbi_datasets, isbi_scales, isbi_names
-from segtools.ns2dir import load, save
 import augmend
 from augmend import Augmend,FlipRot90,Elastic,Rotate,Scale,IntensityScaleShift,Identity
+
+from segtools.ns2dir import load, save
 from segtools import torch_models
-from tqdm import tqdm
 from segtools.point_matcher import match_unambiguous_nearestNeib
 from segtools.point_tools import trim_images_from_pts2
-
 from segtools.math_utils import conv_at_pts4, conv_at_pts_multikern
 
-from collections import Counter
-
-import augmend
-from augmend import Augmend,FlipRot90,Elastic,Rotate,Scale,IntensityScaleShift,Identity
-
+import datagen
+from experiments_common import rchoose, partition, shuffle_and_split, parse_pid, iterdims, savedir_global
+from isbi_tools import get_isbi_info, isbi_datasets, isbi_scales, isbi_names
 import datagen as dgen
 
 import e26_isbidet_dgen
-memory = e26_isbidet_dgen.memory
-
+# memory = e26_isbidet_dgen.memory
 from e26_utils import *
 
 import tracking
@@ -148,6 +142,47 @@ def build_augmend(ndim):
   return aug
 
 
+def how_much_data():
+  for isbiname in isbi_names:
+    for dataset in ["01","02"]:
+
+      # p1 = {'01':1 , '02':2, 'both':0}[dataset]
+      # p0 = isbi_names.index(isbiname)
+      # (p1,p0,),pid = parse_pid([p1,p0],[3,19])
+      # savedir_local = savedir / f'e26_isbidet/train/pid{pid:03d}/'
+
+      # savedir_local = savedir / f'e26_isbidet/train/{isbiname}/{dataset}/'
+      # ds1,params1,_pngs = e26_isbidet_dgen.build_patchFrame([p0,0])
+      # df     = load(savedir_local / 'patchFrame.pkl')
+      # params = load(savedir_local / 'params.pkl')
+      df, params = e26_isbidet_dgen.build_imgFrame_and_params(isbiname, dataset)
+      print(isbiname, dataset, df.npts.sum())
+      # ipdb.set_trace()
+
+
+
+"""
+Wed Dec 14 09:15:42 2022 
+Everything is missing!
+"""
+def readAllOldPatches():
+  for pid in range(3*19):
+    readOldPatches(pid)
+
+def readOldPatches(pid):
+  (p1,p0,),pid = parse_pid(pid,[3,19])
+  isbiname = isbi_names[p0]
+  dataset = {1:'01' , 2:'02', 0:'both'}[p1]
+  savedir_local = savedir / f'e26_isbidet/train/{isbiname}/{dataset}/'
+  # df     = load(savedir_local / 'patchFrame.pkl')
+  try:
+    params = load(savedir_local / 'params.pkl')
+  except FileNotFoundError as e:
+    print(isbiname, dataset)
+    return
+
+  print("\n", isbiname)
+  print(params)
 
 
 ## Unstable. Main Training function.
@@ -180,6 +215,8 @@ def train(isbiname,dataset,continue_training=False,reload_patches=False):
   if reload_patches:
     df     = load(savedir_local / 'patchFrame.pkl')
     params = load(savedir_local / 'params.pkl')
+    # print(df)
+    # sys.exit(0)
   else:
     if dataset=='both':
       info01 = get_isbi_info(myname,isbiname,"01")

@@ -14,6 +14,7 @@ import numpy as np
 from scipy.ndimage import zoom
 from skimage.feature  import peak_local_max
 from matplotlib import pyplot as plt
+import matplotlib
 
 ## 3rd party 
 import augmend
@@ -25,6 +26,7 @@ from pykdtree.kdtree import KDTree as pyKDTree
 from segtools import point_matcher
 from segtools import torch_models
 from segtools.numpy_utils import normalize3
+from segtools.math_utils import place_gaussian_at_pts
 from segtools.ns2dir import load,save ## FIXME
 
 ## local
@@ -33,16 +35,12 @@ from e26_utils import img2png
 
 """
 RUN ME ON SLURM!!
-
 sbatch -J e23-mau -p gpu --gres gpu:1 -n 1 -t  6:00:00 -c 1 --mem 128000 -o slurm_out/e23-mau.out -e slurm_err/e23-mau.out --wrap '/bin/time -v python e23_mauricio2.py'
-
 """
-
 
 # savedir = Path("/Users/broaddus/Desktop/mpi-remote/project-broaddus/devseg_2/expr/e23_mauricio/v02/")
 # savedir = Path("/Users/broaddus/Desktop/work/bioimg-collab/mau-2021/data-experiment/")
 savedir = Path("/projects/project-broaddus/devseg_2/expr/e23_mauricio/v03/")
-
 
 def wipedir(path):
   path = Path(path)
@@ -53,25 +51,6 @@ def wipedir(path):
 """
 UTILITIES
 """
-
-def place_gaussian_at_pts(pts,sigmas=[3,3],shape=[64,64]):
-  """
-  sigmas = sigma for gaussian
-  shape = target/container shape
-  """
-  s  = np.array(sigmas)
-  ks = (7*s).astype(int)
-  ks = ks - ks%2 + 1## enfore ODD shape so kernel is centered! (grow even dims by 1 pix)
-  sh = shape
-
-  def f(x):
-    x = x - (ks-1)/2
-    return np.exp(-(x*x/s/s).sum()/2)
-  kern = np.array([f(x) for x in np.indices(ks).reshape((len(ks),-1)).T]).reshape(ks)
-  kern = kern / kern.max()
-  target = conv_at_pts4(pts,kern,sh,lambda a,b:np.maximum(a,b))
-  return target
-
 
 """
 Tiling patches.
@@ -242,9 +221,6 @@ def data():
     save(composite, savedir/f'data/png/t{s.time}-d{i:04d}.png')
 
   return D
-
-
-
 
 
 """
@@ -525,11 +501,6 @@ def train(dataset=None,continue_training=False):
 
     print("\033[F",end='') ## move cursor UP one line 
     print(f"finished epoch {ep+1}/{N_epochs}, loss={history.lossmeans[-1]:4f}, dt={dt:4f}, rate={n_pix/dt:5f} Mpix/s", end='\n',flush=True)
-
-
-
-
-
 
 
 """

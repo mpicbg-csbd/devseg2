@@ -3,15 +3,14 @@ import matplotlib
 import matplotlib.pyplot as plt
 
 from scipy.ndimage import zoom
-
 try:
     import gputools
-except ImportError as e:
-    print("Can't import gputools on non-gpu node...\n", e)
+except:
+    print("Can't import gputools on non-gpu node...\n")
 
-from joblib import Memory
-location = '/projects/project-broaddus/devseg_2/expr/e26_isbidet/cachedir'
-memory = Memory(location, verbose=0)
+# from joblib import Memory
+# location = '/projects/project-broaddus/devseg_2/expr/e26_isbidet/cachedir'
+# memory = Memory(location, verbose=0)
 
 
 
@@ -24,7 +23,6 @@ def sample2RawPng(sample):
   m = pnglab==0
   pngraw[~m] = (0.25*pngraw+0.75*pnglab)[~m]
   return pngraw
-
 
 
 """
